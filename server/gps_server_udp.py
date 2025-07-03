@@ -41,7 +41,7 @@ nmea_logger = logging.getLogger("nmea")
 nmea_logger.setLevel(logging.INFO)
 log_formatter = logging.Formatter('%(asctime)s - %(message)s')
 file_handler = RotatingFileHandler(
-    "nmea.log",            # fichier log principal
+    "logs/nmea.log",            # fichier log principal
     maxBytes=1024 * 1024,    # 1 Mo max
     backupCount=3          # garde jusqu'à 3 fichiers anciens (nmea.log.1, .2, .3)
 )
