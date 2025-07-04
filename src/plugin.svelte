@@ -22,7 +22,7 @@
         <pre>{gpsData}</pre>
         <p><strong>Latitude :</strong> {maLatitude}</p>
         <p><strong>Longitude :</strong> {maLongitude}</p>
-        <p><strong>Route fond :</strong> {courseOverGround}</p>
+        <p><strong>Route fond :</strong> {courseOverGroundT}</p>
         <p><strong>vitesse fond :</strong> {speedOverGround}</p>
 
         <div class="plugin__buttons">
@@ -66,7 +66,8 @@
     const VESSEL = 'CMA CGM RIVOLI';
     let requestIp = location.hostname;
     let route = 'https://192.168.1.27:5000'; // utilisé uniquement pour affichage texte
-    let latitudesal, latDirection, longitudesal, lonDirection;
+    let latitudesal: number | null = null, latDirection: string | null = null;
+    let longitudesal: number | null = null, lonDirection: string | null = null;
     let latitude: string | null = null;
     let longitude: string | null = null;
     let maLatitude: string | null = null;
@@ -74,7 +75,8 @@
     let gpsData = 'Aucune donnée reçue pour le moment...';
     let lastLatitude: number | null = null;
     let lastLongitude: number | null = null;
-    let courseOverGround: number = 0; // True
+    let courseOverGroundT: number = 0; // True
+    let courseOverGroundM: number = 0; // Magnetic
     let speedOverGround: number = 0; // In knots
     let followShip = true;
 
@@ -110,11 +112,11 @@
             longitudesal = parseFloat(parts[5]);
             lonDirection = parts[6];
             speedOverGround = parseFloat(parts[7]);
-            courseOverGround = parseFloat(parts[8]);
+            courseOverGroundT = parseFloat(parts[8]);
         }
         else if (data.slice(3, 6) === 'VTG') {
             speedOverGround = parseFloat(parts[5]);
-            courseOverGround = parseFloat(parts[1]);
+            courseOverGroundT = parseFloat(parts[1]);
         }
         else if (data.slice(3, 6) === 'HDG') {
             // A Traiter: $HCHDG
@@ -140,7 +142,7 @@
         lastLatitude = newLat;
         lastLongitude = newLon;
 
-        addBoatMarker(newLat, newLon, courseOverGround);
+        addBoatMarker(newLat, newLon, courseOverGroundT);
 
         document.getElementById("err")!.innerHTML = "<p></p>";
     }
@@ -258,7 +260,6 @@
 
         const latlng = L.latLng(lat, lon);
         markerLayer.clearLayers();
-        const newLatLng = L.latLng(lat, lon);
         pathLatLngs.push(latlng);
 
         if (!boatPath) {
@@ -301,7 +302,7 @@
           openedPopup = null;
           return;
         }
-            showMyPopup(lastLatitude, lastLongitude, courseOverGround); // pour forcer l’affichage + popup
+            showMyPopup(lastLatitude, lastLongitude); // pour forcer l’affichage + popup
     }
     
     function toRadians(deg: number): number {
