@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-import os
+import eventlet
+eventlet.monkey_patch()
+import os, sys
 import re
 import socket
 import serial
@@ -13,9 +15,9 @@ from flask_cors import CORS
 from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
 import ssl
-import eventlet
-eventlet.monkey_patch()
 import eventlet.wsgi
+
+sys.stderr = open(os.devnull, 'w')  # Attention : plus rien ne s’affichera si erreur réelle
 
 # Charger les variables d'environnement depuis le fichier .env
 load_dotenv()
@@ -146,5 +148,12 @@ if __name__ == '__main__':
     wrapped_socket = eventlet.wrap_ssl(listener, certfile='cert.pem', keyfile='key.pem', server_side=True)
 
     print(f"[HTTPS] Serveur WebSocket sécurisé sur https://0.0.0.0:{HTTPS_PORT}")
-    eventlet.wsgi.server(wrapped_socket, app)
+    try:
+        eventlet.wsgi.server(wrapped_socket, app, log_output=False)
+    except ssl.SSLError as e:
+        if "sslv3 alert certificate unknown" in str(e).lower():
+            # Silence ces erreurs SSL spécifiques
+            pass
+        else:
+            raise
 

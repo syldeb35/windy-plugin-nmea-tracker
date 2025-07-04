@@ -1,8 +1,10 @@
 node_modules
 test
 dist
-server/*.log
-server/*.log.*
 *.config.js
 nmea-tracker.code-workspace
 .rollup.cache
+server/logs/nmea.log
+server/logs/nmea.log.1
+server/logs/nmea.log.2
+server/logs/nmea.log.3

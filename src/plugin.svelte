@@ -1,87 +1,96 @@
 <div class="plugin__mobile-header">
-    { title }
+    {title}
 </div>
 
 <section class="plugin__content">
     <div
         class="plugin__title plugin__title--chevron-back"
-        on:click={ () => bcast.emit('rqstOpen', 'menu') }
+        on:click={() => bcast.emit('rqstOpen', 'menu')}
     >
-    { title }
+        {title}
     </div>
-<p> A plugin by <a href="https://github.com/syldeb35/Windy-plugin-GPS">Capt. S. DEBRAY</a></p>
-<p> <center>🛳️</center></p>
-<p> Need a server which listen the NMEA emitter and provides a {route} route that returns NMEA frames </p>
-<p>  {requestIp}  </p>
-<p> <center>🛳️</center></p>
+
+    <p>🛳️ Plugin développé par <a href="https://github.com/syldeb35/Windy-plugin-GPS" target="_blank"></a></p>
+    <p>Le serveur NMEA doit être accessible à :</p>
+    <p><code>{route}</code></p>
+    <p>Requête provenant de : <strong>{requestIp}</strong></p>
+
+    <hr />
+
     {#if gpsData}
-        <p> GPS Data:</p>
-        <p> {gpsData}</p>
-        <p>  Latitude: {maLatitude} </p>
-        <p>  Longitude: {maLongitude} </p>
+        <p><strong>Dernière trame NMEA reçue :</strong></p>
+        <pre>{gpsData}</pre>
+        <p><strong>Latitude :</strong> {maLatitude}</p>
+        <p><strong>Longitude :</strong> {maLongitude}</p>
+        <p><strong>Route fond :</strong> {courseOverGround}</p>
+        <p><strong>vitesse fond :</strong> {speedOverGround}</p>
+
         <div class="plugin__buttons">
-            <button on:click={centerShip}>Center Ship</button>
-            <button on:click={toggleFollowShip}>{followShip ? 'Stop Follow' : 'Follow Ship'}</button>
+            <button on:click={centerShip}>📍 Centrer sur le bateau</button>
+            <button on:click={toggleFollowShip}>
+                {followShip ? '🛑 Stop Suivi' : '▶️ Suivre le bateau'}
+            </button> <br>
+            <br>
+            <button on:click={showWeatherPopup}>🌬️ Afficher météo</button>
         </div>
     {/if}
+   
+    
     <div class="error" id="err">
         <p></p>
+    </div>
+    
+    <p class="follow-state">
+      📡 Suivi automatique : {followShip ? 'Activé' : 'Désactivé'}
+    </p>
+    <div id="footer">
+      <center><p>© 2025 Capt S. DEBRAY</p></center>
     </div>
 </section>
 
 
+
 <script lang="ts">
     import bcast from "@windy/broadcast";
-    import { onDestroy, onMount } from 'svelte';
-    import { map } from "@windy/map";
+    import { onMount, onDestroy } from 'svelte';
+    import { map } from '@windy/map';
+    import { getLatLonInterpolator } from '@windy/interpolator';
+    import { overlaySettings } from '@windy/config';
+    import { wind2obj } from '@windy/utils';
+    import store from '@windy/store';
+    import metrics from '@windy/metrics';
     import { io } from './socket.io.min.js';
+    import { createRotatingBoatIcon } from './boatIcon';
+    
     const title = 'GPS position tracker plugin';
+    const VESSEL = 'CMA CGM RIVOLI';
     let requestIp = location.hostname;
-    let route = 'https://192.168.1.27:5000/gps-data'; // utilisé uniquement pour affichage texte
+    let route = 'https://192.168.1.27:5000'; // utilisé uniquement pour affichage texte
+    let latitudesal, latDirection, longitudesal, lonDirection;
     let latitude: string | null = null;
     let longitude: string | null = null;
     let maLatitude: string | null = null;
     let maLongitude: string | null = null;
-    let markerLayer = L.layerGroup().addTo(map);
     let gpsData = 'Aucune donnée reçue pour le moment...';
     let lastLatitude: number | null = null;
     let lastLongitude: number | null = null;
-    let courseOverGround: number = 0;
-    let boatPath: L.Polyline | null = null;
-    let pathLatLngs: L.LatLng[] = [];
+    let courseOverGround: number = 0; // True
+    let speedOverGround: number = 0; // In knots
     let followShip = true;
 
-    // ✅ Initialisation WebSocket
-    onMount(() => {
-        // @ts-ignore: socket.io injecté via script global
-        const socket = io('https://192.168.1.27:5000', {
-            transports: ['websocket'],
-            secure: true,
-            rejectUnauthorized: false // pour auto-signé
-        });
-
-        socket.on('connect', () => {
-            console.log('WebSocket connecté');
-        });
-
-        socket.on('nmea_data', (data: string) => {
-            gpsData = data;
-            processNMEA(data);
-        });
-
-        socket.on('disconnect', () => {
-            console.warn('WebSocket déconnecté');
-        });
-    });
-    onDestroy(() => {
-        // Do nothing
-    });
+    let socket: any = null;
+    let markerLayer = L.layerGroup().addTo(map);
+    let boatPath: L.Polyline | null = null;
+    let projectionArrow: L.Polyline | null = null;
+    let forecastIcon: L.Marker | null = null;
+    let forecastLabel: L.Marker | null = null;
+    let pathLatLngs: L.LatLng[] = [];
+    let openedPopup: L.Popup | null = null;
 
     function processNMEA(data: string) {
         if (!data.startsWith('$')) return;
 
         const parts = data.split(',');
-        let latitudesal, latDirection, longitudesal, lonDirection;
 
         if (data.slice(3, 6) === 'GLL') {
             latitudesal = parseFloat(parts[1]);
@@ -100,10 +109,22 @@
             latDirection = parts[4];
             longitudesal = parseFloat(parts[5]);
             lonDirection = parts[6];
+            speedOverGround = parseFloat(parts[7]);
+            courseOverGround = parseFloat(parts[8]);
+        }
+        else if (data.slice(3, 6) === 'VTG') {
+            speedOverGround = parseFloat(parts[5]);
+            courseOverGround = parseFloat(parts[1]);
+        }
+        else if (data.slice(3, 6) === 'HDG') {
+            // A Traiter: $HCHDG
+        }
+        else if (data.slice(3, 6) === 'HDT') {
+            // A Traiter: $HCHDT
         } else {
             return;
         }
-
+        // A Traiter: $HCHDG, $HCHDT
         latitude = convertLatitude(latitudesal, latDirection);
         longitude = convertLongitude(longitudesal, lonDirection);
         maLatitude = afficheLatitude(latitudesal, latDirection);
@@ -111,11 +132,11 @@
 
         const newLat = latitude;
         const newLon = longitude;
-
+        /*
         if (lastLatitude !== null && lastLongitude !== null && newLat !== null && newLon !== null) {
             courseOverGround = calculateBearing(lastLatitude, lastLongitude, newLat, newLon);
         }
-
+        */
         lastLatitude = newLat;
         lastLongitude = newLon;
 
@@ -149,13 +170,96 @@
         const min = val - deg * 100;
         return ('000' + deg).slice(-3) + '° ' + ('0' + ((Math.floor(min * 1000) / 1000).toFixed(4))).slice(-7) + "' " + dir;
     }
+    
+    function computeProjection(lat: number, lon: number, cog: number, sog: number): L.LatLng {
+        const ts = store.get('timestamp');
+        const heurePrev = ((ts - Date.now()) / 3600000).toFixed(1);
+        // sog en noeuds → km/h (1.852) → m/s (÷3.6)
+        const distanceMeters = sog * 1.852 * 1000 * heurePrev; // sur 24h
+        const R = 6371000; // rayon Terre en m
+        const δ = distanceMeters / R; // en radians
+        const θ = toRadians(cog);
+        const φ1 = toRadians(lat);
+        const λ1 = toRadians(lon);
+
+        const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) + Math.cos(φ1) * Math.sin(δ) * Math.cos(θ));
+        const λ2 = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1), Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2));
+
+        return L.latLng(toDegrees(φ2), toDegrees(λ2));
+    }
+    
+    function showMyPopup(lat: number, lon: number) {
+        openedPopup?.remove();
+    
+        const popup = L.popup({ autoClose: true })
+            .setLatLng([lat, lon])
+            .setContent('<em>Chargement météo...</em>')
+            .openOn(map);
+    
+        openedPopup = popup;
+    
+        getLatLonInterpolator().then(interpolator => {
+            if (!interpolator) {
+                popup.setContent('Couche météo non disponible.');
+                return;
+            }
+    
+            const overlay = store.get('overlay');
+            const values = interpolator({ lat, lon });
+            let content = `<strong>${VESSEL}</strong><br>${lat.toFixed(5)}, ${lon.toFixed(5)}<br>`;
+
+            if (!Array.isArray(values)) {
+                content += '❌ Pas de données interpolées.';
+                popup.setContent(content);
+                return;
+            }
+
+            if (overlay === 'wind') {
+                const { dir, wind } = wind2obj(values);
+                const speed = metrics.wind.convertValue(wind);
+                const unit = metrics.wind.unit || '';
+                content += `💨 Vent : ${speed}<br>🧭 Direction : ${dir} °`;
+            } else if (overlay === 'waves') {
+                const waveHeight = metrics.waves.convertValue(values[0]);
+                const waveDir = Math.round(values[1]);
+                const wavePeriod = values[2].toFixed(1);
+                content += `🌊 Hauteur : ${waveHeight} m<br>🧭 Direction : ${waveDir}°<br>⏱ Période : ${wavePeriod} s`;
+            } else if (overlay === 'gust') {
+                const gust = metrics.wind.convertValue(values[0]);
+                content += `💨 Rafales : ${gust}`;
+            } else if (overlay === 'rain') {
+                const rain = values[0].toFixed(2);
+                content += `🌧️ Pluie : ${rain} mm/h`;
+            } else if (overlay === 'temp') {
+                const tempC = metrics.temp.convertValue(values[0]);
+                content += `🌡️ Température : ${tempC}`;
+            } else if (overlay === 'pressure') {
+                const Press = metrics.pressure.convertValue(values[0]);
+                content += `📉 Pression : ${Press} hPa`;
+            } else if (overlay === 'clouds') {
+                content += `☁️ Couverture nuageuse : ${Math.round(values[0])}%`;
+            } else {
+                content += 'ℹ️ Aucune donnée météo disponible pour cette couche.';
+            }
+
+            const ts = store.get('timestamp');
+            if (ts) {
+                const forecastDate = new Date(ts);
+                content += `<hr><small>Prévision du :<br> ${forecastDate.toUTCString()}<br>`;
+                content += `${forecastDate.toString()}</small>`;
+            }
+
+            popup.setContent(content);
+        });
+    } // Fin showMyPopup
 
     function addBoatMarker(lat: number, lon: number, cog: number) {
         if (!map) return;
-        markerLayer.clearLayers();
 
+        const latlng = L.latLng(lat, lon);
+        markerLayer.clearLayers();
         const newLatLng = L.latLng(lat, lon);
-        pathLatLngs.push(newLatLng);
+        pathLatLngs.push(latlng);
 
         if (!boatPath) {
             boatPath = L.polyline(pathLatLngs, { color: 'blue', weight: 3 }).addTo(map);
@@ -163,24 +267,43 @@
             boatPath.setLatLngs(pathLatLngs);
         }
 
-        const icon = L.divIcon({
-            className: '',
-            html: `
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 100 100" style="transform: rotate(${cog}deg);">
-                    <polygon points="50,0 90,100 50,80 10,100" fill="red" stroke="black" stroke-width="3"/>
-                </svg>
-            `,
-            iconSize: [10, 10],
-            iconAnchor: [5, 5]
-        });
-
-        L.marker(newLatLng, { icon }).addTo(markerLayer);
-
-        if (followShip) {
-            map.setView(newLatLng);
+        const icon = createRotatingBoatIcon(cog, 0.9);
+        const marker = L.marker(latlng, { icon }).addTo(markerLayer);
+        marker.on('click', () => showMyPopup(lat, lon));
+        speedOverGround = 10;
+        // Ajout projection 24h
+        if (speedOverGround > 0) {
+            const projected = computeProjection(lat, lon, cog, speedOverGround);
+            if (projectionArrow) projectionArrow.remove();
+            projectionArrow = L.polyline([latlng, projected], {
+                color: 'red',
+                weight: 2,
+                dashArray: '5, 5',
+            }).addTo(markerLayer);
+            if (forecastIcon) forecastIcon.remove();
+            const icon = createRotatingBoatIcon(cog, 0.6)
+            forecastIcon = L.marker(projected, { icon }).addTo(markerLayer);
         }
-    }
+        // Rotation dynamique
+        const iconDiv = marker.getElement()?.querySelector('.rotatable') as HTMLElement;
+        if (iconDiv) {
+            iconDiv.style.transformOrigin = '12px 12px';
+            iconDiv.style.transform = `rotateZ(${cog}deg)`;
+        }
+        if (followShip) {
+            map.setView(latlng);
+        }
+    } // Fin addBoatMarker
 
+    function showWeatherPopup() {
+        if (openedPopup) {
+          openedPopup?.remove();
+          openedPopup = null;
+          return;
+        }
+            showMyPopup(lastLatitude, lastLongitude, courseOverGround); // pour forcer l’affichage + popup
+    }
+    
     function toRadians(deg: number): number {
         return deg * Math.PI / 180;
     }
@@ -212,11 +335,40 @@
 
     export const onopen = () => {
         console.log('Plugin ouvert');
+        //store.set('overlay', 'wind'); // important pour activer l’interpolation
     };
+    
+    // ✅ Initialisation WebSocket
+    onMount(() => {
+        // @ts-ignore: socket.io injecté via script global
+        socket = io('https://192.168.1.27:5000', {
+            transports: ['websocket'],
+            secure: true,
+            rejectUnauthorized: false // pour auto-signé
+        });
+        
+        socket.on('nmea_data', (data: string) => {
+            gpsData = data;
+            processNMEA(data);
+        });
+    });
+    
+    onDestroy(() => {
+        if (socket) {
+            socket.disconnect();
+            socket = null;
+        }
+        openedPopup?.remove();
+        markerLayer.clearLayers();
+        boatPath?.remove();
+        projectionArrow?.remove();
+        forecastIcon?.remove();
+        boatPath = null;
+        projectionArrow = null;
+        forecastIcon = null;
+        pathLatLngs = [];
+    });
 
-    export const onclose = () => {
-        console.log('Plugin fermé');
-    };
 </script>
 
 <style lang="less">
@@ -226,7 +378,14 @@
         padding: 10px;
         border-radius: 5px;
     }
-
+    .plugin__buttons button {
+        margin: 5px;
+        padding: 5px 10px;
+        font-size: 14px;
+    }
+    .rotatable {
+        transform-origin: center center;
+    }
     .error {
         color: red;
         margin-top: 20px;
@@ -238,6 +397,12 @@
         background: #f5f5f5;
         height: 100%;
         overflow-y: auto;
+    }
+    
+    #footer{
+    height: 40px;
+    position: absolute;
+    bottom: 0px;
     }
 </style>
 

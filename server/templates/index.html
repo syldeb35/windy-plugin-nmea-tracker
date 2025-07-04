@@ -98,7 +98,11 @@
             }
         }
     </style>
-
+    
+<!-- ✅ Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<!-- ✅ Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     </head>
     <body>
@@ -120,6 +124,11 @@
             <p class="defaut" id="vitesse"></p>
             <p class="defaut" id="cap"></p>
         </div>
+        <!-- ✅ Carte Leaflet -->
+        <div class="NMEA">
+            <h2>Position sur la carte</h2>
+            <div id="map" style="height: 400px; width: 100%; border-radius: 8px;"></div>
+        </div>
 
         <script>
           const socket = io();
@@ -133,7 +142,40 @@
           const pVitesse = document.getElementById('vitesse');
           const pCap = document.getElementById('cap');
           
+          // ✅ Initialiser la carte Leaflet
+          let map = L.map('map').setView([48.0, 1.0], 6);  // Position et zoom par défaut
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+              attribution: '© OpenStreetMap contributors',
+          }).addTo(map);
+
+          let marker = null;
+          let path = [];
+          let polyline = L.polyline([], { color: 'red' }).addTo(map);
           
+          function updateMapFromParts(parts, latIndex, latDirIndex, lonIndex, lonDirIndex) {
+              const rawLat = parseFloat(parts[latIndex]);
+              const latDir = parts[latDirIndex];
+              const rawLon = parseFloat(parts[lonIndex]);
+              const lonDir = parts[lonDirIndex];
+
+              if (isNaN(rawLat) || isNaN(rawLon)) return;
+
+              const latDD = (Math.floor(rawLat / 100) + (rawLat % 100) / 60) * (latDir === 'S' ? -1 : 1);
+              const lonDD = (Math.floor(rawLon / 100) + (rawLon % 100) / 60) * (lonDir === 'W' ? -1 : 1);
+
+              const latlng = [latDD, lonDD];
+
+              if (marker) {
+                  marker.setLatLng(latlng);
+              } else {
+                  marker = L.marker(latlng).addTo(map);
+              }
+
+              path.push(latlng);
+              polyline.setLatLngs(path);
+              map.setView(latlng, map.getZoom());
+          }
+
           socket.on('nmea_data', function(data) {
           document.getElementById('gpsMessage').textContent = data;
           
@@ -233,11 +275,14 @@
               pVitesse.classList.add('rmc');
               const parsed = parseRMC(parts);
               if (parsed) {
+                  // Mise à jour des champs texte...
                   pDate.textContent = "Date : " + parsed.date;
                   pHeure.textContent = "Heure UTC : " + parsed.time;
                   pLat.textContent = "Latitude : " + parsed.lat;
                   pLong.textContent = "Longitude : " + parsed.lon;
                   pVitesse.textContent = "Vitesse : " + parsed.speed;
+                  // ✅ Mise à jour carte
+                  updateMapFromParts(parts, 3, 4, 5, 6); // lat, latDir, lon, lonDir
               }
           } else if (data.substring(3,6) === 'GGA') {
               clearHighlightClasses(pHeure, pLat, pLong, pAlt);
@@ -251,6 +296,8 @@
                   pLat.textContent = "Latitude : " + parsed.lat;
                   pLong.textContent = "Longitude : " + parsed.lon;
                   pAlt.textContent = "Altitude : " + parsed.alt;
+                  // ✅ Mise à jour carte
+                  updateMapFromParts(parts, 2, 3, 4, 5);
               }
           } else if (data.substring(3,6) === 'GLL') {
               clearHighlightClasses(pHeure, pLat, pLong);
@@ -262,6 +309,8 @@
                   pHeure.textContent = "Heure UTC : " + parsed.time;
                   pLat.textContent = "Latitude : " + parsed.lat;
                   pLong.textContent = "Longitude : " + parsed.lon;
+                  // ✅ Mise à jour carte
+                  updateMapFromParts(parts, 1, 2, 3, 4);
               }
           } else if (data.substring(3,6) === 'VTG') {
               const parsed = parseVTG(parts);

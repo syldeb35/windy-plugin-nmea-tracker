@@ -1,0 +1,326 @@
+<div class="plugin__mobile-header">
+    {title}
+</div>
+
+<section class="plugin__content">
+    <div
+        class="plugin__title plugin__title--chevron-back"
+        on:click={() => bcast.emit('rqstOpen', 'menu')}
+    >
+        {title}
+    </div>
+
+    <p>🛳️ Plugin développé par <a href="https://github.com/syldeb35/Windy-plugin-GPS" target="_blank">Capt. S. DEBRAY</a></p>
+    <p>Le serveur NMEA doit être accessible à :</p>
+    <p><code>{route}</code></p>
+    <p>Requête provenant de : <strong>{requestIp}</strong></p>
+
+    <hr />
+
+    {#if gpsData}
+        <p><strong>Dernière trame NMEA reçue :</strong></p>
+        <pre>{gpsData}</pre>
+        <p><strong>Latitude :</strong> {maLatitude}</p>
+        <p><strong>Longitude :</strong> {maLongitude}</p>
+
+        <div class="plugin__buttons">
+            <button on:click={centerShip}>📍 Centrer sur le bateau</button>
+            <button on:click={toggleFollowShip}>
+                {followShip ? '🛑 Stop Suivi' : '▶️ Suivre le bateau'}
+            </button>
+        </div>
+    {/if}
+    
+    <button on:click={showWindPopup}>🌬️ Afficher météo</button>
+    
+    <div class="error" id="err">
+        <p></p>
+    </div>
+    
+    <p class="follow-state">
+      📡 Suivi automatique : {followShip ? 'Activé' : 'Désactivé'}
+    </p>
+</section>
+
+
+
+<script lang="ts">
+    import bcast from "@windy/broadcast";
+    import { onDestroy, onMount } from 'svelte';
+    import { map } from "@windy/map";
+    import { io } from './socket.io.min.js';
+    
+    import { getLatLonInterpolator } from '@windy/interpolator';
+    import store from '@windy/store';
+    import { wind2obj } from '@windy/utils';
+
+    import { createRotatingBoatIcon } from './boatIcon';
+    
+    const title = 'GPS position tracker plugin';
+    let socket: any = null;
+    let requestIp = location.hostname;
+    let route = 'https://192.168.1.27:5000/gps-data'; // utilisé uniquement pour affichage texte
+    let latitude: string | null = null;
+    let longitude: string | null = null;
+    let maLatitude: string | null = null;
+    let maLongitude: string | null = null;
+    let markerLayer = L.layerGroup().addTo(map);
+    let gpsData = 'Aucune donnée reçue pour le moment...';
+    let lastLatitude: number | null = null;
+    let lastLongitude: number | null = null;
+    let courseOverGround: number = 0;
+    let boatPath: L.Polyline | null = null;
+    let pathLatLngs: L.LatLng[] = [];
+    let followShip = true;
+    let openedPopup: L.Popup | null = null;
+
+
+    // ✅ Initialisation WebSocket
+    onMount(() => {
+        // @ts-ignore: socket.io injecté via script global
+        socket = io('https://192.168.1.27:5000', {
+            transports: ['websocket'],
+            secure: true,
+            rejectUnauthorized: false // pour auto-signé
+        });
+
+        socket.on('connect', () => {
+            console.log('WebSocket connecté');
+        });
+
+        socket.on('nmea_data', (data: string) => {
+            gpsData = data;
+            processNMEA(data);
+        });
+
+        /*socket.on('disconnect', () => {
+            console.warn('WebSocket déconnecté');
+        });*/
+    });
+    
+    onDestroy(() => {
+        if (socket) {
+            console.log('Fermeture WebSocket...');
+            socket.disconnect();
+            socket = null;
+        }
+
+        if (markerLayer) {
+            markerLayer.clearLayers();
+        }
+
+        if (boatPath) {
+            boatPath.remove();
+            boatPath = null;
+        }
+
+        pathLatLngs = [];
+        console.log('Plugin détruit proprement');
+    });
+
+
+    function processNMEA(data: string) {
+        if (!data.startsWith('$')) return;
+
+        const parts = data.split(',');
+        let latitudesal, latDirection, longitudesal, lonDirection;
+
+        if (data.slice(3, 6) === 'GLL') {
+            latitudesal = parseFloat(parts[1]);
+            latDirection = parts[2];
+            longitudesal = parseFloat(parts[3]);
+            lonDirection = parts[4];
+        }
+        else if (data.slice(3, 6) === 'GGA') {
+            latitudesal = parseFloat(parts[2]);
+            latDirection = parts[3];
+            longitudesal = parseFloat(parts[4]);
+            lonDirection = parts[5];
+        }
+        else if (data.slice(3, 6) === 'RMC') {
+            latitudesal = parseFloat(parts[3]);
+            latDirection = parts[4];
+            longitudesal = parseFloat(parts[5]);
+            lonDirection = parts[6];
+        } else {
+            return;
+        }
+
+        latitude = convertLatitude(latitudesal, latDirection);
+        longitude = convertLongitude(longitudesal, lonDirection);
+        maLatitude = afficheLatitude(latitudesal, latDirection);
+        maLongitude = afficheLongitude(longitudesal, lonDirection);
+
+        const newLat = latitude;
+        const newLon = longitude;
+
+        if (lastLatitude !== null && lastLongitude !== null && newLat !== null && newLon !== null) {
+            courseOverGround = calculateBearing(lastLatitude, lastLongitude, newLat, newLon);
+        }
+
+        lastLatitude = newLat;
+        lastLongitude = newLon;
+
+        addBoatMarker(newLat, newLon, courseOverGround);
+
+        document.getElementById("err")!.innerHTML = "<p></p>";
+    }
+
+    function convertLatitude(value: number, dir: string): number {
+        const degrees = Math.floor(value / 100);
+        const minutes = value - (degrees * 100);
+        let lat = degrees + (minutes / 60);
+        return dir === 'S' ? -lat : lat;
+    }
+
+    function convertLongitude(value: number, dir: string): number {
+        const degrees = Math.floor(value / 100);
+        const minutes = value - (degrees * 100);
+        let lon = degrees + (minutes / 60);
+        return dir === 'W' ? -lon : lon;
+    }
+
+    function afficheLatitude(val: number, dir: string): string {
+        const deg = Math.floor(val / 100);
+        const min = val - deg * 100;
+        return ('00' + deg).slice(-2) + '° ' + ('0' + ((Math.floor(min * 1000) / 1000).toFixed(4))).slice(-7) + "' " + dir;
+    }
+
+    function afficheLongitude(val: number, dir: string): string {
+        const deg = Math.floor(val / 100);
+        const min = val - deg * 100;
+        return ('000' + deg).slice(-3) + '° ' + ('0' + ((Math.floor(min * 1000) / 1000).toFixed(4))).slice(-7) + "' " + dir;
+    }
+
+    function addBoatMarker(lat: number, lon: number, cog: number) {
+        if (!map) return;
+
+        markerLayer.clearLayers();
+        const newLatLng = L.latLng(lat, lon);
+        pathLatLngs.push(newLatLng);
+
+        if (!boatPath) {
+            boatPath = L.polyline(pathLatLngs, { color: 'blue', weight: 3 }).addTo(map);
+        } else {
+            boatPath.setLatLngs(pathLatLngs);
+        }
+
+        const icon = createRotatingBoatIcon(cog);
+        const marker = L.marker(newLatLng, { icon }).addTo(markerLayer);
+
+
+        // Rotation dynamique
+        const iconDiv = marker.getElement()?.querySelector('.rotatable') as HTMLElement;
+        if (iconDiv) {
+            iconDiv.style.transformOrigin = '12px 12px';
+            iconDiv.style.transform = `rotateZ(${cog}deg)`;
+        }
+
+        marker.on('click', () => {
+            openedPopup?.remove();
+
+            const popup = L.popup({ autoClose: true })
+                .setLatLng(newLatLng)
+                .setContent('<em>Chargement météo...</em>')
+                .openOn(map);
+
+            openedPopup = popup;
+
+            getLatLonInterpolator().then(interpolator => {
+                if (!interpolator) {
+                    popup.setContent("❌ Interpolateur météo non disponible.<br>Assure-toi que la couche <strong>Vent</strong> est sélectionnée.");
+                    return;
+                }
+
+                const interpolated = interpolator({ lat, lon });
+
+                let content = `<strong>Position :</strong><br/>${lat.toFixed(5)}, ${lon.toFixed(5)}<br/>`;
+
+                if (Array.isArray(interpolated)) {
+                    const { dir, wind } = wind2obj(interpolated);
+                    const windSpeed = metrics.wind.convertValue(wind);
+                    const windUnit = metrics.wind.unit || 'm/s';
+
+                    content += `💨 Vent : ${windSpeed} ${windUnit}<br/>🧭 Direction : ${dir}°`;
+                } else {
+                    content += '❌ Pas de données météo.';
+                }
+
+                popup.setContent(content);
+            });
+        });
+
+
+        if (followShip) {
+            map.setView(newLatLng);
+        }
+    }
+
+    function showWindPopup() {
+        if (lastLatitude !== null && lastLongitude !== null) {
+            addBoatMarker(lastLatitude, lastLongitude, courseOverGround); // pour forcer l’affichage + popup
+        }
+    }
+
+
+    function toRadians(deg: number): number {
+        return deg * Math.PI / 180;
+    }
+
+    function toDegrees(rad: number): number {
+        return rad * 180 / Math.PI;
+    }
+
+    function calculateBearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
+        const φ1 = toRadians(lat1);
+        const φ2 = toRadians(lat2);
+        const Δλ = toRadians(lon2 - lon1);
+        const y = Math.sin(Δλ) * Math.cos(φ2);
+        const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+        let θ = Math.atan2(y, x);
+        θ = toDegrees(θ);
+        return (θ + 360) % 360;
+    }
+
+    function centerShip() {
+        if (lastLatitude !== null && lastLongitude !== null) {
+            map.setView([lastLatitude, lastLongitude]);
+        }
+    }
+
+    function toggleFollowShip() {
+        followShip = !followShip;
+    }
+
+    export const onopen = () => {
+        console.log('Plugin ouvert');
+        store.set('overlay', 'wind'); // important pour activer l’interpolation
+    };
+
+
+</script>
+
+<style lang="less">
+    .gps-info {
+        margin-top: 20px;
+        background-color: #f0f0f0;
+        padding: 10px;
+        border-radius: 5px;
+    }
+    .rotatable {
+        transform-origin: center center;
+    }
+    .error {
+        color: red;
+        margin-top: 20px;
+    }
+    .plugin-container {
+        padding: 10px;
+        font-family: Arial, sans-serif;
+        white-space: pre-wrap; /* Permet d'afficher les retours à la ligne */
+        background: #f5f5f5;
+        height: 100%;
+        overflow-y: auto;
+    }
+</style>
+
