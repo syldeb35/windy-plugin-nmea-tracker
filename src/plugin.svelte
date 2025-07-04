@@ -55,7 +55,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { map } from '@windy/map';
     import { getLatLonInterpolator } from '@windy/interpolator';
-    import { overlaySettings } from '@windy/config';
+    //import { overlaySettings } from '@windy/config';
     import { wind2obj } from '@windy/utils';
     import store from '@windy/store';
     import metrics from '@windy/metrics';
@@ -78,6 +78,7 @@
     let courseOverGroundT: number = 0; // True
     let courseOverGroundM: number = 0; // Magnetic
     let speedOverGround: number = 0; // In knots
+    let heurePrev: number | null = null; // pour la projection
     let followShip = true;
 
     let socket: any = null;
@@ -175,7 +176,8 @@
     
     function computeProjection(lat: number, lon: number, cog: number, sog: number): L.LatLng {
         const ts = store.get('timestamp');
-        const heurePrev = ((ts - Date.now()) / 3600000).toFixed(1);
+        heurePrev = Math.round((ts - Date.now()) / 3600000) || 24; // en heures, par défaut 24h si pas de timestamp
+        if (heurePrev < 0) heurePrev = 0; // si timestamp futur
         // sog en noeuds → km/h (1.852) → m/s (÷3.6)
         const distanceMeters = sog * 1.852 * 1000 * heurePrev; // sur 24h
         const R = 6371000; // rayon Terre en m
@@ -219,7 +221,6 @@
             if (overlay === 'wind') {
                 const { dir, wind } = wind2obj(values);
                 const speed = metrics.wind.convertValue(wind);
-                const unit = metrics.wind.unit || '';
                 content += `💨 Vent : ${speed}<br>🧭 Direction : ${dir} °`;
             } else if (overlay === 'waves') {
                 const waveHeight = metrics.waves.convertValue(values[0]);
@@ -271,9 +272,12 @@
         const icon = createRotatingBoatIcon(cog, 0.9);
         const marker = L.marker(latlng, { icon }).addTo(markerLayer);
         marker.on('click', () => showMyPopup(lat, lon));
-        speedOverGround = 10;
+        //speedOverGround = 10;
         // Ajout projection 24h
         if (speedOverGround > 0) {
+            if (heurePrev === null) {
+                heurePrev = Math.round(store.get('timestamp') - Date.now() / 3600000);
+            }
             const projected = computeProjection(lat, lon, cog, speedOverGround);
             if (projectionArrow) projectionArrow.remove();
             projectionArrow = L.polyline([latlng, projected], {
@@ -284,6 +288,7 @@
             if (forecastIcon) forecastIcon.remove();
             const icon = createRotatingBoatIcon(cog, 0.6)
             forecastIcon = L.marker(projected, { icon }).addTo(markerLayer);
+            forecastIcon.on('click', () => showMyPopup(projected.lat, projected.lng));
         }
         // Rotation dynamique
         const iconDiv = marker.getElement()?.querySelector('.rotatable') as HTMLElement;
@@ -302,7 +307,9 @@
           openedPopup = null;
           return;
         }
+        if (lastLatitude !== null && lastLongitude !== null) {
             showMyPopup(lastLatitude, lastLongitude); // pour forcer l’affichage + popup
+        }
     }
     
     function toRadians(deg: number): number {
