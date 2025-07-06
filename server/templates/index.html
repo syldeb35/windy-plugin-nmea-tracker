@@ -11,6 +11,11 @@
         <label><input type="checkbox" name="enable_udp" {% if enable_udp %}checked{% endif %}> UDP</label><br>
         <label><input type="checkbox" name="enable_tcp" {% if enable_tcp %}checked{% endif %}> TCP</label><br>
         <label><input type="checkbox" name="enable_debug" {% if enable_debug %}checked{% endif %}> Activer les logs (DEBUG)</label><br>
+        <hr>
+        <label>UDP IP : <input type="text" name="udp_ip" value="{{ udp_ip }}"></label><br>
+        <label>UDP Port : <input type="number" name="udp_port" value="{{ udp_port }}"></label><br>
+        <label>TCP IP : <input type="text" name="tcp_ip" value="{{ tcp_ip }}"></label><br>
+        <label>TCP Port : <input type="number" name="tcp_port" value="{{ tcp_port }}"></label><br>
         <button type="submit">Valider</button>
     </form>
     <hr>

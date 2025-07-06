@@ -204,10 +204,25 @@ def home():
 @app.route('/select_connection', methods=['POST'])
 def select_connection():
     global ENABLE_SERIAL, ENABLE_UDP, ENABLE_TCP, DEBUG
+    global UDP_IP, UDP_PORT, TCP_IP, TCP_PORT
+
     ENABLE_SERIAL = 'enable_serial' in request.form
     ENABLE_UDP = 'enable_udp' in request.form
     ENABLE_TCP = 'enable_tcp' in request.form
     DEBUG = 'enable_debug' in request.form
+
+    # Récupère les nouvelles valeurs IP/Port si présentes
+    UDP_IP = request.form.get('udp_ip', UDP_IP)
+    try:
+        UDP_PORT = int(request.form.get('udp_port', UDP_PORT))
+    except ValueError:
+        pass
+    TCP_IP = request.form.get('tcp_ip', TCP_IP)
+    try:
+        TCP_PORT = int(request.form.get('tcp_port', TCP_PORT))
+    except ValueError:
+        pass
+
     manage_threads()
     return redirect(url_for('home'))
 

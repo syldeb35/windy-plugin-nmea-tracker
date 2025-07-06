@@ -10,7 +10,25 @@
         {title}
     </div>
 
-    <p>🛳️ Plugin développé par <a href="https://github.com/syldeb35/Windy-plugin-GPS" target="_blank"></a></p>
+    <div class="plugin-summary" style="border-radius:8px; padding:12px; margin-bottom:16px;">
+        <strong>GPS position tracker Windy</strong><br>
+        Ce plugin affiche en temps réel la position d’un navire sur la carte Windy à partir de données NMEA ou AIS reçues via UDP, TCP ou port série.<br>
+        <ul style="margin:8px 0 0 18px;">
+            <li>Affichage de la dernière trame NMEA reçue</li>
+            <li>Latitude, longitude, route et vitesse fond du navire</li>
+            <li>Nom du navire (si disponible via AIS type 5)</li>
+            <li>Historique de la trace et projection de la position future</li>
+            <li>Prévisions météo à la position du navire</li>
+            <li>Connexion configurable (UDP, TCP, Série)</li>
+            <li>Décodage AIS classe A (gestion des messages fragmentés)</li>
+        </ul>
+        <br>
+        <span style="font-size:90%"><strong>Idéal pour la navigation, le suivi de flotte ou l’expérimentation avec des données NMEA/AIS en temps réel.</strong></span>
+    </div>
+    <label>
+        Nom du navire :
+        <input type="text" bind:value={vesselName} />
+    <p>🛳️ </p>
     <p>Le serveur NMEA doit être accessible à :</p>
     <p><code>{route}</code></p>
     <p>UDP : <code>{udpIp}:{udpPort}</code></p>
@@ -26,7 +44,6 @@
         <p><strong>Longitude :</strong> {maLongitude}</p>
         <p><strong>Route fond :</strong> {myCourseOverGroundT}</p>
         <p><strong>vitesse fond :</strong> {mySpeedOverGround}</p>
-        <p><strong>Navire AIS :</strong> {vesselName}</p>
 
         <div class="plugin__buttons">
             <button on:click={centerShip}>📍 Centrer sur le bateau</button>
@@ -47,7 +64,10 @@
       📡 Suivi automatique : {followShip ? 'Activé' : 'Désactivé'}
     </p>
     <div id="footer">
-      <center><p>© 2025 Capt S. DEBRAY</p></center>
+      <center>
+        <p>© 2025 Capt S. DEBRAY</p>
+        <p>🛳️ Sources et infos 🛳️<a href="https://github.com/syldeb35/Windy-plugin-GPS" target="_blank"></a></p>
+      </center>
     </div>
 </section>
 
@@ -103,11 +123,16 @@
 
     let aisFragments: { [key: string]: { total: number, received: number, payloads: string[] } } = {};
 
+    /**
+     * Traite chaque trame NMEA/AIS reçue.
+     * Met à jour la position, la vitesse, le cap, le nom du navire, etc.
+     */
     function processNMEA(data: string) {
-        if (!(data.startsWith('$') || data.startsWith('!'))) return; // Vérifie si la trame commence par $ ou !
+        if (!(data.startsWith('$') || data.startsWith('!'))) return;
 
         const parts = data.split(',');
 
+        // Décodage des trames GPS classiques
         if (data.slice(3, 6) === 'GLL') {
             latitudesal = parseFloat(parts[1]);
             latDirection = parts[2];
@@ -215,25 +240,9 @@
         }
     }
 
-    // Fonction de décodage du type 5
-    function decodeAISType5(aisPayload: string) {
-        if (!aisPayload) return;
-        const bitstring = ais6bitDecode(aisPayload);
-        const msgType = parseInt(bitstring.slice(0, 6), 2);
-        if (msgType === 5) {
-            // Le nom du navire est sur 120 bits à partir du bit 112 (28*6 bits)
-            let nameBits = bitstring.slice(112, 232);
-            let name = '';
-            for (let i = 0; i < nameBits.length; i += 6) {
-                const charCode = parseInt(nameBits.slice(i, i + 6), 2);
-                name += aisAscii(charCode);
-            }
-            name = name.replace(/@+$/, '').trim();
-            vesselName = name;
-        }
-    }
+        // Mise à jour des variables de position
 
-        // A Traiter: $HCHDG, $HCHDT
+        
         latitude = convertLatitude(latitudesal, latDirection);
         longitude = convertLongitude(longitudesal, lonDirection);
         maLatitude = afficheLatitude(latitudesal, latDirection);
@@ -261,9 +270,33 @@
 
         addBoatMarker(newLat, newLon, myCourseOverGroundT);
 
+        // Nettoyage des erreurs éventuelles
         document.getElementById("err")!.innerHTML = "<p></p>";
     }
-    // Fonction utilitaire pour décoder le 6bit AIS
+
+    /**
+     * Décode un message AIS type 5 (nom du navire, etc.)
+     */
+    function decodeAISType5(aisPayload: string) {
+        if (!aisPayload) return;
+        const bitstring = ais6bitDecode(aisPayload);
+        const msgType = parseInt(bitstring.slice(0, 6), 2);
+        if (msgType === 5) {
+            // Le nom du navire est sur 120 bits à partir du bit 112 (28*6 bits)
+            let nameBits = bitstring.slice(112, 232);
+            let name = '';
+            for (let i = 0; i < nameBits.length; i += 6) {
+                const charCode = parseInt(nameBits.slice(i, i + 6), 2);
+                name += aisAscii(charCode);
+            }
+            name = name.replace(/@+$/, '').trim();
+            vesselName = name;
+        }
+    }
+    
+    /**
+     * Décode le payload 6 bits AIS en binaire
+     */
     function ais6bitDecode(payload: string): string {
         let bitstring = '';
         for (let i = 0; i < payload.length; i++) {
@@ -274,13 +307,18 @@
         return bitstring;
     }
 
-    // Fonction utilitaire pour décoder l'alphabet AIS
+    /**
+     * Convertit un code AIS 6 bits en caractère ASCII
+     */
     function aisAscii(val: number): string {
         // Table officielle ITU-R M.1371-5
         const table = "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^- !\"#$%&'()*+,-./0123456789:;<=>?";
         return table[val] || ' ';
     }
 
+    /**
+     * Conversion latitude/longitude NMEA vers décimal
+     */
     function convertLatitude(value: number, dir: string): number {
         const degrees = Math.floor(value / 100);
         const minutes = value - (degrees * 100);
@@ -295,6 +333,9 @@
         return dir === 'W' ? -lon : lon;
     }
 
+    /**
+     * Affichage formaté de la latitude/longitude
+     */
     function afficheLatitude(val: number, dir: string): string {
         const deg = Math.floor(val / 100);
         const min = val - deg * 100;
@@ -307,6 +348,9 @@
         return ('000' + deg).slice(-3) + '° ' + ('0' + ((Math.floor(min * 1000) / 1000).toFixed(4))).slice(-7) + "' " + dir;
     }
     
+    /**
+     * Calcule la position projetée du navire selon cap/vitesse et timestamp Windy
+     */
     function computeProjection(lat: number, lon: number, cog: number, sog: number): L.LatLng {
         const ts = store.get('timestamp');
         heurePrev = Math.round((ts - Date.now()) / 3600000) || 24; // en heures, par défaut 24h si pas de timestamp
@@ -325,22 +369,26 @@
         return L.latLng(toDegrees(φ2), toDegrees(λ2));
     }
     
-    function showMyPopup(lat: number, lon: number) {
+    /**
+     * Affiche une popup météo Windy à la position donnée.
+     * @param useProjectionTime Si true, utilise le timestamp Windy (prévision), sinon l'heure actuelle.
+     */
+    function showMyPopup(lat: number, lon: number, useProjectionTime = false) {
         openedPopup?.remove();
-    
+
         const popup = L.popup({ autoClose: true })
             .setLatLng([lat, lon])
             .setContent('<em>Chargement météo...</em>')
             .openOn(map);
-    
+
         openedPopup = popup;
-    
+
         getLatLonInterpolator().then(interpolator => {
             if (!interpolator) {
                 popup.setContent('Couche météo non disponible.');
                 return;
             }
-    
+
             const overlay = store.get('overlay');
             const values = interpolator({ lat, lon });
             let content = `<strong>${VESSEL}</strong><br>${lat.toFixed(5)}, ${lon.toFixed(5)}<br>`;
@@ -378,7 +426,13 @@
                 content += 'ℹ️ Aucune donnée météo disponible pour cette couche.';
             }
 
-            const ts = store.get('timestamp');
+            // Choix du timestamp selon le contexte
+            let ts: number;
+            if (useProjectionTime) {
+                ts = store.get('timestamp'); // heure de projection (prévision)
+            } else {
+                ts = Date.now(); // heure actuelle
+            }
             if (ts) {
                 const forecastDate = new Date(ts);
                 content += `<hr><small>Prévision du :<br> ${forecastDate.toUTCString()}<br>`;
@@ -389,6 +443,10 @@
         });
     } // Fin showMyPopup
 
+    /**
+     * Ajoute le marqueur du navire et la projection sur la carte.
+     * Gère les clics sur les icônes pour afficher la météo à l'heure actuelle ou projetée.
+     */
     function addBoatMarker(lat: number, lon: number, cog: number) {
         if (!map) return;
 
@@ -396,17 +454,24 @@
         markerLayer.clearLayers();
         pathLatLngs.push(latlng);
 
+        // Trace du chemin parcouru
         if (!boatPath) {
             boatPath = L.polyline(pathLatLngs, { color: 'blue', weight: 3 }).addTo(map);
         } else {
             boatPath.setLatLngs(pathLatLngs);
         }
 
+        // Marqueur principal (navire actuel)
         const icon = createRotatingBoatIcon(cog, 0.9);
         const marker = L.marker(latlng, { icon }).addTo(markerLayer);
-        marker.on('click', () => showMyPopup(lat, lon));
-        //mySpeedOverGround = 10;
-        // Ajout projection 24h
+
+        // Clic sur le navire : météo à l'heure actuelle
+        marker.on('click', () => {
+            store.set('timestamp', Date.now());
+            showMyPopup(lat, lon, false);
+        });
+
+        // Projection future (si vitesse > 0)
         if (mySpeedOverGround > 0) {
             if (heurePrev === null) {
                 heurePrev = Math.round(store.get('timestamp') - Date.now() / 3600000);
@@ -421,30 +486,52 @@
             if (forecastIcon) forecastIcon.remove();
             const icon = createRotatingBoatIcon(cog, 0.6)
             forecastIcon = L.marker(projected, { icon }).addTo(markerLayer);
-            forecastIcon.on('click', () => showMyPopup(projected.lat, projected.lng));
+
+            // Clic sur la projection : météo à l'heure de projection
+            forecastIcon.on('click', () => showMyPopup(projected.lat, projected.lng, true));
         }
-        // Rotation dynamique
+
+        // Rotation dynamique de l'icône
         const iconDiv = marker.getElement()?.querySelector('.rotatable') as HTMLElement;
         if (iconDiv) {
             iconDiv.style.transformOrigin = '12px 12px';
             iconDiv.style.transform = `rotateZ(${cog}deg)`;
         }
+        // Suivi automatique du navire
         if (followShip) {
             map.setView(latlng);
         }
     } // Fin addBoatMarker
 
+    /**
+     * Affiche la météo selon la timeline Windy :
+     * - Si timeline à l'heure actuelle : popup sur le navire
+     * - Si timeline dans le futur : popup sur la projection
+     */
     function showWeatherPopup() {
         if (openedPopup) {
-          openedPopup?.remove();
-          openedPopup = null;
-          return;
+            openedPopup?.remove();
+            openedPopup = null;
+            return;
         }
         if (lastLatitude !== null && lastLongitude !== null) {
-            showMyPopup(lastLatitude, lastLongitude); // pour forcer l’affichage + popup
+            const now = Date.now();
+            const ts = store.get('timestamp');
+            // Si la timeline est à l'heure actuelle (±1h)
+            if (Math.abs(ts - now) < (3600*1000)) {
+                showMyPopup(lastLatitude, lastLongitude, false);
+            } else if (mySpeedOverGround > 0) {
+                // Affiche sur la position projetée si timeline dans le futur
+                const projected = computeProjection(lastLatitude, lastLongitude, myCourseOverGroundT, mySpeedOverGround);
+                showMyPopup(projected.lat, projected.lng, true);
+            } else {
+                // Si pas de projection possible, affiche sur la position actuelle
+                showMyPopup(lastLatitude, lastLongitude, false);
+            }
         }
     }
-    
+
+    // Fonctions utilitaires pour calculs géographiques
     function toRadians(deg: number): number {
         return deg * Math.PI / 180;
     }
@@ -464,22 +551,24 @@
         return (θ + 360) % 360;
     }
 
+    // Centrage manuel sur le navire
     function centerShip() {
         if (lastLatitude !== null && lastLongitude !== null) {
             map.setView([lastLatitude, lastLongitude]);
         }
     }
 
+    // Active/désactive le suivi automatique du navire
     function toggleFollowShip() {
         followShip = !followShip;
     }
 
+    // Initialisation à l'ouverture du plugin
     export const onopen = () => {
         console.log('Plugin ouvert');
-        //store.set('overlay', 'wind'); // important pour activer l’interpolation
     };
-    
-    // ✅ Initialisation WebSocket
+
+    // Initialisation WebSocket pour recevoir les trames NMEA/AIS
     onMount(() => {
         // @ts-ignore: socket.io injecté via script global
         socket = io(route, {
@@ -487,13 +576,14 @@
             secure: true,
             rejectUnauthorized: false // pour auto-signé
         });
-        
+
         socket.on('nmea_data', (data: string) => {
             gpsData = data;
             processNMEA(data);
         });
     });
-    
+
+    // Nettoyage à la fermeture du plugin
     onDestroy(() => {
         if (socket) {
             socket.disconnect();
