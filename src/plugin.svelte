@@ -13,6 +13,8 @@
     <p>🛳️ Plugin développé par <a href="https://github.com/syldeb35/Windy-plugin-GPS" target="_blank"></a></p>
     <p>Le serveur NMEA doit être accessible à :</p>
     <p><code>{route}</code></p>
+    <p>UDP : <code>{udpIp}:{udpPort}</code></p>
+    <p>TCP : <code>{tcpIp}:{tcpPort}</code></p>
     <p>Requête provenant de : <strong>{requestIp}</strong></p>
 
     <hr />
@@ -22,8 +24,9 @@
         <pre>{gpsData}</pre>
         <p><strong>Latitude :</strong> {maLatitude}</p>
         <p><strong>Longitude :</strong> {maLongitude}</p>
-        <p><strong>Route fond :</strong> {courseOverGroundT}</p>
-        <p><strong>vitesse fond :</strong> {speedOverGround}</p>
+        <p><strong>Route fond :</strong> {myCourseOverGroundT}</p>
+        <p><strong>vitesse fond :</strong> {mySpeedOverGround}</p>
+        <p><strong>Navire AIS :</strong> {vesselName}</p>
 
         <div class="plugin__buttons">
             <button on:click={centerShip}>📍 Centrer sur le bateau</button>
@@ -65,7 +68,7 @@
     const title = 'GPS position tracker plugin';
     const VESSEL = 'CMA CGM RIVOLI';
     let requestIp = location.hostname;
-    let route = 'https://192.168.1.27:5000'; // utilisé uniquement pour affichage texte
+    let route = 'https://localhost:5000'; // Remplacez par l'URL de votre serveur NMEA
     let latitudesal: number | null = null, latDirection: string | null = null;
     let longitudesal: number | null = null, lonDirection: string | null = null;
     let latitude: string | null = null;
@@ -76,10 +79,13 @@
     let lastLatitude: number | null = null;
     let lastLongitude: number | null = null;
     let courseOverGroundT: number = 0; // True
+    let myCourseOverGroundT: number = 0; // True
     let courseOverGroundM: number = 0; // Magnetic
     let speedOverGround: number = 0; // In knots
+    let mySpeedOverGround: number = 0; // In knots
     let heurePrev: number | null = null; // pour la projection
     let followShip = true;
+    let vesselName = VESSEL;
 
     let socket: any = null;
     let markerLayer = L.layerGroup().addTo(map);
@@ -90,8 +96,15 @@
     let pathLatLngs: L.LatLng[] = [];
     let openedPopup: L.Popup | null = null;
 
+    let udpIp = '0.0.0.0';
+    let udpPort = 5005;
+    let tcpIp = '0.0.0.0';
+    let tcpPort = 5006;
+
+    let aisFragments: { [key: string]: { total: number, received: number, payloads: string[] } } = {};
+
     function processNMEA(data: string) {
-        if (!data.startsWith('$')) return;
+        if (!(data.startsWith('$') || data.startsWith('!'))) return; // Vérifie si la trame commence par $ ou !
 
         const parts = data.split(',');
 
@@ -116,10 +129,21 @@
             courseOverGroundT = parseFloat(parts[8]);
         }
         else if (data.slice(3, 6) === 'VTG') {
-            speedOverGround = parseFloat(parts[5]);
             courseOverGroundT = parseFloat(parts[1]);
+            if (parts[2] === 'T') {
+                courseOverGroundM = parseFloat(parts[3]);
+            }
+            if (parts[4] === 'N') {
+                speedOverGround = parseFloat(parts[5]);
+            } else if (parts[4] === 'K') {
+                // Convertir km/h en noeuds
+                speedOverGround = parseFloat(parts[5]) / 1.852;
+            } else if (parts[4] === 'M') {
+                // A Traiter: $HCHDM
+            }
         }
         else if (data.slice(3, 6) === 'HDG') {
+            
             // A Traiter: $HCHDG
         }
         else if (data.slice(3, 6) === 'HDT') {
@@ -127,12 +151,104 @@
         } else {
             return;
         }
+
+    // Déchiffrement basique AIVDO (VDO)
+    if (data.slice(3, 6) === 'VDO') {
+        // Exemple : !AIVDO,1,1,,B,13aG?P0P00PD;88MD5MTDww@2D0k,0*7C
+        // Ici, la payload AIS est dans parts[5]
+        const aisPayload = parts[5];
+        if (aisPayload) {
+            const bitstring = ais6bitDecode(aisPayload);
+            const mmsi = parseInt(bitstring.slice(8, 38), 2);
+            // Type de message (6 premiers bits)
+            const msgType = parseInt(bitstring.slice(0, 6), 2);
+            // Pour les messages 1, 2, 3 (position)
+            if ([1, 2, 3].includes(msgType)) {
+                const latRaw = parseInt(bitstring.slice(89, 116), 2);
+                const lonRaw = parseInt(bitstring.slice(61, 89), 2);
+                let lat = (latRaw & 0x8000000) ? (latRaw - 0x10000000) : latRaw;
+                let lon = (lonRaw & 0x8000000) ? (lonRaw - 0x10000000) : lonRaw;
+                lat = lat / 600000.0;
+                lon = lon / 600000.0;
+                const cog = parseInt(bitstring.slice(116, 128), 2) / 10.0;
+                const sog = parseInt(bitstring.slice(50, 60), 2) / 10.0;
+                gpsData = `AIS VDO MMSI: ${mmsi}\nLat: ${lat.toFixed(5)}\nLon: ${lon.toFixed(5)}\nCOG: ${cog}°\nSOG: ${sog} nds`;
+                addBoatMarker(lat, lon, cog);
+                maLatitude = lat.toFixed(5);
+                maLongitude = lon.toFixed(5);
+                myCourseOverGroundT = cog;
+                mySpeedOverGround = sog;
+                lastLatitude = lat;
+                lastLongitude = lon;
+            } else {
+                gpsData = `AIS VDO MMSI: ${mmsi} (type ${msgType})`;
+            }
+        }
+        return;
+    }
+    // Déchiffrement AIVDM (VDM)
+    if (data.startsWith('!') && data.includes('AIVDM')) {
+        const parts = data.split(',');
+        const total = parseInt(parts[1]);
+        const num = parseInt(parts[2]);
+        const seq = parts[3]; // identifiant de séquence (peut être vide)
+        const aisPayload = parts[5];
+        const fragKey = seq + '-' + parts[4]; // clé unique pour le message fragmenté
+
+        if (total > 1) {
+            // Message fragmenté
+            if (!aisFragments[fragKey]) {
+                aisFragments[fragKey] = { total, received: 0, payloads: [] };
+            }
+            aisFragments[fragKey].payloads[num - 1] = aisPayload;
+            aisFragments[fragKey].received++;
+
+            // Si tous les fragments sont reçus
+            if (aisFragments[fragKey].received === total) {
+                const fullPayload = aisFragments[fragKey].payloads.join('');
+                delete aisFragments[fragKey];
+                decodeAISType5(fullPayload);
+            }
+        } else {
+            // Message non fragmenté
+            decodeAISType5(aisPayload);
+        }
+    }
+
+    // Fonction de décodage du type 5
+    function decodeAISType5(aisPayload: string) {
+        if (!aisPayload) return;
+        const bitstring = ais6bitDecode(aisPayload);
+        const msgType = parseInt(bitstring.slice(0, 6), 2);
+        if (msgType === 5) {
+            // Le nom du navire est sur 120 bits à partir du bit 112 (28*6 bits)
+            let nameBits = bitstring.slice(112, 232);
+            let name = '';
+            for (let i = 0; i < nameBits.length; i += 6) {
+                const charCode = parseInt(nameBits.slice(i, i + 6), 2);
+                name += aisAscii(charCode);
+            }
+            name = name.replace(/@+$/, '').trim();
+            vesselName = name;
+        }
+    }
+
         // A Traiter: $HCHDG, $HCHDT
         latitude = convertLatitude(latitudesal, latDirection);
         longitude = convertLongitude(longitudesal, lonDirection);
         maLatitude = afficheLatitude(latitudesal, latDirection);
         maLongitude = afficheLongitude(longitudesal, lonDirection);
-
+        
+        if (courseOverGroundT !== null && courseOverGroundT !== undefined && !Number.isNaN(courseOverGroundT)) {
+            myCourseOverGroundT = parseFloat(courseOverGroundT.toFixed(2));
+        } else {
+            myCourseOverGroundT = myCourseOverGroundT; // Si pas de donnée, on garde la dernière valeur
+        }
+        if (speedOverGround !== null && speedOverGround !== undefined && !Number.isNaN(speedOverGround)) {
+            mySpeedOverGround = parseFloat(speedOverGround.toFixed(2));
+        } else {
+            mySpeedOverGround = mySpeedOverGround; // Si pas de donnée, on garde la dernière valeur
+        }
         const newLat = latitude;
         const newLon = longitude;
         /*
@@ -143,9 +259,26 @@
         lastLatitude = newLat;
         lastLongitude = newLon;
 
-        addBoatMarker(newLat, newLon, courseOverGroundT);
+        addBoatMarker(newLat, newLon, myCourseOverGroundT);
 
         document.getElementById("err")!.innerHTML = "<p></p>";
+    }
+    // Fonction utilitaire pour décoder le 6bit AIS
+    function ais6bitDecode(payload: string): string {
+        let bitstring = '';
+        for (let i = 0; i < payload.length; i++) {
+            let val = payload.charCodeAt(i) - 48;
+            if (val > 40) val -= 8;
+            bitstring += ('000000' + val.toString(2)).slice(-6);
+        }
+        return bitstring;
+    }
+
+    // Fonction utilitaire pour décoder l'alphabet AIS
+    function aisAscii(val: number): string {
+        // Table officielle ITU-R M.1371-5
+        const table = "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^- !\"#$%&'()*+,-./0123456789:;<=>?";
+        return table[val] || ' ';
     }
 
     function convertLatitude(value: number, dir: string): number {
@@ -272,13 +405,13 @@
         const icon = createRotatingBoatIcon(cog, 0.9);
         const marker = L.marker(latlng, { icon }).addTo(markerLayer);
         marker.on('click', () => showMyPopup(lat, lon));
-        //speedOverGround = 10;
+        //mySpeedOverGround = 10;
         // Ajout projection 24h
-        if (speedOverGround > 0) {
+        if (mySpeedOverGround > 0) {
             if (heurePrev === null) {
                 heurePrev = Math.round(store.get('timestamp') - Date.now() / 3600000);
             }
-            const projected = computeProjection(lat, lon, cog, speedOverGround);
+            const projected = computeProjection(lat, lon, cog, mySpeedOverGround);
             if (projectionArrow) projectionArrow.remove();
             projectionArrow = L.polyline([latlng, projected], {
                 color: 'red',
@@ -349,7 +482,7 @@
     // ✅ Initialisation WebSocket
     onMount(() => {
         // @ts-ignore: socket.io injecté via script global
-        socket = io('https://192.168.1.27:5000', {
+        socket = io(route, {
             transports: ['websocket'],
             secure: true,
             rejectUnauthorized: false // pour auto-signé
