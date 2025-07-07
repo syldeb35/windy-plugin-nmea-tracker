@@ -1,6 +1,21 @@
 <div class="plugin__mobile-header">
     {title}
 </div>
+<div popover id="help" class="plugin-summary" style="border-radius:8px; padding:12px; margin-bottom:16px;">
+    <strong>GPS position tracker Windy</strong><br>
+    Ce plugin affiche en temps réel la position d’un navire sur la carte Windy à partir de données NMEA ou AIS reçues via UDP, TCP ou port série.<br>
+    <ul style="margin:8px 0 0 18px;">
+        <li>Affichage de la dernière trame NMEA reçue</li>
+        <li>Latitude, longitude, route et vitesse fond du navire</li>
+        <li>Nom du navire (si disponible via AIS type 5)</li>
+        <li>Historique de la trace et projection de la position future</li>
+        <li>Prévisions météo à la position du navire</li>
+        <li>Connexion configurable (UDP, TCP, Série)</li>
+        <li>Décodage AIS classe A (gestion des messages fragmentés)</li>
+    </ul>
+    <br>
+    <span style="font-size:90%"><strong>Idéal pour la navigation, le suivi de flotte ou l’expérimentation avec des données NMEA/AIS en temps réel.</strong></span>
+</div>
 
 <section class="plugin__content">
     <div
@@ -10,27 +25,16 @@
         {title}
     </div>
 
-    <div class="plugin-summary" style="border-radius:8px; padding:12px; margin-bottom:16px;">
-        <strong>GPS position tracker Windy</strong><br>
-        Ce plugin affiche en temps réel la position d’un navire sur la carte Windy à partir de données NMEA ou AIS reçues via UDP, TCP ou port série.<br>
-        <ul style="margin:8px 0 0 18px;">
-            <li>Affichage de la dernière trame NMEA reçue</li>
-            <li>Latitude, longitude, route et vitesse fond du navire</li>
-            <li>Nom du navire (si disponible via AIS type 5)</li>
-            <li>Historique de la trace et projection de la position future</li>
-            <li>Prévisions météo à la position du navire</li>
-            <li>Connexion configurable (UDP, TCP, Série)</li>
-            <li>Décodage AIS classe A (gestion des messages fragmentés)</li>
-        </ul>
-        <br>
-        <span style="font-size:90%"><strong>Idéal pour la navigation, le suivi de flotte ou l’expérimentation avec des données NMEA/AIS en temps réel.</strong></span>
-    </div>
+    
     <label>
         Nom du navire :
         <input type="text" bind:value={vesselName} />
-    <p>🛳️ </p>
-    <p>Le serveur NMEA doit être accessible à :</p>
-    <p><code>{route}</code></p>
+    </label>
+    <p></p>
+    <button popovertarget="help">🛳️        Aide        🛳️</button>
+
+    <p>Le <a href="{route}/config.html" target="_blank">serveur</a> NMEA doit être accessible à :</p>
+    <p><a href="{route}" target="_blank"><code>{route}</code></a></p>
     <p>UDP : <code>{udpIp}:{udpPort}</code></p>
     <p>TCP : <code>{tcpIp}:{tcpPort}</code></p>
     <p>Requête provenant de : <strong>{requestIp}</strong></p>
@@ -66,7 +70,7 @@
     <div id="footer">
       <center>
         <p>© 2025 Capt S. DEBRAY</p>
-        <p>🛳️ Sources et infos 🛳️<a href="https://github.com/syldeb35/Windy-plugin-GPS" target="_blank"></a></p>
+        <p><a href="https://github.com/syldeb35/syldeb35" target="_blank">🛳️ Sources et infos 🛳️</a></p>
       </center>
     </div>
 </section>
@@ -122,30 +126,46 @@
     let tcpPort = 5006;
 
     let aisFragments: { [key: string]: { total: number, received: number, payloads: string[] } } = {};
+    let unsubscribeTimeline: (() => void) | null = null;
+    let projectionHours: number | null = null; // pour la projection
 
     /**
      * Traite chaque trame NMEA/AIS reçue.
      * Met à jour la position, la vitesse, le cap, le nom du navire, etc.
      */
     function processNMEA(data: string) {
-        if (!(data.startsWith('$') || data.startsWith('!'))) return;
-
+        if (!(data.startsWith('$') || data.startsWith('!'))) {
+            document.getElementById("err")!.innerHTML = "<p>NMEA trame invalid</p>";
+            return;
+        }
         const parts = data.split(',');
 
         // Décodage des trames GPS classiques
         if (data.slice(3, 6) === 'GLL') {
+            if (parts.length < 6) {
+                document.getElementById("err")!.innerHTML = "<p>Trame GLL invalide</p>"
+                return;
+            }
             latitudesal = parseFloat(parts[1]);
             latDirection = parts[2];
             longitudesal = parseFloat(parts[3]);
             lonDirection = parts[4];
         }
         else if (data.slice(3, 6) === 'GGA') {
+            if (parts[6] === 'V') {
+                document.getElementById("err")!.innerHTML = "<p>Trame GGA invalide</p>"
+                return;
+            }
             latitudesal = parseFloat(parts[2]);
             latDirection = parts[3];
             longitudesal = parseFloat(parts[4]);
             lonDirection = parts[5];
         }
         else if (data.slice(3, 6) === 'RMC') {
+            if (parts[2] === 'V') {
+                document.getElementById("err")!.innerHTML = "<p>Trame RMC invalide</p>"
+                return;
+            }
             latitudesal = parseFloat(parts[3]);
             latDirection = parts[4];
             longitudesal = parseFloat(parts[5]);
@@ -174,6 +194,7 @@
         else if (data.slice(3, 6) === 'HDT') {
             // A Traiter: $HCHDT
         } else {
+            // document.getElementById("err")!.innerHTML = "<p>No data received</p>";
             return;
         }
 
@@ -267,9 +288,11 @@
         */
         lastLatitude = newLat;
         lastLongitude = newLon;
-
+        if (!Number.isNaN(newLat) && !Number.isNaN(newLon)) {
+            
         addBoatMarker(newLat, newLon, myCourseOverGroundT);
 
+        }
         // Nettoyage des erreurs éventuelles
         document.getElementById("err")!.innerHTML = "<p></p>";
     }
@@ -336,13 +359,13 @@
     /**
      * Affichage formaté de la latitude/longitude
      */
-    function afficheLatitude(val: number, dir: string): string {
+    function afficheLatitude(val: number, dir?: string): string {
         const deg = Math.floor(val / 100);
         const min = val - deg * 100;
         return ('00' + deg).slice(-2) + '° ' + ('0' + ((Math.floor(min * 1000) / 1000).toFixed(4))).slice(-7) + "' " + dir;
     }
 
-    function afficheLongitude(val: number, dir: string): string {
+    function afficheLongitude(val: number, dir?: string): string {
         const deg = Math.floor(val / 100);
         const min = val - deg * 100;
         return ('000' + deg).slice(-3) + '° ' + ('0' + ((Math.floor(min * 1000) / 1000).toFixed(4))).slice(-7) + "' " + dir;
@@ -353,8 +376,8 @@
      */
     function computeProjection(lat: number, lon: number, cog: number, sog: number): L.LatLng {
         const ts = store.get('timestamp');
-        heurePrev = Math.round((ts - Date.now()) / 3600000) || 24; // en heures, par défaut 24h si pas de timestamp
-        if (heurePrev < 0) heurePrev = 0; // si timestamp futur
+        heurePrev = Math.ceil((ts - Date.now()) / 3600000) || 0; // en heures, si pas de timestamp on ne projette pas
+        if (heurePrev < 1) heurePrev = 0; // si timestamp dans le passé, on ne projette pas
         // sog en noeuds → km/h (1.852) → m/s (÷3.6)
         const distanceMeters = sog * 1.852 * 1000 * heurePrev; // sur 24h
         const R = 6371000; // rayon Terre en m
@@ -429,9 +452,9 @@
             // Choix du timestamp selon le contexte
             let ts: number;
             if (useProjectionTime) {
-                ts = store.get('timestamp'); // heure de projection (prévision)
+                ts = getRoundedHourTimestamp(store.get('timestamp')); // heure de projection (prévision)
             } else {
-                ts = Date.now(); // heure actuelle
+                ts = getRoundedHourTimestamp(Date.now()); // heure actuelle
             }
             if (ts) {
                 const forecastDate = new Date(ts);
@@ -450,9 +473,9 @@
     function addBoatMarker(lat: number, lon: number, cog: number) {
         if (!map) return;
 
-        const latlng = L.latLng(lat, lon);
+        const Position = L.latLng(lat, lon);
         markerLayer.clearLayers();
-        pathLatLngs.push(latlng);
+        pathLatLngs.push(Position);
 
         // Trace du chemin parcouru
         if (!boatPath) {
@@ -463,22 +486,23 @@
 
         // Marqueur principal (navire actuel)
         const icon = createRotatingBoatIcon(cog, 0.9);
-        const marker = L.marker(latlng, { icon }).addTo(markerLayer);
+        const marker = L.marker(Position, { icon }).addTo(markerLayer);
 
         // Clic sur le navire : météo à l'heure actuelle
         marker.on('click', () => {
-            store.set('timestamp', Date.now());
+            // Arrondit à l'heure pleine la plus proche (en ms)
+            store.set('timestamp', getRoundedHourTimestamp());
             showMyPopup(lat, lon, false);
         });
 
         // Projection future (si vitesse > 0)
         if (mySpeedOverGround > 0) {
             if (heurePrev === null) {
-                heurePrev = Math.round(store.get('timestamp') - Date.now() / 3600000);
+                heurePrev = Math.ceil(store.get('timestamp') - Date.now() / 3600000);
             }
             const projected = computeProjection(lat, lon, cog, mySpeedOverGround);
             if (projectionArrow) projectionArrow.remove();
-            projectionArrow = L.polyline([latlng, projected], {
+            projectionArrow = L.polyline([Position, projected], {
                 color: 'red',
                 weight: 2,
                 dashArray: '5, 5',
@@ -488,7 +512,9 @@
             forecastIcon = L.marker(projected, { icon }).addTo(markerLayer);
 
             // Clic sur la projection : météo à l'heure de projection
-            forecastIcon.on('click', () => showMyPopup(projected.lat, projected.lng, true));
+            forecastIcon.on('click', () => {
+                showMyPopup(projected.lat, projected.lng, true);
+            });
         }
 
         // Rotation dynamique de l'icône
@@ -499,7 +525,7 @@
         }
         // Suivi automatique du navire
         if (followShip) {
-            map.setView(latlng);
+            map.setView(Position);
         }
     } // Fin addBoatMarker
 
@@ -515,8 +541,8 @@
             return;
         }
         if (lastLatitude !== null && lastLongitude !== null) {
-            const now = Date.now();
-            const ts = store.get('timestamp');
+            const now = getRoundedHourTimestamp(Date.now());
+            const ts = getRoundedHourTimestamp(store.get('timestamp'));
             // Si la timeline est à l'heure actuelle (±1h)
             if (Math.abs(ts - now) < (3600*1000)) {
                 showMyPopup(lastLatitude, lastLongitude, false);
@@ -551,6 +577,15 @@
         return (θ + 360) % 360;
     }
 
+    /**
+     * Arrondit un timestamp (ou Date.now() si non fourni) à l'heure pleine la plus proche (en ms)
+     */
+    function getRoundedHourTimestamp(ts?: number): number {
+        const t = ts ?? Date.now();
+        const hourMs = 3600 * 1000;
+        return Math.ceil(t / hourMs) * hourMs;
+    }
+
     // Centrage manuel sur le navire
     function centerShip() {
         if (lastLatitude !== null && lastLongitude !== null) {
@@ -581,6 +616,20 @@
             gpsData = data;
             processNMEA(data);
         });
+
+        // Abonnement au changement de la timeline Windy
+        const unsub = store.on('timestamp', (ts: number) => {
+            // Ce code sera exécuté à chaque changement de la timeline
+            // Par exemple :
+            console.log('Timeline Windy changée, nouveau timestamp :', ts);
+            // Tu peux ici déclencher une action, mettre à jour une variable, etc.
+            projectionHours = getRoundedHourTimestamp(store.get('timestamp'));
+        });
+        if (typeof unsub === 'function') {
+            unsubscribeTimeline = unsub;
+        } else {
+            unsubscribeTimeline = null;
+        }
     });
 
     // Nettoyage à la fermeture du plugin
@@ -598,6 +647,9 @@
         projectionArrow = null;
         forecastIcon = null;
         pathLatLngs = [];
+
+        // Désabonnement de la timeline Windy
+        if (unsubscribeTimeline) unsubscribeTimeline();
     });
 
 </script>
@@ -631,7 +683,7 @@
     }
     
     #footer{
-    height: 40px;
+    height: 100px;
     position: absolute;
     bottom: 0px;
     }

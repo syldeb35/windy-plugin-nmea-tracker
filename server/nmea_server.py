@@ -187,10 +187,11 @@ def manage_threads():
         tcp_thread = None
 
 # === ROUTES FLASK ===
-@app.route('/', methods=['GET'])
+@app.route('/config.html', methods=['GET'])
 def home():
+    serial_ports = list_serial_ports()
     return render_template(
-        'index.html',
+        'config.html',
         enable_serial=ENABLE_SERIAL,
         enable_udp=ENABLE_UDP,
         enable_tcp=ENABLE_TCP,
@@ -198,20 +199,22 @@ def home():
         udp_ip=UDP_IP,
         udp_port=UDP_PORT,
         tcp_ip=TCP_IP,
-        tcp_port=TCP_PORT
+        tcp_port=TCP_PORT,
+        serial_ports=serial_ports,
+        serial_port=SERIAL_PORT,
+        serial_baudrate=SERIAL_BAUDRATE
     )
 
 @app.route('/select_connection', methods=['POST'])
 def select_connection():
     global ENABLE_SERIAL, ENABLE_UDP, ENABLE_TCP, DEBUG
-    global UDP_IP, UDP_PORT, TCP_IP, TCP_PORT
+    global UDP_IP, UDP_PORT, TCP_IP, TCP_PORT, SERIAL_PORT, SERIAL_BAUDRATE
 
     ENABLE_SERIAL = 'enable_serial' in request.form
     ENABLE_UDP = 'enable_udp' in request.form
     ENABLE_TCP = 'enable_tcp' in request.form
     DEBUG = 'enable_debug' in request.form
 
-    # Récupère les nouvelles valeurs IP/Port si présentes
     UDP_IP = request.form.get('udp_ip', UDP_IP)
     try:
         UDP_PORT = int(request.form.get('udp_port', UDP_PORT))
@@ -223,12 +226,24 @@ def select_connection():
     except ValueError:
         pass
 
+    # Nouveau : port série sélectionné
+    SERIAL_PORT = request.form.get('serial_port', SERIAL_PORT)
+    try:
+        SERIAL_BAUDRATE = int(request.form.get('serial_baudrate', SERIAL_BAUDRATE))
+    except (ValueError, TypeError):
+        pass
+    # Redémarre les threads avec la nouvelle configuration
     manage_threads()
     return redirect(url_for('home'))
 
-@app.route('/index.html', methods=['GET'])
-def index():
+@app.route('/', methods=['GET'])
+def config():
     return render_template('./index.html') #, allowed_types=", ".join(ALLOWED_SENTENCE_TYPES))
+
+def list_serial_ports():
+    """Retourne la liste des ports série disponibles (nom et description)."""
+    ports = list(serial.tools.list_ports.comports())
+    return [(p.device, p.description) for p in ports]
     
 if __name__ == '__main__':
     # Détection automatique si aucun port série défini
