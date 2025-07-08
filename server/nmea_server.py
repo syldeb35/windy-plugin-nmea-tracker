@@ -3,8 +3,13 @@
 # -*- coding: utf-8 -*-
 # NMEA Server for Windy Plugin
 
-import eventlet
-eventlet.monkey_patch()
+""" import eventlet
+eventlet.monkey_patch(thread=False)
+import eventlet.wsgi """
+# Pour éviter les problèmes de threads avec Flask-SocketIO
+from gevent import monkey
+monkey.patch_all()
+from gevent.pywsgi import WSGIServer
 import os, sys
 import re
 import socket
@@ -19,7 +24,7 @@ from flask_cors import CORS
 from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
 import ssl
-import eventlet.wsgi
+
 
 sys.stderr = open(os.devnull, 'w')  # Attention : plus rien ne s’affichera si erreur réelle
 
@@ -33,7 +38,7 @@ UDP_PORT = 5005
 TCP_IP = "0.0.0.0"
 TCP_PORT = 5006
 HTTPS_PORT = 5000
-REJECTED_PATTERN = re.compile(r'^\$([A-Z][A-Z])(GS[A-Z]|XDR|AMAID|AMCLK|AMSA|SGR)')
+REJECTED_PATTERN = re.compile(r'^\$([A-Z][A-Z])(GS[A-Z]|XDR|AMAID|AMCLK|AMSA|SGR|MMB|MDA)')
 # === CHARGEMENT CONFIG ENV ===
 SERIAL_PORT = os.getenv("SERIAL_PORT", "/dev/rfcomm0").strip()
 SERIAL_BAUDRATE = int(os.getenv("SERIAL_BAUDRATE", 4800))
@@ -43,7 +48,7 @@ ENABLE_TCP = os.getenv("ENABLE_TCP", "True").lower() == "true"
 
 # === CONFIGURATION DES LOGS ===
 # Désactiver les logs HTTP (werkzeug). Masque les requêtes GET / POST (DEBUG, ERROR, WARNING)
-logging.getLogger('werkzeug').setLevel(logging.ERROR)
+# logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 # Logger pour les trames NMEA uniquement
 nmea_logger = logging.getLogger("nmea")
@@ -60,7 +65,8 @@ nmea_logger.addHandler(file_handler)
 
 # === SERVEUR FLASK ===
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
+# socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
 CORS(app)  # Autorise toutes les origines (origine wildcard *)
 
 # === DÉTECTION PORT BLUETOOTH SÉRIE DE FAÇON SIMPLE ===
@@ -85,6 +91,11 @@ def detect_bluetooth_serial_port():
     print("[AUTO-DETECT] Aucun port Bluetooth série détecté.")
     return None
 
+def list_serial_ports():
+    """Retourne la liste des ports série disponibles (nom et description)."""
+    ports = list(serial.tools.list_ports.comports())
+    return [(p.device, p.description) for p in ports]
+    
         
 # === FLAGS ET THREADS POUR GESTION DYNAMIQUE ===
 serial_thread = None
@@ -145,7 +156,32 @@ def tcp_listener(stop_event):
     sock.close()
     print("[TCP] Arrêté.")
 
+# Fonction pour écouter le port série et envoyer les données NMEA
+# Utilise un buffer pour gérer les données en attente et éviter les pertes de trames
 def serial_listener(port, baudrate, stop_event):
+    print(f"[SERIAL] Listener démarre sur {port} @ {baudrate} bps")
+    try:
+        with serial.Serial(port, baudrate, timeout=0.1) as ser:
+            print(f"[SERIAL] Écoute sur {port} @ {baudrate} bps")
+            buffer = ""
+            while not stop_event.is_set():
+                data = ser.read(ser.in_waiting or 1).decode('utf-8', errors='ignore')
+                if data:
+                    buffer += data
+                    while '\n' in buffer:
+                        line, buffer = buffer.split('\n', 1)
+                        line = line.strip()
+                        if not REJECTED_PATTERN.match(line):
+                            if DEBUG:
+                                print(f"[NMEA][SERIAL] {line}")
+                            nmea_logger.info(f"[SERIAL] {line}")
+                            socketio.emit('nmea_data', line)
+    except serial.SerialException as e:
+        print(f"[ERREUR][SERIAL] Impossible d'ouvrir le port {port} : {e}")
+    print("[SERIAL] Arrêté.")
+
+# """ Version précédente de serial_listener, moins efficace
+""" def serial_listener(port, baudrate, stop_event):
     try:
         with serial.Serial(port, baudrate, timeout=1) as ser:
             print(f"[SERIAL] Écoute sur {port} @ {baudrate} bps")
@@ -158,7 +194,7 @@ def serial_listener(port, baudrate, stop_event):
                     socketio.emit('nmea_data', line)
     except serial.SerialException as e:
         print(f"[ERREUR][SERIAL] Impossible d'ouvrir le port {port} : {e}")
-    print("[SERIAL] Arrêté.")
+    print("[SERIAL] Arrêté.") """
 
 # === FONCTION DE GESTION DES THREADS ===
 def manage_threads():
@@ -170,8 +206,9 @@ def manage_threads():
             serial_thread = threading.Thread(target=serial_listener, args=(SERIAL_PORT, SERIAL_BAUDRATE, serial_stop), daemon=True)
             serial_thread.start()
     else:
-        serial_stop.set()
-        serial_thread = None
+        if serial_thread and serial_thread.is_alive():
+            serial_stop.set()
+            serial_thread = None
     # UDP
     if ENABLE_UDP:
         if udp_thread is None or not udp_thread.is_alive():
@@ -179,8 +216,9 @@ def manage_threads():
             udp_thread = threading.Thread(target=udp_listener, args=(udp_stop,), daemon=True)
             udp_thread.start()
     else:
-        udp_stop.set()
-        udp_thread = None
+        if udp_thread and udp_thread.is_alive():
+            udp_stop.set()
+            udp_thread = None
     # TCP
     if ENABLE_TCP:
         if tcp_thread is None or not tcp_thread.is_alive():
@@ -188,8 +226,27 @@ def manage_threads():
             tcp_thread = threading.Thread(target=tcp_listener, args=(tcp_stop,), daemon=True)
             tcp_thread.start()
     else:
-        tcp_stop.set()
-        tcp_thread = None
+        if tcp_thread and tcp_thread.is_alive():
+            tcp_stop.set()
+            tcp_thread = None
+
+def run_flask_app():
+    print(f"[INFO] Démarrage du serveur Flask en HTTPS sur {HTTPS_PORT}")
+    ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ssl_ctx.load_cert_chain(certfile='cert.pem', keyfile='key.pem')
+
+    http_server = WSGIServer(('0.0.0.0', HTTPS_PORT), app, keyfile='key.pem', certfile='cert.pem')
+    print("[INFO] Serveur HTTPS démarré")
+    http_server.serve_forever()
+
+def main_thread():
+    # Démarre les threads pour UDP, TCP et Série si activés
+    manage_threads()
+
+    # Lancement du serveur Flask
+    print(f"[INFO] Lancement du serveur Flask sur HTTPS port {HTTPS_PORT}")
+    run_flask_app()  # Lance le serveur Flask
+
 
 # === ROUTES FLASK ===
 @app.route('/config.html', methods=['GET'])
@@ -245,35 +302,36 @@ def select_connection():
 def config():
     return render_template('./index.html') #, allowed_types=", ".join(ALLOWED_SENTENCE_TYPES))
 
-def list_serial_ports():
-    """Retourne la liste des ports série disponibles (nom et description)."""
-    ports = list(serial.tools.list_ports.comports())
-    return [(p.device, p.description) for p in ports]
-    
+
 if __name__ == '__main__':
+    main_thread()
     # Détection automatique si aucun port série défini
-    if ENABLE_SERIAL:
+    """ if ENABLE_SERIAL:
         if not SERIAL_PORT:
-            SERIAL_PORT = detect_bluetooth_serial_port()
-    manage_threads()
+            SERIAL_PORT = detect_bluetooth_serial_port() """
+    # manage_threads()
     # Serveur Flask en HTTPS (nécessite cert.pem et key.pem)
     #app.run(host='0.0.0.0', port=HTTPS_PORT, ssl_context=('cert.pem', 'key.pem'))
     #socketio.run(app, host='0.0.0.0', port=HTTPS_PORT, ssl_context=('cert.pem', 'key.pem'), server='eventlet')
     
-    # Configuration SSL manuelle
+    """ # Configuration SSL manuelle
     ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ssl_ctx.load_cert_chain(certfile='cert.pem', keyfile='key.pem')
+    ssl_ctx.load_cert_chain(certfile='cert.pem', keyfile='key.pem') """
 
-    listener = eventlet.listen(('0.0.0.0', HTTPS_PORT))
-    wrapped_socket = eventlet.wrap_ssl(listener, certfile='cert.pem', keyfile='key.pem', server_side=True)
+    """ listener = eventlet.listen(('0.0.0.0', HTTPS_PORT))
+    wrapped_socket = eventlet.wrap_ssl(listener, certfile='cert.pem', keyfile='key.pem', server_side=True) """
 
-    print(f"[HTTPS] Serveur WebSocket sécurisé sur https://0.0.0.0:{HTTPS_PORT}")
-    try:
-        eventlet.wsgi.server(wrapped_socket, app, log_output=False)
+    print(f"[INFO] Mode async SocketIO : {socketio.async_mode}")
+    
+    """ try:
+        # Démarre le serveur Flask dans un thread séparé
+        flask_thread = threading.Thread(target=run_flask_app)
+        flask_thread.daemon = True  # Permet au thread de se fermer en même temps que l'application principale
+        flask_thread.start()
     except ssl.SSLError as e:
         if "sslv3 alert certificate unknown" in str(e).lower():
             # Silence ces erreurs SSL spécifiques
             pass
         else:
-            raise
-
+            raise """
+    print(f"[HTTPS] Serveur WebSocket sécurisé sur https://0.0.0.0:{HTTPS_PORT}")

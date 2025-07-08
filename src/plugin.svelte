@@ -1,20 +1,21 @@
 <div class="plugin__mobile-header">
     {title}
 </div>
+
 <div popover id="help" class="plugin-summary" style="border-radius:8px; padding:12px; margin-bottom:16px;">
     <strong>GPS position tracker Windy</strong><br>
-    Ce plugin affiche en temps réel la position d’un navire sur la carte Windy à partir de données NMEA ou AIS reçues via UDP, TCP ou port série.<br>
+    This plugin displays real-time vessel position on Windy map from NMEA or AIS data received via UDP, TCP or serial port.<br>
     <ul style="margin:8px 0 0 18px;">
-        <li>Affichage de la dernière trame NMEA reçue</li>
-        <li>Latitude, longitude, route et vitesse fond du navire</li>
-        <li>Nom du navire (si disponible via AIS type 5)</li>
-        <li>Historique de la trace et projection de la position future</li>
-        <li>Prévisions météo à la position du navire</li>
-        <li>Connexion configurable (UDP, TCP, Série)</li>
-        <li>Décodage AIS classe A (gestion des messages fragmentés)</li>
+        <li>Display of last received NMEA frame</li>
+        <li>Vessel latitude, longitude, course and speed over ground</li>
+        <li>Vessel name (if available via AIS type 5)</li>
+        <li>Track history and future position projection</li>
+        <li>Weather forecast at vessel position</li>
+        <li>Configurable connection (UDP, TCP, Serial)</li>
+        <li>AIS class A decoding (fragmented messages handling)</li>
     </ul>
     <br>
-    <span style="font-size:90%"><strong>Idéal pour la navigation, le suivi de flotte ou l’expérimentation avec des données NMEA/AIS en temps réel.</strong></span>
+    <span style="font-size:90%"><strong>Ideal for navigation, fleet tracking or experimenting with real-time NMEA/AIS data.</strong></span>
 </div>
 
 <section class="plugin__content">
@@ -27,35 +28,35 @@
 
     
     <label>
-        Nom du navire :
+        Vessel name:
         <input type="text" bind:value={vesselName} />
     </label>
     <p></p>
-    <button popovertarget="help">🛳️        Aide        🛳️</button>
+    <button popovertarget="help">🛳️ <big>Help</big> 🛳️</button>
 
-    <p>Le <a href="{route}/config.html" target="_blank">serveur</a> NMEA doit être accessible à :</p>
+    <p>The <a href="{route}/config.html" target="_blank">NMEA server</a> must be accessible at:</p>
     <p><a href="{route}" target="_blank"><code>{route}</code></a></p>
-    <p>UDP : <code>{udpIp}:{udpPort}</code></p>
-    <p>TCP : <code>{tcpIp}:{tcpPort}</code></p>
-    <p>Requête provenant de : <strong>{requestIp}</strong></p>
+    <p>UDP: <code>{udpIp}:{udpPort}</code></p>
+    <p>TCP: <code>{tcpIp}:{tcpPort}</code></p>
+    <!-- <p>Request from: <strong>{requestIp}</strong></p> -->
 
     <hr />
 
     {#if gpsData}
-        <p><strong>Dernière trame NMEA reçue :</strong></p>
+        <p><strong>Last received NMEA frame:</strong></p>
         <pre>{gpsData}</pre>
-        <p><strong>Latitude :</strong> {maLatitude}</p>
-        <p><strong>Longitude :</strong> {maLongitude}</p>
-        <p><strong>Route fond :</strong> {myCourseOverGroundT}</p>
-        <p><strong>vitesse fond :</strong> {mySpeedOverGround}</p>
+        <p><strong>Latitude:</strong> {myLatitude}</p>
+        <p><strong>Longitude:</strong> {myLongitude}</p>
+        <p><strong>Course over ground:</strong> {myCourseOverGroundT}</p>
+        <p><strong>Speed over ground:</strong> {mySpeedOverGround}</p>
 
         <div class="plugin__buttons">
-            <button on:click={centerShip}>📍 Centrer sur le bateau</button>
+            <button on:click={centerShip}>📍 Center on vessel</button>
             <button on:click={toggleFollowShip}>
-                {followShip ? '🛑 Stop Suivi' : '▶️ Suivre le bateau'}
+                {followShip ? '🛑 Stop Tracking' : '▶️ Follow vessel'}
             </button> <br>
             <br>
-            <button on:click={showWeatherPopup}>🌬️ Afficher météo</button>
+            <button id="button" on:click={showWeatherPopup}>🌬️ Show weather</button>
         </div>
     {/if}
    
@@ -65,12 +66,12 @@
     </div>
     
     <p class="follow-state">
-      📡 Suivi automatique : {followShip ? 'Activé' : 'Désactivé'}
+      📡 Automatic tracking: {followShip ? 'Enabled' : 'Disabled'}
     </p>
     <div id="footer">
       <center>
         <p>© 2025 Capt S. DEBRAY</p>
-        <p><a href="https://github.com/syldeb35/syldeb35" target="_blank">🛳️ Sources et infos 🛳️</a></p>
+        <p><a href="https://github.com/syldeb35/syldeb35" target="_blank">🛳️ Sources and info 🛳️</a></p>
       </center>
     </div>
 </section>
@@ -92,22 +93,24 @@
     const title = 'GPS position tracker plugin';
     const VESSEL = 'CMA CGM RIVOLI';
     let requestIp = location.hostname;
-    let route = 'https://localhost:5000'; // Remplacez par l'URL de votre serveur NMEA
+    let route = 'https://localhost:5000'; // Replace with your NMEA server URL
     let latitudesal: number | null = null, latDirection: string | null = null;
     let longitudesal: number | null = null, lonDirection: string | null = null;
-    let latitude: string | null = null;
-    let longitude: string | null = null;
-    let maLatitude: string | null = null;
-    let maLongitude: string | null = null;
-    let gpsData = 'Aucune donnée reçue pour le moment...';
+    let latitude: number | null = null;
+    let longitude: number | null = null;
+    let myLatitude: string | null = null;
+    let myLongitude: string | null = null;
+    let gpsData = 'No data received yet...';
     let lastLatitude: number | null = null;
     let lastLongitude: number | null = null;
     let courseOverGroundT: number = 0; // True
     let myCourseOverGroundT: number = 0; // True
+    let trueHeading: number = 0; // True heading
     let courseOverGroundM: number = 0; // Magnetic
+    let varM: number = 0; // Magnetic variation
     let speedOverGround: number = 0; // In knots
     let mySpeedOverGround: number = 0; // In knots
-    let heurePrev: number | null = null; // pour la projection
+    let heurePrev: number | null = null; // for projection
     let followShip = true;
     let vesselName = VESSEL;
 
@@ -115,6 +118,7 @@
     let markerLayer = L.layerGroup().addTo(map);
     let boatPath: L.Polyline | null = null;
     let projectionArrow: L.Polyline | null = null;
+    let headingArrow: L.Polyline | null = null;
     let forecastIcon: L.Marker | null = null;
     let forecastLabel: L.Marker | null = null;
     let pathLatLngs: L.LatLng[] = [];
@@ -127,43 +131,41 @@
 
     let aisFragments: { [key: string]: { total: number, received: number, payloads: string[] } } = {};
     let unsubscribeTimeline: (() => void) | null = null;
-    let projectionHours: number | null = null; // pour la projection
+    let projectionHours: number | null = null; // for projection
 
     /**
-     * Traite chaque trame NMEA/AIS reçue.
-     * Met à jour la position, la vitesse, le cap, le nom du navire, etc.
+     * Processes each received NMEA/AIS frame.
+     * Updates position, speed, heading, vessel name, etc.
      */
     function processNMEA(data: string) {
         if (!(data.startsWith('$') || data.startsWith('!'))) {
-            document.getElementById("err")!.innerHTML = "<p>NMEA trame invalid</p>";
+            document.getElementById("err")!.innerHTML = "<p>Invalid NMEA frame</p>";
             return;
         }
         const parts = data.split(',');
 
-        // Décodage des trames GPS classiques
-        if (data.slice(3, 6) === 'GLL') {
+        // Decoding classic GPS frames
+        if (data.includes('GLL')) {
             if (parts.length < 6) {
-                document.getElementById("err")!.innerHTML = "<p>Trame GLL invalide</p>"
+                document.getElementById("err")!.innerHTML = "<p>Invalid GLL frame</p>"
                 return;
             }
             latitudesal = parseFloat(parts[1]);
             latDirection = parts[2];
             longitudesal = parseFloat(parts[3]);
             lonDirection = parts[4];
-        }
-        else if (data.slice(3, 6) === 'GGA') {
+        } else if (data.includes('GGA')) {
             if (parts[6] === 'V') {
-                document.getElementById("err")!.innerHTML = "<p>Trame GGA invalide</p>"
+                document.getElementById("err")!.innerHTML = "<p>Invalid GGA frame</p>"
                 return;
             }
             latitudesal = parseFloat(parts[2]);
             latDirection = parts[3];
             longitudesal = parseFloat(parts[4]);
             lonDirection = parts[5];
-        }
-        else if (data.slice(3, 6) === 'RMC') {
+        } else if (data.includes('RMC')) {
             if (parts[2] === 'V') {
-                document.getElementById("err")!.innerHTML = "<p>Trame RMC invalide</p>"
+                document.getElementById("err")!.innerHTML = "<p>Invalid RMC frame</p>"
                 return;
             }
             latitudesal = parseFloat(parts[3]);
@@ -172,8 +174,7 @@
             lonDirection = parts[6];
             speedOverGround = parseFloat(parts[7]);
             courseOverGroundT = parseFloat(parts[8]);
-        }
-        else if (data.slice(3, 6) === 'VTG') {
+        } else if (data.includes('VTG')) {
             courseOverGroundT = parseFloat(parts[1]);
             if (parts[2] === 'T') {
                 courseOverGroundM = parseFloat(parts[3]);
@@ -181,103 +182,101 @@
             if (parts[4] === 'N') {
                 speedOverGround = parseFloat(parts[5]);
             } else if (parts[4] === 'K') {
-                // Convertir km/h en noeuds
+                // Convert km/h to knots
                 speedOverGround = parseFloat(parts[5]) / 1.852;
             } else if (parts[4] === 'M') {
-                // A Traiter: $HCHDM
+                // To be processed: $HCHDM
             }
-        }
-        else if (data.slice(3, 6) === 'HDG') {
-            
-            // A Traiter: $HCHDG
-        }
-        else if (data.slice(3, 6) === 'HDT') {
-            // A Traiter: $HCHDT
+        } else if (data.includes('HDG')) {
+            courseOverGroundM = parseFloat(parts[1]);
+            varM = parseFloat(parts[4]);
+        } else if (data.includes('HDT')) {
+            trueHeading = parseFloat(parts[1]);
         } else {
             // document.getElementById("err")!.innerHTML = "<p>No data received</p>";
             return;
         }
 
-    // Déchiffrement basique AIVDO (VDO)
-    if (data.slice(3, 6) === 'VDO') {
-        // Exemple : !AIVDO,1,1,,B,13aG?P0P00PD;88MD5MTDww@2D0k,0*7C
-        // Ici, la payload AIS est dans parts[5]
-        const aisPayload = parts[5];
-        if (aisPayload) {
-            const bitstring = ais6bitDecode(aisPayload);
-            const mmsi = parseInt(bitstring.slice(8, 38), 2);
-            // Type de message (6 premiers bits)
-            const msgType = parseInt(bitstring.slice(0, 6), 2);
-            // Pour les messages 1, 2, 3 (position)
-            if ([1, 2, 3].includes(msgType)) {
-                const latRaw = parseInt(bitstring.slice(89, 116), 2);
-                const lonRaw = parseInt(bitstring.slice(61, 89), 2);
-                let lat = (latRaw & 0x8000000) ? (latRaw - 0x10000000) : latRaw;
-                let lon = (lonRaw & 0x8000000) ? (lonRaw - 0x10000000) : lonRaw;
-                lat = lat / 600000.0;
-                lon = lon / 600000.0;
-                const cog = parseInt(bitstring.slice(116, 128), 2) / 10.0;
-                const sog = parseInt(bitstring.slice(50, 60), 2) / 10.0;
-                gpsData = `AIS VDO MMSI: ${mmsi}\nLat: ${lat.toFixed(5)}\nLon: ${lon.toFixed(5)}\nCOG: ${cog}°\nSOG: ${sog} nds`;
-                addBoatMarker(lat, lon, cog);
-                maLatitude = lat.toFixed(5);
-                maLongitude = lon.toFixed(5);
-                myCourseOverGroundT = cog;
-                mySpeedOverGround = sog;
-                lastLatitude = lat;
-                lastLongitude = lon;
+        // Basic AIVDO (VDO) decoding
+        if (data.startsWith('!') && data.includes('VDO')) {
+            // Example: !AIVDO,1,1,,B,13aG?P0P00PD;88MD5MTDww@2D0k,0*7C
+            // Here, the AIS payload is in parts[5]
+            const aisPayload = parts[5];
+            if (aisPayload) {
+                const bitstring = ais6bitDecode(aisPayload);
+                const mmsi = parseInt(bitstring.slice(8, 38), 2);
+                // Message type (first 6 bits)
+                const msgType = parseInt(bitstring.slice(0, 6), 2);
+                // For messages 1, 2, 3 (position)
+                if ([1, 2, 3].includes(msgType)) {
+                    const latRaw = parseInt(bitstring.slice(89, 116), 2);
+                    const lonRaw = parseInt(bitstring.slice(61, 89), 2);
+                    let lat = (latRaw & 0x8000000) ? (latRaw - 0x10000000) : latRaw;
+                    let lon = (lonRaw & 0x8000000) ? (lonRaw - 0x10000000) : lonRaw;
+                    lat = lat / 600000.0;
+                    lon = lon / 600000.0;
+                    const cog = parseInt(bitstring.slice(116, 128), 2) / 10.0;
+                    const sog = parseInt(bitstring.slice(50, 60), 2) / 10.0;
+                    gpsData = `AIS VDO MMSI: ${mmsi}\nLat: ${lat.toFixed(5)}\nLon: ${lon.toFixed(5)}\nCOG: ${cog}°\nSOG: ${sog} nds`;
+                    addBoatMarker(lat, lon, cog);
+                    myLatitude = lat.toFixed(5);
+                    myLongitude = lon.toFixed(5);
+                    myCourseOverGroundT = cog;
+                    mySpeedOverGround = sog;
+                    lastLatitude = lat;
+                    lastLongitude = lon;
+                } else {
+                    gpsData = `AIS VDO MMSI: ${mmsi} (type ${msgType})`;
+                }
+            }
+            return;
+        }
+        // AIVDM (VDM) decoding
+        if (data.startsWith('!') && data.includes('AIVDM')) {
+            const parts = data.split(',');
+            const total = parseInt(parts[1]);
+            const num = parseInt(parts[2]);
+            const seq = parts[3]; // sequence identifier (can be empty)
+            const aisPayload = parts[5];
+            const fragKey = seq + '-' + parts[4]; // unique key for fragmented message
+
+            if (total > 1) {
+                // Fragmented message
+                if (!aisFragments[fragKey]) {
+                    aisFragments[fragKey] = { total, received: 0, payloads: [] };
+                }
+                aisFragments[fragKey].payloads[num - 1] = aisPayload;
+                aisFragments[fragKey].received++;
+
+                // If all fragments are received
+                if (aisFragments[fragKey].received === total) {
+                    const fullPayload = aisFragments[fragKey].payloads.join('');
+                    delete aisFragments[fragKey];
+                    decodeAISType5(fullPayload);
+                }
             } else {
-                gpsData = `AIS VDO MMSI: ${mmsi} (type ${msgType})`;
+                // Non-fragmented message
+                decodeAISType5(aisPayload);
             }
         }
-        return;
-    }
-    // Déchiffrement AIVDM (VDM)
-    if (data.startsWith('!') && data.includes('AIVDM')) {
-        const parts = data.split(',');
-        const total = parseInt(parts[1]);
-        const num = parseInt(parts[2]);
-        const seq = parts[3]; // identifiant de séquence (peut être vide)
-        const aisPayload = parts[5];
-        const fragKey = seq + '-' + parts[4]; // clé unique pour le message fragmenté
 
-        if (total > 1) {
-            // Message fragmenté
-            if (!aisFragments[fragKey]) {
-                aisFragments[fragKey] = { total, received: 0, payloads: [] };
-            }
-            aisFragments[fragKey].payloads[num - 1] = aisPayload;
-            aisFragments[fragKey].received++;
-
-            // Si tous les fragments sont reçus
-            if (aisFragments[fragKey].received === total) {
-                const fullPayload = aisFragments[fragKey].payloads.join('');
-                delete aisFragments[fragKey];
-                decodeAISType5(fullPayload);
-            }
-        } else {
-            // Message non fragmenté
-            decodeAISType5(aisPayload);
-        }
-    }
-
-        // Mise à jour des variables de position
+        // Position variables update
 
         
         latitude = convertLatitude(latitudesal, latDirection);
         longitude = convertLongitude(longitudesal, lonDirection);
-        maLatitude = afficheLatitude(latitudesal, latDirection);
-        maLongitude = afficheLongitude(longitudesal, lonDirection);
+        myLatitude = displayLatitude(latitudesal, latDirection);
+        myLongitude = displayLongitude(longitudesal, lonDirection);
         
         if (courseOverGroundT !== null && courseOverGroundT !== undefined && !Number.isNaN(courseOverGroundT)) {
             myCourseOverGroundT = parseFloat(courseOverGroundT.toFixed(2));
         } else {
-            myCourseOverGroundT = myCourseOverGroundT; // Si pas de donnée, on garde la dernière valeur
+            myCourseOverGroundT = myCourseOverGroundT; // If no data, keep the last value
         }
         if (speedOverGround !== null && speedOverGround !== undefined && !Number.isNaN(speedOverGround)) {
             mySpeedOverGround = parseFloat(speedOverGround.toFixed(2));
         } else {
-            mySpeedOverGround = mySpeedOverGround; // Si pas de donnée, on garde la dernière valeur
+            mySpeedOverGround = mySpeedOverGround; // If no data, keep the last value
         }
         const newLat = latitude;
         const newLon = longitude;
@@ -293,12 +292,12 @@
         addBoatMarker(newLat, newLon, myCourseOverGroundT);
 
         }
-        // Nettoyage des erreurs éventuelles
+        // Clear potential errors
         document.getElementById("err")!.innerHTML = "<p></p>";
     }
 
     /**
-     * Décode un message AIS type 5 (nom du navire, etc.)
+     * Decodes an AIS type 5 message (vessel name, etc.)
      */
     function decodeAISType5(aisPayload: string) {
         if (!aisPayload) return;
@@ -334,13 +333,13 @@
      * Convertit un code AIS 6 bits en caractère ASCII
      */
     function aisAscii(val: number): string {
-        // Table officielle ITU-R M.1371-5
+        // Official ITU-R M.1371-5 table
         const table = "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^- !\"#$%&'()*+,-./0123456789:;<=>?";
         return table[val] || ' ';
     }
 
     /**
-     * Conversion latitude/longitude NMEA vers décimal
+     * Convert NMEA latitude/longitude to decimal
      */
     function convertLatitude(value: number, dir: string): number {
         const degrees = Math.floor(value / 100);
@@ -357,31 +356,51 @@
     }
 
     /**
-     * Affichage formaté de la latitude/longitude
+     * Formatted display of latitude/longitude
      */
-    function afficheLatitude(val: number, dir?: string): string {
-        const deg = Math.floor(val / 100);
-        const min = val - deg * 100;
-        return ('00' + deg).slice(-2) + '° ' + ('0' + ((Math.floor(min * 1000) / 1000).toFixed(4))).slice(-7) + "' " + dir;
+    function displayLatitude(val: number, dir?: string): string {
+        const hemisphere = dir ?? (val >= 0 ? 'N' : 'S');
+        let deg: number | null = null;
+        let min: number | null = null;
+        // If dir is undefined or null, we assume it's a decimal degrees value
+        // and we calculate degrees and minutes accordingly.
+        if (dir === undefined || dir === null) {
+            deg = Math.floor(Math.abs(val));
+            min = (Math.abs(val) - deg) * 60; // Convert decimal degrees to minutes
+        } else { // If dir is defined, we assume it's a raw value.
+            deg = Math.floor(Math.abs(val) / 100);
+            min = Math.abs(val) - deg * 100;
+        }
+        return ('00' + deg).slice(-2) + '° ' + ('0' + ((Math.floor(min * 1000) / 1000).toFixed(4))).slice(-7) + "' " + hemisphere;
     }
 
-    function afficheLongitude(val: number, dir?: string): string {
-        const deg = Math.floor(val / 100);
-        const min = val - deg * 100;
-        return ('000' + deg).slice(-3) + '° ' + ('0' + ((Math.floor(min * 1000) / 1000).toFixed(4))).slice(-7) + "' " + dir;
+    function displayLongitude(val: number, dir?: string): string {
+        const hemisphere = dir ?? (val >= 0 ? 'E' : 'W');
+        let deg: number | null = null;
+        let min: number | null = null;
+        // If dir is undefined or null, we assume it's a decimal degrees value
+        // and we calculate degrees and minutes accordingly.
+        if (dir === undefined || dir === null) {
+            deg = Math.floor(Math.abs(val));
+            min = (Math.abs(val) - deg) * 60; // Convert decimal degrees to minutes
+        } else { // If dir is defined, we assume it's a raw value.
+            deg = Math.floor(Math.abs(val) / 100);
+            min = Math.abs(val) - deg * 100;
+        }
+        return ('000' + deg).slice(-3) + '° ' + ('0' + ((Math.floor(min * 1000) / 1000).toFixed(4))).slice(-7) + "' " + hemisphere;
     }
     
     /**
-     * Calcule la position projetée du navire selon cap/vitesse et timestamp Windy
+     * Calculate the projected position of the vessel based on heading/speed and Windy timestamp
      */
-    function computeProjection(lat: number, lon: number, cog: number, sog: number): L.LatLng {
+    function computeProjection(lat: number, lon: number, cog: number, sog: number, duration?: number): L.LatLng {
         const ts = store.get('timestamp');
-        heurePrev = Math.ceil((ts - Date.now()) / 3600000) || 0; // en heures, si pas de timestamp on ne projette pas
-        if (heurePrev < 1) heurePrev = 0; // si timestamp dans le passé, on ne projette pas
-        // sog en noeuds → km/h (1.852) → m/s (÷3.6)
-        const distanceMeters = sog * 1.852 * 1000 * heurePrev; // sur 24h
-        const R = 6371000; // rayon Terre en m
-        const δ = distanceMeters / R; // en radians
+        duration = duration ?? (Math.floor((ts - Date.now()) / 3600000) || 0); // in hours, if no timestamp we don't project
+        if (duration < 1) duration = 0; // if timestamp in the past, we don't project
+        // sog in knots → km/h (1.852) → m/s (÷3.6)
+        const distanceMeters = sog * 1.852 * 1000 * duration; // in meters
+        const R = 6371000; // Earth radius in m
+        const δ = distanceMeters / R; // in radians
         const θ = toRadians(cog);
         const φ1 = toRadians(lat);
         const λ1 = toRadians(lon);
@@ -393,31 +412,43 @@
     }
     
     /**
-     * Affiche une popup météo Windy à la position donnée.
-     * @param useProjectionTime Si true, utilise le timestamp Windy (prévision), sinon l'heure actuelle.
+     * Shows a Windy weather popup at the given position.
+     * @param useProjectionTime If true, uses Windy timestamp (forecast), otherwise current time.
      */
     function showMyPopup(lat: number, lon: number, useProjectionTime = false) {
         openedPopup?.remove();
 
         const popup = L.popup({ autoClose: true })
             .setLatLng([lat, lon])
-            .setContent('<em>Chargement météo...</em>')
+            .setContent('<em>Loading weather...</em>')
             .openOn(map);
 
         openedPopup = popup;
 
         getLatLonInterpolator().then(interpolator => {
             if (!interpolator) {
-                popup.setContent('Couche météo non disponible.');
+                popup.setContent('Weather layer not available.');
                 return;
+            }
+
+            // Choose timestamp according to context
+            let ts: number;
+            let forecastDate: Date;
+            if (useProjectionTime) {
+                ts = getRoundedHourTimestamp(store.get('timestamp')); // projection time (forecast)
+            } else {
+                ts = getRoundedHourTimestamp(Date.now()); // current time
+            }
+            if (ts) {
+                forecastDate = new Date(ts);
             }
 
             const overlay = store.get('overlay');
             const values = interpolator({ lat, lon });
-            let content = `<strong>${VESSEL}</strong><br>${lat.toFixed(5)}, ${lon.toFixed(5)}<br>`;
+            let content = `<strong>${VESSEL}</strong><br>φ = ${displayLatitude(lat)}, λ= ${displayLongitude(lon)}<br>`;
 
             if (!Array.isArray(values)) {
-                content += '❌ Pas de données interpolées.';
+                content += '❌ No interpolated data.';
                 popup.setContent(content);
                 return;
             }
@@ -425,50 +456,38 @@
             if (overlay === 'wind') {
                 const { dir, wind } = wind2obj(values);
                 const speed = metrics.wind.convertValue(wind);
-                content += `💨 Vent : ${speed}<br>🧭 Direction : ${dir} °`;
+                content += `💨 Wind: ${speed}<br>🧭 Direction: ${dir} °`;
             } else if (overlay === 'waves') {
                 const waveHeight = metrics.waves.convertValue(values[0]);
                 const waveDir = Math.round(values[1]);
                 const wavePeriod = values[2].toFixed(1);
-                content += `🌊 Hauteur : ${waveHeight} m<br>🧭 Direction : ${waveDir}°<br>⏱ Période : ${wavePeriod} s`;
+                content += `🌊 Height: ${waveHeight} m<br>🧭 Direction: ${waveDir}°<br>⏱ Period: ${wavePeriod} s`;
             } else if (overlay === 'gust') {
                 const gust = metrics.wind.convertValue(values[0]);
-                content += `💨 Rafales : ${gust}`;
+                content += `💨 Gusts: ${gust}`;
             } else if (overlay === 'rain') {
                 const rain = values[0].toFixed(2);
-                content += `🌧️ Pluie : ${rain} mm/h`;
+                content += `🌧️ Rain: ${rain} mm/h`;
             } else if (overlay === 'temp') {
                 const tempC = metrics.temp.convertValue(values[0]);
-                content += `🌡️ Température : ${tempC}`;
+                content += `🌡️ Temperature: ${tempC}`;
             } else if (overlay === 'pressure') {
                 const Press = metrics.pressure.convertValue(values[0]);
-                content += `📉 Pression : ${Press} hPa`;
+                content += `📉 Pressure: ${Press} hPa`;
             } else if (overlay === 'clouds') {
-                content += `☁️ Couverture nuageuse : ${Math.round(values[0])}%`;
+                content += `☁️ Cloud cover: ${Math.round(values[0])}%`;
             } else {
-                content += 'ℹ️ Aucune donnée météo disponible pour cette couche.';
+                content += 'ℹ️ No weather data available for this layer.';
             }
-
-            // Choix du timestamp selon le contexte
-            let ts: number;
-            if (useProjectionTime) {
-                ts = getRoundedHourTimestamp(store.get('timestamp')); // heure de projection (prévision)
-            } else {
-                ts = getRoundedHourTimestamp(Date.now()); // heure actuelle
-            }
-            if (ts) {
-                const forecastDate = new Date(ts);
-                content += `<hr><small>Prévision du :<br> ${forecastDate.toUTCString()}<br>`;
-                content += `${forecastDate.toString()}</small>`;
-            }
-
+            content += `<hr><small><strong>Forecast in ${projectionHours} hours :</strong><br> ${forecastDate.toUTCString()}<br>`;
+            //content += `${forecastDate.toString()}</small>`;
             popup.setContent(content);
         });
-    } // Fin showMyPopup
+    } // End showMyPopup
 
     /**
-     * Ajoute le marqueur du navire et la projection sur la carte.
-     * Gère les clics sur les icônes pour afficher la météo à l'heure actuelle ou projetée.
+     * Adds the vessel marker and projection on the map.
+     * Handles clicks on icons to display weather at current or projected time.
      */
     function addBoatMarker(lat: number, lon: number, cog: number) {
         if (!map) return;
@@ -477,62 +496,89 @@
         markerLayer.clearLayers();
         pathLatLngs.push(Position);
 
-        // Trace du chemin parcouru
+        mySpeedOverGround = 6; // Default speed if not provided
+
+        // Trace of the path traveled
         if (!boatPath) {
             boatPath = L.polyline(pathLatLngs, { color: 'blue', weight: 3 }).addTo(map);
         } else {
             boatPath.setLatLngs(pathLatLngs);
         }
 
-        // Marqueur principal (navire actuel)
-        const icon = createRotatingBoatIcon(cog, 0.9);
-        const marker = L.marker(Position, { icon }).addTo(markerLayer);
+        // Heading direction arrow
+        const headingEnd = computeProjection(lat, lon, trueHeading, 6, 24);
+        if (headingArrow) headingArrow.remove();
+        headingArrow = L.polyline([Position, headingEnd], {
+            color: 'blue',
+            weight: 2,
+            dashArray: '10, 10',
+        }).addTo(markerLayer);
 
-        // Clic sur le navire : météo à l'heure actuelle
+        // Future projection arrow
+        const cogEnd = computeProjection(lat, lon, cog, mySpeedOverGround, projectionHours);
+        if (projectionArrow) projectionArrow.remove();
+        projectionArrow = L.polyline([Position, cogEnd], {
+            color: 'red',
+            weight: 1,
+            dashArray: '5, 5',
+        }).addTo(markerLayer);
+
+        // Main marker (current position)
+        const icon = createRotatingBoatIcon(trueHeading, 0.9);
+        const marker = L.marker(Position, { icon }).addTo(markerLayer);
+        marker.bindTooltip(vesselName, { permanent: false, direction: 'top', className: 'boat-tooltip' });
+
+        // Click on vessel: weather at current time
         marker.on('click', () => {
-            // Arrondit à l'heure pleine la plus proche (en ms)
+            if (openedPopup) {
+                openedPopup.remove();
+                openedPopup = null;
+                return;
+            }
+            // Round to the nearest full hour (in ms)
             store.set('timestamp', getRoundedHourTimestamp());
             showMyPopup(lat, lon, false);
         });
 
-        // Projection future (si vitesse > 0)
-        if (mySpeedOverGround > 0) {
-            if (heurePrev === null) {
-                heurePrev = Math.ceil(store.get('timestamp') - Date.now() / 3600000);
+        // Future projection icon (if speed > 0.5 knots)
+        if (mySpeedOverGround > 0.5) {
+            if (projectionHours === null || projectionHours === undefined) {
+                projectionHours = getRoundedHourTimestamp(store.get('timestamp')) - getRoundedHourTimestamp();
             }
-            const projected = computeProjection(lat, lon, cog, mySpeedOverGround);
-            if (projectionArrow) projectionArrow.remove();
-            projectionArrow = L.polyline([Position, projected], {
-                color: 'red',
-                weight: 2,
-                dashArray: '5, 5',
-            }).addTo(markerLayer);
+            const projected = computeProjection(lat, lon, cog, mySpeedOverGround, projectionHours);            
+            // Display forecast icon at projected position
             if (forecastIcon) forecastIcon.remove();
-            const icon = createRotatingBoatIcon(cog, 0.6)
+            const icon = createRotatingBoatIcon(trueHeading, 0.6)
             forecastIcon = L.marker(projected, { icon }).addTo(markerLayer);
+            forecastIcon.bindTooltip(`Weather forecast in ${projectionHours} hours`, { permanent: false, direction: 'top', className: 'forecast-tooltip' });
 
-            // Clic sur la projection : météo à l'heure de projection
+            // Click on projection: weather at projection time
             forecastIcon.on('click', () => {
+                if (openedPopup) {
+                    openedPopup.remove();
+                    openedPopup = null;
+                    return;
+                }
                 showMyPopup(projected.lat, projected.lng, true);
             });
         }
 
-        // Rotation dynamique de l'icône
+        // Dynamic rotation of the icon
         const iconDiv = marker.getElement()?.querySelector('.rotatable') as HTMLElement;
         if (iconDiv) {
             iconDiv.style.transformOrigin = '12px 12px';
-            iconDiv.style.transform = `rotateZ(${cog}deg)`;
+            iconDiv.style.transform = `rotateZ(${trueHeading}deg)`;
         }
-        // Suivi automatique du navire
+        // Automatic vessel tracking
         if (followShip) {
             map.setView(Position);
         }
-    } // Fin addBoatMarker
+    } // End addBoatMarker
 
     /**
-     * Affiche la météo selon la timeline Windy :
-     * - Si timeline à l'heure actuelle : popup sur le navire
-     * - Si timeline dans le futur : popup sur la projection
+     * Shows weather according to Windy timeline:
+     * - If timeline at current time: popup on vessel
+     * - If timeline in the future: popup on projection
      */
     function showWeatherPopup() {
         if (openedPopup) {
@@ -543,21 +589,21 @@
         if (lastLatitude !== null && lastLongitude !== null) {
             const now = getRoundedHourTimestamp(Date.now());
             const ts = getRoundedHourTimestamp(store.get('timestamp'));
-            // Si la timeline est à l'heure actuelle (±1h)
-            if (Math.abs(ts - now) < (3600*1000)) {
+            // If timeline is at current time (±1h)
+            if (projectionHours < (1)) {
                 showMyPopup(lastLatitude, lastLongitude, false);
-            } else if (mySpeedOverGround > 0) {
-                // Affiche sur la position projetée si timeline dans le futur
-                const projected = computeProjection(lastLatitude, lastLongitude, myCourseOverGroundT, mySpeedOverGround);
+            } else if (projectionHours >= (1)) {
+                // Display on projected position if timeline in the future
+                const projected = computeProjection(lastLatitude, lastLongitude, myCourseOverGroundT, mySpeedOverGround, projectionHours);
                 showMyPopup(projected.lat, projected.lng, true);
             } else {
-                // Si pas de projection possible, affiche sur la position actuelle
+                // If no projection possible, display on current position
                 showMyPopup(lastLatitude, lastLongitude, false);
             }
         }
     }
 
-    // Fonctions utilitaires pour calculs géographiques
+    // Utility functions for geographical calculations
     function toRadians(deg: number): number {
         return deg * Math.PI / 180;
     }
@@ -578,38 +624,38 @@
     }
 
     /**
-     * Arrondit un timestamp (ou Date.now() si non fourni) à l'heure pleine la plus proche (en ms)
+     * Rounds a timestamp (or Date.now() if not provided) to the nearest full hour (in ms)
      */
     function getRoundedHourTimestamp(ts?: number): number {
         const t = ts ?? Date.now();
         const hourMs = 3600 * 1000;
-        return Math.ceil(t / hourMs) * hourMs;
+        return Math.floor(t / hourMs) * hourMs;
     }
 
-    // Centrage manuel sur le navire
+    // Manual centering on vessel
     function centerShip() {
         if (lastLatitude !== null && lastLongitude !== null) {
             map.setView([lastLatitude, lastLongitude]);
         }
     }
 
-    // Active/désactive le suivi automatique du navire
+    // Enable/disable automatic vessel tracking
     function toggleFollowShip() {
         followShip = !followShip;
     }
 
-    // Initialisation à l'ouverture du plugin
+    // Initialization when plugin opens
     export const onopen = () => {
-        console.log('Plugin ouvert');
+        console.log('Plugin opened');
     };
 
-    // Initialisation WebSocket pour recevoir les trames NMEA/AIS
+    // WebSocket initialization to receive NMEA/AIS frames
     onMount(() => {
-        // @ts-ignore: socket.io injecté via script global
+        // @ts-ignore: socket.io injected via global script
         socket = io(route, {
             transports: ['websocket'],
             secure: true,
-            rejectUnauthorized: false // pour auto-signé
+            rejectUnauthorized: false // for self-signed
         });
 
         socket.on('nmea_data', (data: string) => {
@@ -617,13 +663,18 @@
             processNMEA(data);
         });
 
-        // Abonnement au changement de la timeline Windy
+        // Subscribe to Windy timeline changes
         const unsub = store.on('timestamp', (ts: number) => {
-            // Ce code sera exécuté à chaque changement de la timeline
-            // Par exemple :
-            console.log('Timeline Windy changée, nouveau timestamp :', ts);
-            // Tu peux ici déclencher une action, mettre à jour une variable, etc.
-            projectionHours = getRoundedHourTimestamp(store.get('timestamp'));
+            // This code will be executed on every timeline change
+            // For example:
+            console.log('Windy timeline changed, new timestamp:', ts);
+            // You can trigger an action here, update a variable, etc.
+            projectionHours = (getRoundedHourTimestamp(store.get('timestamp')) - getRoundedHourTimestamp()) / (3600 * 1000); // in hours
+            if (projectionHours > 1) {
+                document.getElementById('button').innerHTML = "🌬️ Show weather (in " + projectionHours + "h)";
+            } else {
+                document.getElementById('button').innerHTML = "🌬️ Show weather";
+            }
         });
         if (typeof unsub === 'function') {
             unsubscribeTimeline = unsub;
@@ -632,7 +683,7 @@
         }
     });
 
-    // Nettoyage à la fermeture du plugin
+    // Cleanup when plugin closes
     onDestroy(() => {
         if (socket) {
             socket.disconnect();
@@ -648,7 +699,7 @@
         forecastIcon = null;
         pathLatLngs = [];
 
-        // Désabonnement de la timeline Windy
+        // Unsubscribe from Windy timeline
         if (unsubscribeTimeline) unsubscribeTimeline();
     });
 
@@ -676,7 +727,7 @@
     .plugin-container {
         padding: 10px;
         font-family: Arial, sans-serif;
-        white-space: pre-wrap; /* Permet d'afficher les retours à la ligne */
+        white-space: pre-wrap; /* Allows displaying line breaks */
         background: #f5f5f5;
         height: 100%;
         overflow-y: auto;
