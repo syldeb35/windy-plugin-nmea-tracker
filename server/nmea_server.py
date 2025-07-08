@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# -*- coding: utf-8 -*-
+# NMEA Server for Windy Plugin
+
 import eventlet
 eventlet.monkey_patch()
 import os, sys
@@ -45,6 +49,7 @@ logging.getLogger('werkzeug').setLevel(logging.ERROR)
 nmea_logger = logging.getLogger("nmea")
 nmea_logger.setLevel(logging.INFO)
 log_formatter = logging.Formatter('%(asctime)s - %(message)s')
+os.makedirs("logs", exist_ok=True)  # Crée le dossier logs s'il n'existe pas
 file_handler = RotatingFileHandler(
     "logs/nmea.log",            # fichier log principal
     maxBytes=1024 * 1024,    # 1 Mo max
