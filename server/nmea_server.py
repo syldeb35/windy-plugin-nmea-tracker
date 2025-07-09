@@ -367,7 +367,7 @@ def run_flask_app():
         try:
             # Suppress verbose SSL logs
             import logging
-            logging.getLogger('gevent.ssl').setLevel(logging.ERROR)
+            logging.getLogger('gevent.ssl').setLevel(logging.WARNING)
             
             http_server = WSGIServer(
                 ('0.0.0.0', HTTPS_PORT), 
