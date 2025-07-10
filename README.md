@@ -1,8 +1,8 @@
 # Windy Plugin NMEA Tracker
 
-### Windy "GPS position tracker" plugin – NMEA/AIS position tracking
+## Windy "NMEA position tracker" plugin – GPS/AIS position tracking
 
-This plugin allows you to display a vessel's position in real time on the Windy map, based on NMEA or AIS data received via UDP, TCP, or serial port. It displays:
+This plugin allows you to display a vessel's position in real time on the Windy map, based on NMEA data received via UDP, TCP, or serial port. It displays:
 
 - The last NMEA frame received
 - The vessel's latitude, longitude, course, and speed over ground
@@ -31,7 +31,7 @@ Navigation, fleet tracking, onboard weather monitoring, or experimenting with re
 
 **Documentation at: [https://docs.windy-plugins.com/](https://docs.windy-plugins.com/)**
 
-# CHANGELOG
+### CHANGELOG
 
--   1.0.0
-    -   Initial version of this plugin
+- 1.0.0
+  - Initial version of this plugin
