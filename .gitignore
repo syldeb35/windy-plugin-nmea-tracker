@@ -1,7 +1,7 @@
 .vscode
 dist
 node_modules
-*.config.js
+rollup.config-win.js
 CleanUpSources.sh
 nmea-tracker.code-workspace
 .rollup.cache
