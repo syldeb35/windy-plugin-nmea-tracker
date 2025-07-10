@@ -509,7 +509,7 @@
         pathLatLngs.push(Position);
 
         if (mySpeedOverGround === null || mySpeedOverGround === undefined || isNaN(mySpeedOverGround)) {
-            mySpeedOverGround = 6; // Default to 0 if no speed data
+            mySpeedOverGround = 6; // Default to 6 if no speed data
         }
 
         // Trace of the path traveled
