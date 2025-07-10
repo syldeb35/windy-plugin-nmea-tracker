@@ -1,8 +1,10 @@
+
 import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
-import typescript from '@rollup/plugin-typescript';
+//import typescript from '@rollup/plugin-typescript';
 import terser from '@rollup/plugin-terser';
 
+import serve from 'rollup-plugin-serve';
 import rollupSvelte from 'rollup-plugin-svelte';
 import rollupSwc from 'rollup-plugin-swc3';
 import rollupCleanup from 'rollup-plugin-cleanup';
@@ -12,7 +14,7 @@ import sveltePreprocess from 'svelte-preprocess';
 
 import { transformCodeToESMPlugin, keyPEM, certificatePEM } from '@windycom/plugin-devtools';
 
-const useSourceMaps = false;
+const useSourceMaps = false; // Set to true if you want to generate source maps
 
 const buildConfigurations = {
     src: {
@@ -30,7 +32,7 @@ export default {
         {
             file: `dist/${out}.js`,
             format: 'module',
-            sourcemap: false, // Disable sourcemaps for the main build
+            sourcemap: false,
         },
         {
             file: `dist/${out}.min.js`,
@@ -49,14 +51,6 @@ export default {
         clearScreen: false,
     },
     plugins: [
-        typescript({
-            sourceMap: useSourceMaps,
-            inlineSources: false,
-        }),
-        rollupSwc({
-            include: ['**/*.ts', '**/*.svelte'],
-            sourceMaps: useSourceMaps,
-        }),
         rollupSvelte({
             emitCss: false,
             preprocess: {
@@ -70,7 +64,10 @@ export default {
                 },
             },
         }),
-
+        rollupSwc({
+            include: ['**/*.ts', '**/*.svelte'],
+            sourceMaps: useSourceMaps,
+        }),
         resolve({
             browser: true,
             mainFields: ['module', 'jsnext:main', 'main'],

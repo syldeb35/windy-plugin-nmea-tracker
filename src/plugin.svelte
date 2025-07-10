@@ -20,6 +20,7 @@
 
 <section class="plugin__content">
     <button
+        style="border-radius:8px; padding:12px; margin-bottom:16px; background: #3c3c3c;"
         class="plugin__title plugin__title--chevron-back"
         on:click={() => bcast.emit('rqstOpen', 'menu')}
         type="button"
@@ -92,8 +93,8 @@
     import { io } from './socket.io.min.js';
     import { createRotatingBoatIcon } from './boatIcon';
     
-    const title = 'GPS position tracker plugin';
-    const VESSEL = 'CMA CGM RIVOLI';
+    const title = 'NMEA tracker plugin';
+    const VESSEL = 'YOUR BOAT';
     let requestIp = location.hostname;
     let route = 'https://localhost:5000'; // Replace with your NMEA server URL
     let latitudesal: number | null = null, latDirection: string | null = null;
@@ -398,6 +399,7 @@
     function computeProjection(lat: number, lon: number, cog: number, sog: number, duration?: number): L.LatLng {
         const ts = store.get('timestamp');
         duration = duration ?? (Math.floor((ts - Date.now()) / 3600000) || 0); // in hours, if no timestamp we don't project
+        if (duration > 360) duration = 0;
         if (duration < 1) duration = 0; // if timestamp in the past, we don't project
         // sog in knots → km/h (1.852) → m/s (÷3.6)
         const distanceMeters = sog * 1.852 * 1000 * duration; // in meters
