@@ -31,7 +31,7 @@ Navigation, fleet tracking, onboard weather monitoring, or experimenting with re
 
 **Documentation at: [https://docs.windy-plugins.com/](https://docs.windy-plugins.com/)**
 
-**Plugin accessible at: [https://windy-plugins.com/7445473/windy-plugin-nmea-tracker/1.0.0/plugin.min.js](https://windy-plugins.com/7445473/windy-plugin-nmea-tracker/1.0.0/plugin.min.js)**
+**Plugin accessible at: [https://windy-plugins.com/7445473/windy-plugin-nmea-tracker/1.0.1/plugin.min.js](https://windy-plugins.com/7445473/windy-plugin-nmea-tracker/1.0.1/plugin.min.js)**
 
 ### CHANGELOG
 
