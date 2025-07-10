@@ -1,7 +1,11 @@
-export function createRotatingBoatIcon(head: number, opacity?: number): L.DivIcon {
-	if (typeof opacity !== 'undefined') {
-        let opacity = 0.846008;
+declare global {
+    interface Window {
+        L: any;
     }
+}
+
+export function createRotatingBoatIcon(head: number, opacity: number = 0.846008): any {
+    const L = (window as any).L;
     return L.divIcon({
         className: '',
         html: `

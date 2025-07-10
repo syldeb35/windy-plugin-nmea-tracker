@@ -19,12 +19,14 @@
 </div>
 
 <section class="plugin__content">
-    <div
+    <button
         class="plugin__title plugin__title--chevron-back"
         on:click={() => bcast.emit('rqstOpen', 'menu')}
+        type="button"
+        aria-label="Retour au menu"
     >
         {title}
-    </div>
+    </button>
 
     
     <label>
