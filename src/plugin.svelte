@@ -74,7 +74,7 @@
     <div id="footer">
       <center>
         <p>© 2025 Capt S. DEBRAY</p>
-        <p><a href="https://github.com/syldeb35/syldeb35" target="_blank">🛳️ Sources and info 🛳️</a></p>
+        <p><a href="https://github.com/syldeb35/windy-plugin-nmea-tracker" target="_blank">🛳️ Sources and info 🛳️</a></p>
       </center>
     </div>
     <div class="error" id="err">
