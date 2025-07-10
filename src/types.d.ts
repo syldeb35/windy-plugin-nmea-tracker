@@ -20,3 +20,38 @@ declare module '@windy/broadcast' {
     };
     export default bcast;
 }
+
+declare module '@windy/map' {
+    export const map: any;
+}
+
+declare module '@windy/interpolator' {
+    export function getLatLonInterpolator(): Promise<any>;
+}
+
+declare module '@windy/config' {
+    export const overlaySettings: any;
+}
+
+declare module '@windy/utils' {
+    export function wind2obj(values: any): { dir: number, wind: number };
+}
+
+declare module '@windy/store' {
+    const store: {
+        get: (key: string) => any;
+        set: (key: string, value: any) => void;
+        on: (key: string, callback: (value: any) => void) => (() => void) | void;
+    };
+    export default store;
+}
+
+declare module '@windy/metrics' {
+    const metrics: {
+        wind: { convertValue: (value: number) => string };
+        waves: { convertValue: (value: number) => string };
+        temp: { convertValue: (value: number) => string };
+        pressure: { convertValue: (value: number) => string };
+    };
+    export default metrics;
+}

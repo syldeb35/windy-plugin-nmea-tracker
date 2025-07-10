@@ -11,7 +11,6 @@ const config: ExternalPluginConfig = {
     desktopUI: 'rhpane',
     mobileUI: 'fullscreen',
     routerPath: '/nmea-tracker',
-    private: true,
 };
 
 export default config;

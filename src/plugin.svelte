@@ -61,15 +61,15 @@
             <br>
             <button id="button" on:click={showWeatherPopup}>🌬️ Show weather</button>
         </div>
-    {/if}
-   
-    
-    <div class="error" id="err">
-        <p></p>
-    </div>
-    
+    {/if}    
+    <hr />
     <p class="follow-state">
       📡 Automatic tracking: {followShip ? 'Enabled' : 'Disabled'}
+    </p>
+    <p class="connection-state">
+      🔌 Connection: <span class={isConnected ? ' connected' : ' disconnected'}>
+        {isConnected ? ' Connected' : ' Disconnected'}
+      </span>
     </p>
     <div id="footer">
       <center>
@@ -77,16 +77,14 @@
         <p><a href="https://github.com/syldeb35/syldeb35" target="_blank">🛳️ Sources and info 🛳️</a></p>
       </center>
     </div>
+    <div class="error" id="err">
+        <p></p>
+    </div>
 </section>
 
 
 
 <script lang="ts">
-    declare global {
-    interface Window {
-        L: any;
-    }
-}
     import bcast from "@windy/broadcast";
     import { onMount, onDestroy } from 'svelte';
     import { map } from '@windy/map';
@@ -97,7 +95,9 @@
     import metrics from '@windy/metrics';
     import io from './socket.io.min.js';
     import { createRotatingBoatIcon } from './boatIcon';
-    import * as L from 'leaflet';
+    
+    // Use global Leaflet from Windy
+    const L = (window as any).L;
     
     const title = 'NMEA tracker plugin';
     const VESSEL = 'YOUR BOAT';
@@ -124,15 +124,14 @@
     let vesselName = VESSEL;
 
     let socket: any = null;
-    let L: any = window.L; // Ensure L is available from the global window object
-    let markerLayer = L.layerGroup().addTo(map);
-    let boatPath: L.Polyline | null = null;
-    let projectionArrow: L.Polyline | null = null;
-    let headingArrow: L.Polyline | null = null;
-    let forecastIcon: L.Marker | null = null;
-    let forecastLabel: L.Marker | null = null;
-    let pathLatLngs: L.LatLng[] = [];
-    let openedPopup: L.Popup | null = null;
+    let markerLayer: any = null;
+    let boatPath: any = null;
+    let projectionArrow: any = null;
+    let headingArrow: any = null;
+    let forecastIcon: any = null;
+    let forecastLabel: any = null;
+    let pathLatLngs: any[] = [];
+    let openedPopup: any = null;
 
     let udpIp = '0.0.0.0';
     let udpPort = 5005;
@@ -142,6 +141,8 @@
     let aisFragments: { [key: string]: { total: number, received: number, payloads: string[] } } = {};
     let unsubscribeTimeline: (() => void) | null = null;
     let projectionHours: number | null = null; // for projection
+    let isConnected: boolean = false; // WebSocket connection status
+    let connectionLostTimer: number | null = null; // Timer for connection lost alert
 
     /**
      * Processes each received NMEA/AIS frame.
@@ -203,7 +204,7 @@
         } else if (data.includes('HDT')) {
             trueHeading = parseFloat(parts[1]);
         } else {
-            // document.getElementById("err")!.innerHTML = "<p>No data received</p>";
+            document.getElementById("err")!.innerHTML = "<p>No data received</p>";
             return;
         }
 
@@ -403,7 +404,7 @@
     /**
      * Calculate the projected position of the vessel based on heading/speed and Windy timestamp
      */
-    function computeProjection(lat: number, lon: number, cog: number, sog: number, duration?: number): L.LatLng {
+    function computeProjection(lat: number, lon: number, cog: number, sog: number, duration?: number): any {
         const ts = store.get('timestamp');
         duration = duration ?? (Math.floor((ts - Date.now()) / 3600000) || 0); // in hours, if no timestamp we don't project
         if (duration > 360) duration = 0;
@@ -501,7 +502,7 @@
      * Handles clicks on icons to display weather at current or projected time.
      */
     function addBoatMarker(lat: number, lon: number, cog: number) {
-        if (!map) return;
+        if (!map || !markerLayer) return;
 
         const Position = L.latLng(lat, lon);
         markerLayer.clearLayers();
@@ -665,11 +666,59 @@
 
     // WebSocket initialization to receive NMEA/AIS frames
     onMount(() => {
+        // Initialize marker layer when component mounts and map is available
+        markerLayer = L.layerGroup().addTo(map);
+        
         // @ts-ignore: socket.io injected via global script
         socket = io(route, {
             transports: ['websocket'],
             secure: true,
             rejectUnauthorized: false // for self-signed
+        });
+
+        // Connection event handlers
+        socket.on('connect', () => {
+            console.log('WebSocket connected to NMEA server');
+            isConnected = true;
+            // Clear the connection lost timer
+            if (connectionLostTimer) {
+                clearTimeout(connectionLostTimer);
+                connectionLostTimer = null;
+            }
+            document.getElementById("err")!.innerHTML = "<p></p>"; // Clear any previous error
+        });
+
+        socket.on('disconnect', (reason: string) => {
+            console.log('WebSocket disconnected:', reason);
+            isConnected = false;
+            document.getElementById("err")!.innerHTML = "<p>⚠️ Connection lost to NMEA server</p>";
+            
+            // Set a timer to show alert if disconnection persists
+            connectionLostTimer = setTimeout(() => {
+                if (!isConnected) {
+                    alert('⚠️ NMEA Server Connection Lost!\n\nThe connection to the NMEA server has been lost for more than 10 seconds.\nPlease check:\n- NMEA server is running\n- Network connectivity\n- Server URL: ' + route);
+                }
+            }, 10000); // 10 seconds
+        });
+
+        socket.on('connect_error', (error: any) => {
+            console.error('WebSocket connection error:', error);
+            isConnected = false;
+            document.getElementById("err")!.innerHTML = "<p>❌ Failed to connect to NMEA server</p>";
+        });
+
+        socket.on('reconnect', (attemptNumber: number) => {
+            console.log('WebSocket reconnected after', attemptNumber, 'attempts');
+            isConnected = true;
+            // Clear the connection lost timer
+            if (connectionLostTimer) {
+                clearTimeout(connectionLostTimer);
+                connectionLostTimer = null;
+            }
+            document.getElementById("err")!.innerHTML = "<p>✅ Reconnected to NMEA server</p>";
+            setTimeout(() => {
+                document.getElementById("err")!.innerHTML = "<p></p>";
+            }, 3000); // Clear success message after 3 seconds
         });
 
         socket.on('nmea_data', (data: string) => {
@@ -702,6 +751,11 @@
         if (socket) {
             socket.disconnect();
             socket = null;
+        }
+        // Clear connection lost timer
+        if (connectionLostTimer) {
+            clearTimeout(connectionLostTimer);
+            connectionLostTimer = null;
         }
         openedPopup?.remove();
         markerLayer.clearLayers();
@@ -737,6 +791,16 @@
     .error {
         color: red;
         margin-top: 20px;
+    }
+    .connection-state {
+        margin-top: 10px;
+        font-weight: bold;
+    }
+    .connected {
+        color: green;
+    }
+    .disconnected {
+        color: red;
     }
     .plugin-container {
         padding: 10px;

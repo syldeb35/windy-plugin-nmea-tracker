@@ -6,7 +6,22 @@
 	],
 	"settings": {
 		"cSpell.words": [
-			"RIVOLI"
+			"AIVDM",
+			"AIVDO",
+			"bcast",
+			"bitstring",
+			"HCHDM",
+			"latitudesal",
+			"Lngs",
+			"longitudesal",
+			"mmsi",
+			"nmea",
+			"popovertarget",
+			"rhpane",
+			"RIVOLI",
+			"rollup",
+			"rqst",
+			"unsub"
 		]
 	}
 }
