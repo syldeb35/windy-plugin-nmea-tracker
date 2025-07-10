@@ -82,16 +82,22 @@
 
 
 <script lang="ts">
+    declare global {
+    interface Window {
+        L: any;
+    }
+}
     import bcast from "@windy/broadcast";
     import { onMount, onDestroy } from 'svelte';
     import { map } from '@windy/map';
     import { getLatLonInterpolator } from '@windy/interpolator';
-    //import { overlaySettings } from '@windy/config';
+    import { overlaySettings } from '@windy/config';
     import { wind2obj } from '@windy/utils';
     import store from '@windy/store';
     import metrics from '@windy/metrics';
-    import { io } from './socket.io.min.js';
+    import io from './socket.io.min.js';
     import { createRotatingBoatIcon } from './boatIcon';
+    import * as L from 'leaflet';
     
     const title = 'NMEA tracker plugin';
     const VESSEL = 'YOUR BOAT';
@@ -118,6 +124,7 @@
     let vesselName = VESSEL;
 
     let socket: any = null;
+    let L: any = window.L; // Ensure L is available from the global window object
     let markerLayer = L.layerGroup().addTo(map);
     let boatPath: L.Polyline | null = null;
     let projectionArrow: L.Polyline | null = null;
@@ -500,7 +507,9 @@
         markerLayer.clearLayers();
         pathLatLngs.push(Position);
 
-        mySpeedOverGround = 6; // Default speed if not provided
+        if (mySpeedOverGround === null || mySpeedOverGround === undefined || isNaN(mySpeedOverGround)) {
+            mySpeedOverGround = 6; // Default to 0 if no speed data
+        }
 
         // Trace of the path traveled
         if (!boatPath) {
@@ -651,6 +660,7 @@
     // Initialization when plugin opens
     export const onopen = () => {
         console.log('Plugin opened');
+        projectionHours = 0; // Reset projection hours
     };
 
     // WebSocket initialization to receive NMEA/AIS frames
