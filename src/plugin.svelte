@@ -811,10 +811,25 @@
         overflow-y: auto;
     }
     
+    /* Styles for links */
+    a {
+        color: #4db8ff;
+        text-decoration: underline;
+    }
+    
+    a:hover {
+        color: #66d9ff;
+        text-decoration: underline;
+    }
+    
+    a:visited {
+        color: #b366ff;
+    }
+    
     #footer{
-    height: 100px;
-    position: absolute;
-    bottom: 0px;
+        height: 100px;
+        position: absolute;
+        bottom: 0px;
     }
 </style>
 
