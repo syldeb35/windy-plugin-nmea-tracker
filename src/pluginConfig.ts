@@ -7,10 +7,11 @@ const config: ExternalPluginConfig = {
     icon: '🛰️',
     description: 'GPS Tracker.',
     author: 'Sylvain DEBRAY (CMA CGM)',
-    repository: 'https://github.com/SylvainDEBRAY/Windy-plugin-GPS',
+    repository: 'https://github.com/syldeb35/windy-plugin-nmea-tracker',
     desktopUI: 'rhpane',
     mobileUI: 'fullscreen',
     routerPath: '/nmea-tracker',
+    private: true,
 };
 
 export default config;
