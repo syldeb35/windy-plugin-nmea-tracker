@@ -35,12 +35,23 @@
         <input type="text" bind:value={vesselName} />
     </label>
     <p></p>
-    <button class="centered" popovertarget="help">🛳️ <big>Help</big> 🛳️</button>
-
-    <p>The <a href="{route}/config.html" target="_blank">NMEA server</a> must be accessible at:</p>
-    <p><a href="{route}" target="_blank"><code>{route}</code></a></p>
-    <p>UDP: <code>{udpIp}:{udpPort}</code></p>
-    <p>TCP: <code>{tcpIp}:{tcpPort}</code></p>
+    <div class="centered">
+        <button popovertarget="help">🛳️ <big>Help</big> 🛳️</button>
+    </div>
+    
+    {#if userOS === 'Windows'}
+        <p>Prerequisite: <strong><a href="https://google.com/" target="_blank">NMEA tracker server (for Windows systems)</a></strong></p>
+    {:else if userOS === 'Linux'}
+        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/1pzHIIKMDEre_g3w9lvyu1jAnnLOTRjyh/view?usp=sharing" target="_blank">NMEA tracker server (for Linux systems)</a></strong></p>
+    {:else if userOS === 'macOS'}
+        <p>Prerequisite: <strong><a href="https://google.com/" target="_blank">NMEA tracker server (for macOS systems)</a></strong></p>
+    {:else}
+        <p>Prerequisite: <strong><a href="https://google.com/" target="_blank">NMEA tracker server</a></strong></p>
+    {/if}
+    <p>Configure the server: <a href="{route}/config.html" target="_blank">Configuration</a></p>
+    <p>Test the server: <a href="{route}" target="_blank"><code>Testing</code></a></p>
+    <!-- <p>UDP: <code>{udpIp}:{udpPort}</code></p> -->
+    <!-- <p>TCP: <code>{tcpIp}:{tcpPort}</code></p> -->
     <!-- <p>Request from: <strong>{requestIp}</strong></p> -->
 
     <hr />
@@ -103,6 +114,20 @@
     const VESSEL = 'YOUR BOAT';
     let requestIp = location.hostname;
     let route = 'https://localhost:5000'; // Replace with your NMEA server URL
+    
+    // Detect user's operating system
+    function detectOSAdvanced() {
+        const userAgent = navigator.userAgent.toLowerCase();
+        if (userAgent.includes('windows nt')) return 'Windows';
+        if (userAgent.includes('mac os')) return 'macOS';
+        if (userAgent.includes('linux')) return 'Linux';
+        if (userAgent.includes('android')) return 'Android';
+        if (userAgent.includes('iphone') || userAgent.includes('ipad')) return 'iOS';
+        return 'Unknown';
+    }
+
+    const userOS = detectOSAdvanced();
+    console.log('User OS detected:', userOS);
     let latitudesal: number | null = null, latDirection: string | null = null;
     let longitudesal: number | null = null, lonDirection: string | null = null;
     let latitude: number | null = null;
@@ -813,6 +838,7 @@
     .centered {
         display: flex;
         justify-content: center;
+        text-align: center;
         align-items: center;
     }
     /* Styles for links */
