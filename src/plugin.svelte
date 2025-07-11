@@ -34,6 +34,10 @@
         Vessel name:
         <input type="text" bind:value={vesselName} />
     </label>
+    <label class="centered">
+        Your MMSI:
+        <input type="text" bind:value={myMMSI} placeholder="e.g. 123456789" maxlength="9" />
+    </label>
     <p></p>
     <div class="centered">
         <button popovertarget="help">🛳️ <big>Help</big> 🛳️</button>
@@ -82,6 +86,11 @@
         {isConnected ? ' Connected' : ' Disconnected'}
       </span>
     </p>
+    {#if myMMSI}
+    <p class="mmsi-state">
+      🆔 MMSI: {myMMSI} {isValidMMSI(myMMSI) ? '✅' : '❌ Invalid format'}
+    </p>
+    {/if}
     <div id="footer">
       <center>
         <p>© 2025 Capt S. DEBRAY</p>
@@ -150,6 +159,7 @@
 
     let socket: any = null;
     let markerLayer: any = null;
+    let aisShipsLayer: any = null; // Layer for AIS ships
     let boatPath: any = null;
     let projectionArrow: any = null;
     let headingArrow: any = null;
@@ -157,17 +167,26 @@
     let forecastLabel: any = null;
     let pathLatLngs: any[] = [];
     let openedPopup: any = null;
+    let aisShips: { [mmsi: string]: any } = {}; // Store AIS ships data
 
     let udpIp = '0.0.0.0';
     let udpPort = 5005;
     let tcpIp = '0.0.0.0';
     let tcpPort = 5006;
+    let myMMSI = ''; // Our own MMSI for comparison
 
     let aisFragments: { [key: string]: { total: number, received: number, payloads: string[] } } = {};
     let unsubscribeTimeline: (() => void) | null = null;
     let projectionHours: number | null = null; // for projection
     let isConnected: boolean = false; // WebSocket connection status
     let connectionLostTimer: number | null = null; // Timer for connection lost alert
+
+    /**
+     * Validates MMSI format (9 digits)
+     */
+    function isValidMMSI(mmsi: string): boolean {
+        return /^\d{9}$/.test(mmsi);
+    }
 
     /**
      * Processes each received NMEA/AIS frame.
@@ -241,6 +260,15 @@
             if (aisPayload) {
                 const bitstring = ais6bitDecode(aisPayload);
                 const mmsi = parseInt(bitstring.slice(8, 38), 2);
+                
+                // Store our own MMSI for comparison if not manually set
+                if (!myMMSI || !isValidMMSI(myMMSI)) {
+                    myMMSI = mmsi.toString();
+                }
+                
+                // Check if this is our own vessel (either manual MMSI or auto-detected)
+                const isOwnVessel = (myMMSI && mmsi.toString() === myMMSI);
+                
                 // Message type (first 6 bits)
                 const msgType = parseInt(bitstring.slice(0, 6), 2);
                 // For messages 1, 2, 3 (position)
@@ -267,7 +295,7 @@
             }
             return;
         }
-        // AIVDM (VDM) decoding
+        // AIVDM (VDM) decoding - External AIS ships
         if (data.startsWith('!') && data.includes('AIVDM')) {
             const parts = data.split(',');
             const total = parseInt(parts[1]);
@@ -288,12 +316,13 @@
                 if (aisFragments[fragKey].received === total) {
                     const fullPayload = aisFragments[fragKey].payloads.join('');
                     delete aisFragments[fragKey];
-                    decodeAISType5(fullPayload);
+                    decodeAISMessage(fullPayload);
                 }
             } else {
                 // Non-fragmented message
-                decodeAISType5(aisPayload);
+                decodeAISMessage(aisPayload);
             }
+            return; // Don't process as own ship data
         }
 
         // Position variables update
@@ -333,14 +362,148 @@
     }
 
     /**
-     * Decodes an AIS type 5 message (vessel name, etc.)
+     * Creates an AIS ship icon
      */
-    function decodeAISType5(aisPayload: string) {
+    function createAISShipIcon(heading: number, shipType: number = 0): any {
+        let color = '#ff6600'; // Default orange
+        let size = 16;
+        
+        // Color based on ship type (AIS ship and cargo type)
+        if (shipType >= 70 && shipType <= 79) color = '#ff0000'; // Cargo ships - red
+        else if (shipType >= 60 && shipType <= 69) color = '#0066ff'; // Passenger ships - blue
+        else if (shipType >= 80 && shipType <= 89) color = '#00cc00'; // Tanker ships - green
+        else if (shipType >= 30 && shipType <= 39) color = '#8800ff'; // Fishing vessels - purple
+        else if (shipType >= 40 && shipType <= 49) color = '#ffcc00'; // High speed craft - yellow
+        
+        const iconHtml = `
+            <div class="ais-ship-icon" style="
+                width: ${size}px; 
+                height: ${size}px; 
+                transform: rotate(${heading}deg);
+                transform-origin: center center;
+            ">
+                <svg width="${size}" height="${size}" viewBox="0 0 24 24">
+                    <path d="M12 2L4 12h16L12 2z" fill="${color}" stroke="#000" stroke-width="1"/>
+                </svg>
+            </div>
+        `;
+        
+        return L.divIcon({
+            html: iconHtml,
+            className: 'ais-ship-marker',
+            iconSize: [size, size],
+            iconAnchor: [size/2, size/2]
+        });
+    }
+
+    /**
+     * Updates or adds an AIS ship on the map
+     */
+    function updateAISShip(mmsi: string, data: any) {
+        if (!aisShipsLayer) return;
+        
+        const shipKey = mmsi.toString();
+        const position = L.latLng(data.lat, data.lon);
+        
+        // Remove existing marker if it exists
+        if (aisShips[shipKey] && aisShips[shipKey].marker) {
+            aisShipsLayer.removeLayer(aisShips[shipKey].marker);
+        }
+        
+        // Create new marker
+        const icon = createAISShipIcon(data.cog || 0, data.shipType || 0);
+        const marker = L.marker(position, { icon }).addTo(aisShipsLayer);
+        
+        // Create tooltip content
+        const tooltipContent = `
+            <strong>MMSI: ${mmsi}</strong><br>
+            Name: ${data.name || 'Unknown'}<br>
+            Course: ${data.cog?.toFixed(1) || 'N/A'}°<br>
+            Speed: ${data.sog?.toFixed(1) || 'N/A'} knots<br>
+            Type: ${getShipTypeName(data.shipType || 0)}
+        `;
+        
+        marker.bindTooltip(tooltipContent, { 
+            permanent: false, 
+            direction: 'top', 
+            className: 'ais-ship-tooltip' 
+        });
+        
+        // Store ship data
+        aisShips[shipKey] = {
+            marker: marker,
+            data: data,
+            lastUpdate: Date.now()
+        };
+    }
+
+    /**
+     * Get ship type name from AIS ship type code
+     */
+    function getShipTypeName(shipType: number): string {
+        if (shipType >= 70 && shipType <= 79) return 'Cargo';
+        if (shipType >= 60 && shipType <= 69) return 'Passenger';
+        if (shipType >= 80 && shipType <= 89) return 'Tanker';
+        if (shipType >= 30 && shipType <= 39) return 'Fishing';
+        if (shipType >= 40 && shipType <= 49) return 'High Speed';
+        if (shipType >= 20 && shipType <= 29) return 'Wing in Ground';
+        if (shipType >= 50 && shipType <= 59) return 'Special Craft';
+        if (shipType >= 90 && shipType <= 99) return 'Other';
+        return 'Unknown';
+    }
+
+    /**
+     * Clean up old AIS ships (older than 10 minutes)
+     */
+    function cleanupOldAISShips() {
+        const now = Date.now();
+        const maxAge = 10 * 60 * 1000; // 10 minutes
+        
+        Object.keys(aisShips).forEach(mmsi => {
+            if (now - aisShips[mmsi].lastUpdate > maxAge) {
+                if (aisShips[mmsi].marker) {
+                    aisShipsLayer.removeLayer(aisShips[mmsi].marker);
+                }
+                delete aisShips[mmsi];
+            }
+        });
+    }
+    function decodeAISMessage(aisPayload: string) {
         if (!aisPayload) return;
         const bitstring = ais6bitDecode(aisPayload);
         const msgType = parseInt(bitstring.slice(0, 6), 2);
-        if (msgType === 5) {
-            // Le nom du navire est sur 120 bits à partir du bit 112 (28*6 bits)
+        const mmsi = parseInt(bitstring.slice(8, 38), 2).toString(); // Extract MMSI from payload
+        
+        // Check if this is our own vessel
+        const isOwnVessel = (myMMSI && isValidMMSI(myMMSI) && mmsi === myMMSI);
+        
+        if (msgType === 1 || msgType === 2 || msgType === 3) {
+            // Position Report (Class A)
+            const lat = (parseInt(bitstring.slice(89, 116), 2) - 134217728) / 600000;
+            const lon = (parseInt(bitstring.slice(61, 89), 2) - 134217728) / 600000;
+            const cog = parseInt(bitstring.slice(116, 128), 2) / 10; // Course over ground
+            const sog = parseInt(bitstring.slice(50, 60), 2) / 10; // Speed over ground
+            const heading = parseInt(bitstring.slice(128, 137), 2); // True heading
+            
+            if (lat !== 91 && lon !== 181) { // Valid coordinates
+                if (isOwnVessel) {
+                    // This is our own vessel - update our position data
+                    gpsData = `AIS MMSI: ${mmsi} (Own vessel)\nLat: ${lat.toFixed(5)}\nLon: ${lon.toFixed(5)}\nCOG: ${cog}°\nSOG: ${sog} nds`;
+                    addBoatMarker(lat, lon, cog);
+                    myLatitude = lat.toFixed(5);
+                    myLongitude = lon.toFixed(5);
+                    myCourseOverGroundT = cog;
+                    mySpeedOverGround = sog;
+                    lastLatitude = lat;
+                    lastLongitude = lon;
+                } else {
+                    // This is an external vessel - add to AIS ships
+                    updateAISShip(mmsi, { lat, lon, cog, sog, heading });
+                }
+            }
+        } else if (msgType === 5) {
+            // Static and Voyage Related Data
+            const shipType = parseInt(bitstring.slice(232, 240), 2);
             let nameBits = bitstring.slice(112, 232);
             let name = '';
             for (let i = 0; i < nameBits.length; i += 6) {
@@ -348,7 +511,19 @@
                 name += aisAscii(charCode);
             }
             name = name.replace(/@+$/, '').trim();
-            vesselName = name;
+            
+            if (isOwnVessel) {
+                // This is our own vessel - update vessel name
+                vesselName = name;
+            } else {
+                // This is an external vessel - store static data
+                if (!aisShips[mmsi]) {
+                    aisShips[mmsi] = { marker: null, lastUpdate: Date.now() };
+                }
+                aisShips[mmsi].name = name;
+                aisShips[mmsi].shipType = shipType;
+                aisShips[mmsi].lastUpdate = Date.now();
+            }
         }
     }
     
@@ -694,6 +869,12 @@
         // Initialize marker layer when component mounts and map is available
         markerLayer = L.layerGroup().addTo(map);
         
+        // Initialize AIS ships layer
+        aisShipsLayer = L.layerGroup().addTo(map);
+        
+        // Start cleanup timer for old AIS ships (every 5 minutes)
+        setInterval(cleanupOldAISShips, 5 * 60 * 1000);
+        
         // @ts-ignore: socket.io injected via global script
         socket = io(route, {
             transports: ['websocket'],
@@ -784,6 +965,7 @@
         }
         openedPopup?.remove();
         markerLayer.clearLayers();
+        aisShipsLayer?.clearLayers(); // Clear AIS ships layer
         boatPath?.remove();
         projectionArrow?.remove();
         forecastIcon?.remove();
@@ -827,6 +1009,11 @@
     .disconnected {
         color: red;
     }
+    .mmsi-state {
+        margin-top: 10px;
+        font-weight: bold;
+        color: #0066cc;
+    }
     .plugin-container {
         padding: 10px;
         font-family: Arial, sans-serif;
@@ -860,6 +1047,21 @@
         height: 100px;
         position: absolute;
         bottom: 0px;
+    }
+    
+    /* AIS Ship marker styles */
+    .ais-ship-marker {
+        background: transparent !important;
+        border: none !important;
+    }
+    
+    .ais-ship-icon {
+        cursor: pointer;
+        z-index: 1000;
+    }
+    
+    .ais-ship-icon svg {
+        filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.3));
     }
 </style>
 
