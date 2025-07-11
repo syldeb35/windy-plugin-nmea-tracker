@@ -30,12 +30,12 @@
     </button>
 
     
-    <label>
+    <label class="centered">
         Vessel name:
         <input type="text" bind:value={vesselName} />
     </label>
     <p></p>
-    <button popovertarget="help">🛳️ <big>Help</big> 🛳️</button>
+    <button class="centered" popovertarget="help">🛳️ <big>Help</big> 🛳️</button>
 
     <p>The <a href="{route}/config.html" target="_blank">NMEA server</a> must be accessible at:</p>
     <p><a href="{route}" target="_blank"><code>{route}</code></a></p>
@@ -810,7 +810,11 @@
         height: 100%;
         overflow-y: auto;
     }
-    
+    .centered {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
     /* Styles for links */
     a {
         color: #4db8ff;
@@ -825,7 +829,7 @@
     a:visited {
         color: #b366ff;
     }
-    
+    /* Styles for the footer */
     #footer{
         height: 100px;
         position: absolute;
