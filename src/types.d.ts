@@ -10,6 +10,7 @@ declare module '@windy/interfaces' {
         desktopUI: string;
         mobileUI: string;
         routerPath: string;
+        private: boolean;
     }
 }
 

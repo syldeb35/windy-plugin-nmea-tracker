@@ -2,7 +2,7 @@ import type { ExternalPluginConfig } from '@windy/interfaces';
 
 const config: ExternalPluginConfig = {
     name: 'windy-plugin-nmea-tracker',
-    version: '1.0.1',
+    version: '1.0.2',
     title: 'NMEA tracker plugin',
     icon: '🛰️',
     description: 'NMEA tracker plugin.',
@@ -10,7 +10,13 @@ const config: ExternalPluginConfig = {
     repository: 'https://github.com/syldeb35/windy-plugin-nmea-tracker',
     desktopUI: 'rhpane',
     mobileUI: 'fullscreen',
+    //desktopUI: 'embedded',
+    //mobileUI: 'small',
     routerPath: '/nmea-tracker',
+    private: true,
+    // This plugin is private and not intended for public use.
+    // It is used internally by CMA CGM for testing purposes.
+    // It is not available in the Windy plugin store.
 };
 
 export default config;

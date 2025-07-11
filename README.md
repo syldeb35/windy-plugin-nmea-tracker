@@ -37,3 +37,8 @@ Navigation, fleet tracking, onboard weather monitoring, or experimenting with re
 
 - 1.0.0
   - Initial version of this plugin
+- 1.0.1
+  - Bugfix
+- 1.0.2
+  - UI review
+  - AIS parser completed

@@ -30,10 +30,10 @@
     </button>
 
     
-    <label class="centered">
+    <!-- <label class="centered">
         Vessel name:
         <input type="text" bind:value={vesselName} />
-    </label>
+    </label> -->
     <label class="centered">
         Your MMSI:
         <input type="text" bind:value={myMMSI} placeholder="e.g. 123456789" maxlength="9" />
@@ -44,11 +44,15 @@
     </div>
     
     {#if userOS === 'Windows'}
-        <p>Prerequisite: <strong><a href="https://google.com/" target="_blank">NMEA tracker server (for Windows systems)</a></strong></p>
+        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/1vaJohWpDq1b_FuU6mT2mOA_baj7ATbTm/view?usp=sharing" target="_blank">NMEA tracker server (for Windows systems)</a></strong></p>
     {:else if userOS === 'Linux'}
-        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/1pzHIIKMDEre_g3w9lvyu1jAnnLOTRjyh/view?usp=sharing" target="_blank">NMEA tracker server (for Linux systems)</a></strong></p>
-    {:else if userOS === 'macOS'}
-        <p>Prerequisite: <strong><a href="https://google.com/" target="_blank">NMEA tracker server (for macOS systems)</a></strong></p>
+        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/1gtHy7I55g-o26V-Ryx_oOifvlxGAqIF6/view?usp=sharing" target="_blank">NMEA tracker server (for Linux systems)</a></strong></p>
+    {:else if userOS.includes('macOS') && userOS.includes('Intel')}
+        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/1ZYDc7i_ycNmofew59UrqXeudNZktawbx/view?usp=sharing" target="_blank">NMEA tracker server (for macOS Intel)</a></strong></p>
+    {:else if userOS.includes('macOS') && userOS.includes('Apple Silicon')}
+        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/1N0-qNmHeDdbN0TmdcHszFqZVkFIdSrCW/view?usp=sharing" target="_blank">NMEA tracker server (for macOS Apple Silicon)</a></strong></p>
+    {:else if userOS.includes('macOS')}
+        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/1N0-qNmHeDdbN0TmdcHszFqZVkFIdSrCW/view?usp=sharing" target="_blank">NMEA tracker server (for macOS)</a></strong></p>
     {:else}
         <p>Prerequisite: <strong><a href="https://google.com/" target="_blank">NMEA tracker server</a></strong></p>
     {/if}
@@ -91,20 +95,33 @@
       🆔 MMSI: {myMMSI} {isValidMMSI(myMMSI) ? '✅' : '❌ Invalid format'}
     </p>
     {/if}
+    <p class="debug-info" style="font-size: 12px; color: #666; margin-top: 5px;">
+      💻 Detected OS: {userOS}
+    </p>
+    <div class="error" id="err">
+        <p></p>
+    </div>
     <div id="footer">
       <center>
         <p>© 2025 Capt S. DEBRAY</p>
         <p><a href="https://github.com/syldeb35/windy-plugin-nmea-tracker" target="_blank">🛳️ Sources and info 🛳️</a></p>
       </center>
     </div>
-    <div class="error" id="err">
-        <p></p>
-    </div>
 </section>
 
 
 
 <script lang="ts">
+    // Type declaration for modern Navigator API
+    declare global {
+        interface Navigator {
+            userAgentData?: {
+                platform?: string;
+                getHighEntropyValues?: (hints: string[]) => Promise<{architecture?: string}>;
+            };
+            deviceMemory?: number;
+        }
+    }
     import bcast from "@windy/broadcast";
     import { onMount, onDestroy } from 'svelte';
     import { map } from '@windy/map';
@@ -124,14 +141,86 @@
     let requestIp = location.hostname;
     let route = 'https://localhost:5000'; // Replace with your NMEA server URL
     
-    // Detect user's operating system
+    // Detect user's operating system with detailed macOS detection
     function detectOSAdvanced() {
         const userAgent = navigator.userAgent.toLowerCase();
-        if (userAgent.includes('windows nt')) return 'Windows';
-        if (userAgent.includes('mac os')) return 'macOS';
+        
+        if (userAgent.includes('windows nt')) {
+            return 'Windows';
+        }
+        
+        if (userAgent.includes('mac os')) {
+            // More detailed macOS detection
+            const macOSMatch = userAgent.match(/mac os x (\d+)[_.](\d+)/);
+            let macVersion = '';
+            let architecture = '';
+            
+            if (macOSMatch) {
+                const majorVersion = parseInt(macOSMatch[1]);
+                const minorVersion = parseInt(macOSMatch[2]);
+                
+                // macOS version mapping
+                if (majorVersion === 10) {
+                    if (minorVersion >= 15) macVersion = 'macOS Catalina+';
+                    else macVersion = 'macOS Legacy';
+                    architecture = 'Intel'; // macOS 10.x is always Intel
+                } else if (majorVersion >= 11) {
+                    macVersion = `macOS ${majorVersion}`;
+                    
+                    // Detect architecture - multiple methods
+                    if (userAgent.includes('arm') || userAgent.includes('apple silicon')) {
+                        architecture = 'Apple Silicon';
+                    } else if (userAgent.includes('intel') || userAgent.includes('x86')) {
+                        architecture = 'Intel';
+                    } else {
+                        // Try to detect via modern APIs (newer browsers)
+                        try {
+                            if (navigator.userAgentData && navigator.userAgentData.platform) {
+                                const platform = navigator.userAgentData.platform.toLowerCase();
+                                if (platform === 'macos') {
+                                    // Use CPU info to determine architecture if available
+                                    navigator.userAgentData.getHighEntropyValues?.(['architecture']).then((ua) => {
+                                        architecture = ua.architecture === 'arm' ? 'Apple Silicon' : 'Intel';
+                                    }).catch(() => {
+                                        architecture = 'Unknown';
+                                    });
+                                } else {
+                                    architecture = 'Unknown';
+                                }
+                            } else {
+                                // Alternative: Use hardware concurrency and other hints
+                                const cores = navigator.hardwareConcurrency || 0;
+                                const memory = navigator.deviceMemory || 0;
+                                
+                                // Apple Silicon Macs typically have 8+ cores and high memory
+                                // This is a heuristic, not foolproof
+                                if (cores >= 8 && memory >= 8) {
+                                    architecture = 'Likely Apple Silicon';
+                                } else if (cores > 0) {
+                                    architecture = 'Likely Intel';
+                                } else {
+                                    architecture = 'Unknown';
+                                }
+                            }
+                        } catch {
+                            architecture = 'Unknown';
+                        }
+                    }
+                }
+                
+                return `${macVersion} (${architecture})`;
+            }
+            
+            // Fallback for macOS detection
+            if (userAgent.includes('intel')) return 'macOS (Intel)';
+            if (userAgent.includes('arm')) return 'macOS (Apple Silicon)';
+            return 'macOS';
+        }
+        
         if (userAgent.includes('linux')) return 'Linux';
         if (userAgent.includes('android')) return 'Android';
         if (userAgent.includes('iphone') || userAgent.includes('ipad')) return 'iOS';
+        
         return 'Unknown';
     }
 
