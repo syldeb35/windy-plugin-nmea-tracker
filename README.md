@@ -42,3 +42,4 @@ Navigation, fleet tracking, onboard weather monitoring, or experimenting with re
 - 1.0.2
   - UI review
   - AIS parser completed
+  - Various bugfix

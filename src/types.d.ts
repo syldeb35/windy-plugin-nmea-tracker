@@ -1,3 +1,16 @@
+// Global Navigator API extensions
+export {};
+declare global {
+    interface Navigator {
+        userAgentData?: {
+            platform?: string;
+            getHighEntropyValues?: (hints: string[]) => Promise<{architecture?: string}>;
+        };
+        deviceMemory?: number;
+    }
+}
+
+// Windy plugin interfaces and module declarations
 declare module '@windy/interfaces' {
     export interface ExternalPluginConfig {
         name: string;

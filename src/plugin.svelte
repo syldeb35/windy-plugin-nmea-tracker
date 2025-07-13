@@ -64,9 +64,9 @@
 
     <hr />
 
-    {#if gpsData}
-        <p><strong>Last received NMEA frame:</strong></p>
-        <pre>{gpsData}</pre>
+    {#if nmeaHistory.length > 0}
+        <p><strong>Last received NMEA frames:</strong></p>
+        <p class="nmea-types">{nmeaHistory.join(', ')}</p>
         <p><strong>Latitude:</strong> {myLatitude}</p>
         <p><strong>Longitude:</strong> {myLongitude}</p>
         <p><strong>Course over ground:</strong> {myCourseOverGroundT}</p>
@@ -112,22 +112,12 @@
 
 
 <script lang="ts">
-    // Type declaration for modern Navigator API
-    declare global {
-        interface Navigator {
-            userAgentData?: {
-                platform?: string;
-                getHighEntropyValues?: (hints: string[]) => Promise<{architecture?: string}>;
-            };
-            deviceMemory?: number;
-        }
-    }
     import bcast from "@windy/broadcast";
     import { onMount, onDestroy } from 'svelte';
     import { map } from '@windy/map';
     import { getLatLonInterpolator } from '@windy/interpolator';
     import { overlaySettings } from '@windy/config';
-    import { wind2obj } from '@windy/utils';
+    import { wind2obj, wave2obj } from '@windy/utils';
     import store from '@windy/store';
     import metrics from '@windy/metrics';
     import io from './socket.io.min.js';
@@ -138,7 +128,6 @@
     
     const title = 'NMEA tracker plugin';
     const VESSEL = 'YOUR BOAT';
-    let requestIp = location.hostname;
     let route = 'https://localhost:5000'; // Replace with your NMEA server URL
     
     // Detect user's operating system with detailed macOS detection
@@ -175,11 +164,13 @@
                     } else {
                         // Try to detect via modern APIs (newer browsers)
                         try {
-                            if (navigator.userAgentData && navigator.userAgentData.platform) {
-                                const platform = navigator.userAgentData.platform.toLowerCase();
+                            // Use type assertion for experimental APIs
+                            const nav = navigator as any;
+                            if (nav.userAgentData && nav.userAgentData.platform) {
+                                const platform = nav.userAgentData.platform.toLowerCase();
                                 if (platform === 'macos') {
                                     // Use CPU info to determine architecture if available
-                                    navigator.userAgentData.getHighEntropyValues?.(['architecture']).then((ua) => {
+                                    nav.userAgentData.getHighEntropyValues?.(['architecture']).then((ua: any) => {
                                         architecture = ua.architecture === 'arm' ? 'Apple Silicon' : 'Intel';
                                     }).catch(() => {
                                         architecture = 'Unknown';
@@ -190,7 +181,7 @@
                             } else {
                                 // Alternative: Use hardware concurrency and other hints
                                 const cores = navigator.hardwareConcurrency || 0;
-                                const memory = navigator.deviceMemory || 0;
+                                const memory = (navigator as any).deviceMemory || 0;
                                 
                                 // Apple Silicon Macs typically have 8+ cores and high memory
                                 // This is a heuristic, not foolproof
@@ -232,7 +223,8 @@
     let longitude: number | null = null;
     let myLatitude: string | null = null;
     let myLongitude: string | null = null;
-    let gpsData = 'No data received yet...';
+    let data = 'No data received yet...';
+    let nmeaHistory: string[] = []; // Store last 10 NMEA frame types
     let lastLatitude: number | null = null;
     let lastLongitude: number | null = null;
     let courseOverGroundT: number = 0; // True
@@ -243,7 +235,7 @@
     let speedOverGround: number = 0; // In knots
     let mySpeedOverGround: number = 0; // In knots
     let heurePrev: number | null = null; // for projection
-    let followShip = true;
+    let followShip = false; // do not follow ship by default
     let vesselName = VESSEL;
 
     let socket: any = null;
@@ -269,6 +261,27 @@
     let projectionHours: number | null = null; // for projection
     let isConnected: boolean = false; // WebSocket connection status
     let connectionLostTimer: number | null = null; // Timer for connection lost alert
+    let lastError: string = ''; // Store the last error to persist until valid frame
+    let lastFrameReceived: number = Date.now(); // Timestamp of last received frame
+    let noFrameTimer: number | null = null; // Timer for no frame detection
+
+    /**
+     * Adds NMEA frame type to history (keep last 10)
+     */
+    function addToNmeaHistory(frame: string) {
+        // Only add frames that start with $ (standard NMEA) or ! (AIS)
+        if (frame.startsWith('$') || frame.startsWith('!')) {
+            // Extract frame type (e.g., $GPGGA -> $GPGGA)
+            const frameType = frame.split(',')[0];
+            
+            nmeaHistory.unshift(frameType); // Add to beginning
+            if (nmeaHistory.length > 10) {
+                nmeaHistory.pop(); // Remove oldest if more than 10
+            }
+            // Update reactive variable to trigger UI update
+            nmeaHistory = [...nmeaHistory];
+        }
+    }
 
     /**
      * Validates MMSI format (9 digits)
@@ -282,35 +295,54 @@
      * Updates position, speed, heading, vessel name, etc.
      */
     function processNMEA(data: string) {
+        // Reset the no frame timer since we received a frame
+        resetNoFrameTimer();
+        
         if (!(data.startsWith('$') || data.startsWith('!'))) {
-            document.getElementById("err")!.innerHTML = "<p>Invalid NMEA frame</p>";
-            return;
+            lastError = "[Err] Invalid NMEA frame";
+            return lastError;
         }
+        
+        // Add frame to history
+        addToNmeaHistory(data);
+        
         const parts = data.split(',');
 
         // Decoding classic GPS frames
         if (data.includes('GLL')) {
             if (parts.length < 6) {
-                document.getElementById("err")!.innerHTML = "<p>Invalid GLL frame</p>"
-                return;
+                lastError = "[Err] Invalid GLL frame - insufficient parts";
+                return lastError;
+            }
+            if (parts[6] === 'V') {
+                lastError = "[Err] Invalid GLL frame - status invalid";
+                return lastError;
             }
             latitudesal = parseFloat(parts[1]);
             latDirection = parts[2];
             longitudesal = parseFloat(parts[3]);
             lonDirection = parts[4];
         } else if (data.includes('GGA')) {
-            if (parts[6] === 'V') {
-                document.getElementById("err")!.innerHTML = "<p>Invalid GGA frame</p>"
-                return;
+            if (parts.length < 7) {
+                lastError = "[Err] Invalid GGA frame - insufficient parts";
+                return lastError;
+            }
+            if (parts[6] === '0' || parts[6] === 'V') {
+                lastError = "[Err] Invalid GGA frame - no GPS fix";
+                return lastError;
             }
             latitudesal = parseFloat(parts[2]);
             latDirection = parts[3];
             longitudesal = parseFloat(parts[4]);
             lonDirection = parts[5];
         } else if (data.includes('RMC')) {
+            if (parts.length < 9) {
+                lastError = "[Err] Invalid RMC frame - insufficient parts";
+                return lastError;
+            }
             if (parts[2] === 'V') {
-                document.getElementById("err")!.innerHTML = "<p>Invalid RMC frame</p>"
-                return;
+                lastError = "[Err] Invalid RMC frame - status invalid";
+                return lastError;
             }
             latitudesal = parseFloat(parts[3]);
             latDirection = parts[4];
@@ -319,6 +351,10 @@
             speedOverGround = parseFloat(parts[7]);
             courseOverGroundT = parseFloat(parts[8]);
         } else if (data.includes('VTG')) {
+            if (parts.length < 6) {
+                lastError = "[Err] Invalid VTG frame - insufficient parts";
+                return lastError;
+            }
             courseOverGroundT = parseFloat(parts[1]);
             if (parts[2] === 'T') {
                 courseOverGroundM = parseFloat(parts[3]);
@@ -332,19 +368,31 @@
                 // To be processed: $HCHDM
             }
         } else if (data.includes('HDG')) {
+            if (parts.length < 5) {
+                lastError = "[Err] Invalid HDG frame - insufficient parts";
+                return lastError;
+            }
             courseOverGroundM = parseFloat(parts[1]);
             varM = parseFloat(parts[4]);
         } else if (data.includes('HDT')) {
+            if (parts.length < 2) {
+                lastError = "[Err] Invalid HDT frame - insufficient parts";
+                return lastError;
+            }
             trueHeading = parseFloat(parts[1]);
         } else {
-            document.getElementById("err")!.innerHTML = "<p>No data received</p>";
-            return;
+            // Not an error, just unsupported frame type
+            return ""; // Return empty string for unsupported but valid frames
         }
 
         // Basic AIVDO (VDO) decoding
         if (data.startsWith('!') && data.includes('VDO')) {
             // Example: !AIVDO,1,1,,B,13aG?P0P00PD;88MD5MTDww@2D0k,0*7C
             // Here, the AIS payload is in parts[5]
+            if (parts.length < 6) {
+                lastError = "[Err] Invalid AIS VDO frame - insufficient parts";
+                return lastError;
+            }
             const aisPayload = parts[5];
             if (aisPayload) {
                 const bitstring = ais6bitDecode(aisPayload);
@@ -370,7 +418,7 @@
                     lon = lon / 600000.0;
                     const cog = parseInt(bitstring.slice(116, 128), 2) / 10.0;
                     const sog = parseInt(bitstring.slice(50, 60), 2) / 10.0;
-                    gpsData = `AIS VDO MMSI: ${mmsi}\nLat: ${lat.toFixed(5)}\nLon: ${lon.toFixed(5)}\nCOG: ${cog}°\nSOG: ${sog} nds`;
+                    data = `AIS VDO MMSI: ${mmsi}\nLat: ${lat.toFixed(5)}\nLon: ${lon.toFixed(5)}\nCOG: ${cog}°\nSOG: ${sog} nds`;
                     addBoatMarker(lat, lon, cog);
                     myLatitude = lat.toFixed(5);
                     myLongitude = lon.toFixed(5);
@@ -378,15 +426,22 @@
                     mySpeedOverGround = sog;
                     lastLatitude = lat;
                     lastLongitude = lon;
+                    // Clear error on successful AIS processing
+                    lastError = '';
+                    clearErrorDisplay();
                 } else {
-                    gpsData = `AIS VDO MMSI: ${mmsi} (type ${msgType})`;
+                    data = `AIS VDO MMSI: ${mmsi} (type ${msgType})`;
                 }
             }
-            return;
+            return '';
         }
         // AIVDM (VDM) decoding - External AIS ships
         if (data.startsWith('!') && data.includes('AIVDM')) {
             const parts = data.split(',');
+            if (parts.length < 6) {
+                lastError = "[Err] Invalid AIS AIVDM frame - insufficient parts";
+                return lastError;
+            }
             const total = parseInt(parts[1]);
             const num = parseInt(parts[2]);
             const seq = parts[3]; // sequence identifier (can be empty)
@@ -411,7 +466,7 @@
                 // Non-fragmented message
                 decodeAISMessage(aisPayload);
             }
-            return; // Don't process as own ship data
+            return ''; // Don't process as own ship data
         }
 
         // Position variables update
@@ -442,12 +497,64 @@
         lastLatitude = newLat;
         lastLongitude = newLon;
         if (!Number.isNaN(newLat) && !Number.isNaN(newLon)) {
-            
-        addBoatMarker(newLat, newLon, myCourseOverGroundT);
-
+            addBoatMarker(newLat, newLon, myCourseOverGroundT);
+            // Clear error if position is valid
+            lastError = '';
+            clearErrorDisplay();
         }
-        // Clear potential errors
-        document.getElementById("err")!.innerHTML = "<p></p>";
+        
+        // Return empty string for successful processing
+        return '';
+    }
+
+    /**
+     * Clears the error display
+     */
+    function clearErrorDisplay() {
+        // Clear the no frame error specifically when valid data is received
+        if (lastError.includes("No NMEA frames received")) {
+            lastError = '';
+        }
+        const errorElement = document.getElementById("err");
+        if (errorElement) {
+            errorElement.innerHTML = "<p></p>";
+        }
+    }
+
+    /**
+     * Updates the error display with persistent error
+     */
+    function updateErrorDisplay() {
+        if (lastError) {
+            const errorElement = document.getElementById("err");
+            if (errorElement) {
+                errorElement.innerHTML = `<p class="error">${lastError}</p>`;
+            }
+        }
+    }
+
+    /**
+     * Starts the timer to detect no frame reception
+     */
+    function startNoFrameTimer() {
+        if (noFrameTimer) {
+            clearTimeout(noFrameTimer);
+        }
+        noFrameTimer = setTimeout(() => {
+            lastError = "[Err] No NMEA frames received for more than 1 minute";
+            updateErrorDisplay();
+        }, 60000); // 60 seconds
+    }
+
+    /**
+     * Resets the no frame timer (called when a frame is received)
+     */
+    function resetNoFrameTimer() {
+        lastFrameReceived = Date.now();
+        if (noFrameTimer) {
+            clearTimeout(noFrameTimer);
+        }
+        startNoFrameTimer();
     }
 
     /**
@@ -577,7 +684,7 @@
             if (lat !== 91 && lon !== 181) { // Valid coordinates
                 if (isOwnVessel) {
                     // This is our own vessel - update our position data
-                    gpsData = `AIS MMSI: ${mmsi} (Own vessel)\nLat: ${lat.toFixed(5)}\nLon: ${lon.toFixed(5)}\nCOG: ${cog}°\nSOG: ${sog} nds`;
+                    data = `AIS MMSI: ${mmsi} (Own vessel)\nLat: ${lat.toFixed(5)}\nLon: ${lon.toFixed(5)}\nCOG: ${cog}°\nSOG: ${sog} nds`;
                     addBoatMarker(lat, lon, cog);
                     myLatitude = lat.toFixed(5);
                     myLongitude = lon.toFixed(5);
@@ -585,6 +692,9 @@
                     mySpeedOverGround = sog;
                     lastLatitude = lat;
                     lastLongitude = lon;
+                    // Clear error on successful AIS processing of own vessel
+                    lastError = '';
+                    clearErrorDisplay();
                 } else {
                     // This is an external vessel - add to AIS ships
                     updateAISShip(mmsi, { lat, lon, cog, sog, heading });
@@ -746,8 +856,12 @@
 
             const overlay = store.get('overlay');
             const values = interpolator({ lat, lon });
-            let content = `<strong>${VESSEL}</strong><br>φ = ${displayLatitude(lat)}, λ= ${displayLongitude(lon)}<br>`;
-
+            let content = `<div style="text-align: center;"><strong>${vesselName}</strong><br>φ = ${displayLatitude(lat)}, λ= ${displayLongitude(lon)}</div>`;
+            if (projectionHours === 0) {
+                content += `<hr><div><small><strong>${overlay} actual forecast :</strong></small></div>`;
+            } else if (projectionHours > 0) {
+                content += `<hr><div><small><strong>${overlay} forecast in ${projectionHours} hours :</strong></small></div>`;
+            }
             if (!Array.isArray(values)) {
                 content += '❌ No interpolated data.';
                 popup.setContent(content);
@@ -758,29 +872,67 @@
                 const { dir, wind } = wind2obj(values);
                 const speed = metrics.wind.convertValue(wind);
                 content += `💨 Wind: ${speed}<br>🧭 Direction: ${dir} °`;
+
             } else if (overlay === 'waves') {
-                const waveHeight = metrics.waves.convertValue(values[0]);
-                const waveDir = Math.round(values[1]);
-                const wavePeriod = values[2].toFixed(1);
-                content += `🌊 Height: ${waveHeight} m<br>🧭 Direction: ${waveDir}°<br>⏱ Period: ${wavePeriod} s`;
+                const { period, dir } = wave2obj(values);
+                const waveHeight = metrics.waves.convertValue(values[2]);
+                const waveDir = ((dir % 360) + 360) % 360; // Normalize to 0-360°
+                const wavePeriod = period.toFixed(1);
+                content += `🌊 Height: ${waveHeight} <br>🧭 Direction: ${Math.round(waveDir)}°<br>⏱ Period: ${wavePeriod} s`;
+            
+            } else if (overlay === 'wwaves') {
+                const { period, dir } = wave2obj(values);
+                const waveHeight = metrics.waves.convertValue(values[2]);
+                const waveDir = ((dir % 360) + 360) % 360; // Normalize to 0-360°
+                const wavePeriod = period.toFixed(1);
+                content += `🌊 Height: ${waveHeight} <br>🧭 Direction: ${Math.round(waveDir)}°<br>⏱ Period: ${wavePeriod} s`;
+            
             } else if (overlay === 'gust') {
                 const gust = metrics.wind.convertValue(values[0]);
-                content += `💨 Gusts: ${gust}`;
+                content += `💨 Gusts: ${gust} at ${Math.round(values[1])}m`;
+            
             } else if (overlay === 'rain') {
                 const rain = values[0].toFixed(2);
                 content += `🌧️ Rain: ${rain} mm/h`;
+            
             } else if (overlay === 'temp') {
                 const tempC = metrics.temp.convertValue(values[0]);
                 content += `🌡️ Temperature: ${tempC}`;
+            
             } else if (overlay === 'pressure') {
                 const Press = metrics.pressure.convertValue(values[0]);
                 content += `📉 Pressure: ${Press} hPa`;
+            
             } else if (overlay === 'clouds') {
                 content += `☁️ Cloud cover: ${Math.round(values[0])}%`;
+            
+            } else if (overlay === 'swell') {
+                const { swellHeight, swellDir, swellPeriod } = wave2obj(values);
+                content += `🌊 Swell height: ${swellHeight}<br>🧭 Direction: ${Math.round(swellDir)}°<br>⏱ Period: ${swellPeriod} s`;
+            
+            } else if (overlay === 'currents') {
+                const currentSpeed = Math.abs(values[0] * 1.944).toFixed(2); // Convert m/s to knots and take absolute value
+                const currentDir = ((values[1] % 360) + 360) % 360; // Normalize to 0-360°
+                content += `🌊 Current speed: ${currentSpeed} knots<br>🧭 Direction: ${Math.round(currentDir)}°`;
+            
+            } else if (overlay === 'tide') {
+                const tidalCurrentSpeed = Math.abs(values[0] * 1.944).toFixed(2); // Convert m/s to knots and take absolute value
+                const tidalCurrentDir = ((values[1] % 360) + 360) % 360; // Normalize to 0-360°
+                content += `🌊 Tidal current: ${tidalCurrentSpeed} knots<br>🧭 Direction: ${Math.round(tidalCurrentDir)}°`;
+            
+            } else if (overlay === 'swell1' || overlay === 'swell2' || overlay === 'swell3') {
+                const swellPeriod = values[0].toFixed(1);
+                const swellDir = ((values[1] % 360) + 360) % 360;
+                const swellHeight = metrics.waves.convertValue(values[2]);
+                const swellNum = overlay.slice(-1);
+                content += `🌊 Swell ${swellNum}: ${swellHeight}<br>🧭 Direction: ${Math.round(swellDir)}°<br>⏱ Period: ${swellPeriod} s`;
+            
             } else {
-                content += 'ℹ️ No weather data available for this layer.';
+                content += `ℹ️ No weather data available for ${overlay}.`;
             }
-            content += `<hr><small><strong>Forecast in ${projectionHours} hours :</strong><br> ${forecastDate.toUTCString()}<br>`;
+            // Add Windy API version and forecast date
+            content += `<hr><div style="text-align: right;"><small><strong>Forecast date : </strong>${forecastDate.toUTCString()}</small></div>`;
+            // Uncomment to display forecast date in the popup
             //content += `${forecastDate.toString()}</small>`;
             popup.setContent(content);
         });
@@ -964,6 +1116,9 @@
         // Start cleanup timer for old AIS ships (every 5 minutes)
         setInterval(cleanupOldAISShips, 5 * 60 * 1000);
         
+        // Start the no frame detection timer
+        startNoFrameTimer();
+        
         // @ts-ignore: socket.io injected via global script
         socket = io(route, {
             transports: ['websocket'],
@@ -980,13 +1135,20 @@
                 clearTimeout(connectionLostTimer);
                 connectionLostTimer = null;
             }
-            document.getElementById("err")!.innerHTML = "<p></p>"; // Clear any previous error
+            // Reset the no frame timer on connection
+            resetNoFrameTimer();
         });
 
         socket.on('disconnect', (reason: string) => {
             console.log('WebSocket disconnected:', reason);
             isConnected = false;
             document.getElementById("err")!.innerHTML = "<p>⚠️ Connection lost to NMEA server</p>";
+            
+            // Stop the no frame timer when disconnected (connection issue, not frame issue)
+            if (noFrameTimer) {
+                clearTimeout(noFrameTimer);
+                noFrameTimer = null;
+            }
             
             // Set a timer to show alert if disconnection persists
             connectionLostTimer = setTimeout(() => {
@@ -1010,6 +1172,8 @@
                 clearTimeout(connectionLostTimer);
                 connectionLostTimer = null;
             }
+            // Reset the no frame timer on reconnection
+            resetNoFrameTimer();
             document.getElementById("err")!.innerHTML = "<p>✅ Reconnected to NMEA server</p>";
             setTimeout(() => {
                 document.getElementById("err")!.innerHTML = "<p></p>";
@@ -1017,8 +1181,11 @@
         });
 
         socket.on('nmea_data', (data: string) => {
-            gpsData = data;
-            processNMEA(data);
+            let Result: string;
+            Result = processNMEA(data);
+            if (Result.startsWith('[Err]')) {
+                updateErrorDisplay();
+            }
         });
 
         // Subscribe to Windy timeline changes
@@ -1051,6 +1218,11 @@
         if (connectionLostTimer) {
             clearTimeout(connectionLostTimer);
             connectionLostTimer = null;
+        }
+        // Clear no frame timer
+        if (noFrameTimer) {
+            clearTimeout(noFrameTimer);
+            noFrameTimer = null;
         }
         openedPopup?.remove();
         markerLayer.clearLayers();
@@ -1151,6 +1323,19 @@
     
     .ais-ship-icon svg {
         filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.3));
+    }
+    
+    /* NMEA Types display */
+    .nmea-types {
+        background: #2a2a2a;
+        border-radius: 4px;
+        padding: 8px 12px;
+        margin: 8px 0;
+        color: #4db8ff;
+        font-family: 'Courier New', monospace;
+        font-size: 12px;
+        border: 1px solid #444;
+        word-break: break-all;
     }
 </style>
 
