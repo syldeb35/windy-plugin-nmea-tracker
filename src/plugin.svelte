@@ -69,8 +69,12 @@
         <p class="nmea-types">{nmeaHistory.join(', ')}</p>
         <p><strong>Latitude:</strong> {myLatitude}</p>
         <p><strong>Longitude:</strong> {myLongitude}</p>
-        <p><strong>Course over ground:</strong> {myCourseOverGroundT}</p>
-        <p><strong>Speed over ground:</strong> {mySpeedOverGround}</p>
+        <p><strong>Course over ground:</strong> 
+            {testModeEnabled ? `${testCOG}° (TEST)` : `${myCourseOverGroundT}°`}
+        </p>
+        <p><strong>Speed over ground:</strong> 
+            {testModeEnabled ? `${testSOG} knots (TEST)` : `${mySpeedOverGround} knots`}
+        </p>
 
         <div class="plugin__buttons">
             <button on:click={centerShip}>📍 Center on vessel</button>
@@ -98,6 +102,31 @@
     <p class="debug-info" style="font-size: 12px; color: #666; margin-top: 5px;">
       💻 Detected OS: {userOS}
     </p>
+    
+    <!-- Test Mode Controls -->
+    <hr />
+    <div class="test-mode-section">
+      <p style="font-weight: bold; margin-bottom: 10px;">🧪 Test Mode (for static vessel testing):</p>
+      <label class="centered">
+        <input type="checkbox" bind:checked={testModeEnabled} />
+        Enable test mode
+      </label>
+      {#if testModeEnabled}
+        <div style="margin-top: 10px;">
+          <label class="centered">
+            Test SOG (knots):
+            <input type="number" bind:value={testSOG} min="0" max="30" step="0.1" style="width: 80px;" />
+          </label>
+          <label class="centered">
+            Test COG (degrees):
+            <input type="number" bind:value={testCOG} min="0" max="360" step="1" style="width: 80px;" />
+          </label>
+          <p style="font-size: 12px; color: #666; margin-top: 5px;">
+            📝 Test values override real data for projections and weather forecasts
+          </p>
+        </div>
+      {/if}
+    </div>
     <div class="error" id="err">
         <p></p>
     </div>
@@ -265,6 +294,11 @@
     let errorList: string[] = []; // Store multiple errors
     let lastFrameReceived: number = Date.now(); // Timestamp of last received frame
     let noFrameTimer: number | null = null; // Timer for no frame detection
+
+    // Test mode variables for when vessel is stopped
+    let testModeEnabled: boolean = false; // Enable/disable test mode
+    let testSOG: number = 6; // Test Speed Over Ground in knots
+    let testCOG: number = 45; // Test Course Over Ground in degrees
 
     /**
      * Adds NMEA frame type to history (keep last 10)
@@ -954,26 +988,31 @@
             } else if (overlay === 'clouds') {
                 content += `☁️ Cloud cover: ${Math.round(values[0])}%`;
             
-            } else if (overlay === 'swell') {
-                const { swellHeight, swellDir, swellPeriod } = wave2obj(values);
-                content += `🌊 Swell height: ${swellHeight}<br>🧭 Direction: ${Math.round(swellDir)}°<br>⏱ Period: ${swellPeriod} s`;
+            } else if (overlay === 'tide') {
+                const tideHeight = values[0];
+                content += `🌊 Tide: ${tideHeight.toFixed(2)} m`;
             
             } else if (overlay === 'currents') {
-                const currentSpeed = Math.abs(values[0] * 1.944).toFixed(2); // Convert m/s to knots and take absolute value
-                const currentDir = ((values[1] % 360) + 360) % 360; // Normalize to 0-360°
-                content += `🌊 Current speed: ${currentSpeed} knots<br>🧭 Direction: ${Math.round(currentDir)}°`;
-            
-            } else if (overlay === 'tide') {
-                const tidalCurrentSpeed = Math.abs(values[0] * 1.944).toFixed(2); // Convert m/s to knots and take absolute value
-                const tidalCurrentDir = ((values[1] % 360) + 360) % 360; // Normalize to 0-360°
-                content += `🌊 Tidal current: ${tidalCurrentSpeed} knots<br>🧭 Direction: ${Math.round(tidalCurrentDir)}°`;
+                const currentSpeed = values[0];
+                const currentDir = values[1];
+                content += `🌊 Current: ${currentSpeed.toFixed(2)} m/s at ${Math.round(currentDir)}°`;
             
             } else if (overlay === 'swell1' || overlay === 'swell2' || overlay === 'swell3') {
+                // For swell overlays, direction conversion formula
+                console.log(`Swell ${overlay} data:`, values);
+                
                 const swellPeriod = values[0].toFixed(1);
-                const swellDir = ((values[1] % 360) + 360) % 360;
+                let swellDir = values[1];
+                
+                // Correct conversion formula based on calibration:
+                // 270° → raw: -0.18068928020111485
+                // 190° → raw: 10.719788777108018
+                let swellDirDeg = (270 - swellDir * 7.33) % 360;
+                if (swellDirDeg < 0) swellDirDeg += 360;
+                
                 const swellHeight = metrics.waves.convertValue(values[2]);
                 const swellNum = overlay.slice(-1);
-                content += `🌊 Swell ${swellNum}: ${swellHeight}<br>🧭 Direction: ${Math.round(swellDir)}°<br>⏱ Period: ${swellPeriod} s`;
+                content += `🌊 Swell ${swellNum}: ${swellHeight}<br>🧭 Direction: ${Math.round(swellDirDeg)}°<br>⏱ Period: ${swellPeriod} s`;
             
             } else {
                 content += `ℹ️ No weather data available for ${overlay}.`;
@@ -997,8 +1036,17 @@
         markerLayer.clearLayers();
         pathLatLngs.push(Position);
 
-        if (mySpeedOverGround === null || mySpeedOverGround === undefined || isNaN(mySpeedOverGround)) {
-            mySpeedOverGround = 6; // Default to 6 if no speed data
+        // Use test values if test mode is enabled
+        let effectiveSOG = mySpeedOverGround;
+        let effectiveCOG = cog;
+        
+        if (testModeEnabled) {
+            effectiveSOG = testSOG;
+            effectiveCOG = testCOG;
+        }
+
+        if (effectiveSOG === null || effectiveSOG === undefined || isNaN(effectiveSOG)) {
+            effectiveSOG = 6; // Default to 6 if no speed data
         }
 
         // Trace of the path traveled
@@ -1017,11 +1065,11 @@
             dashArray: '10, 10',
         }).addTo(markerLayer);
 
-        // Future projection arrow
-        const cogEnd = computeProjection(lat, lon, cog, mySpeedOverGround, projectionHours);
+        // Future projection arrow (use effective values for test mode)
+        const cogEnd = computeProjection(lat, lon, effectiveCOG, effectiveSOG, projectionHours);
         if (projectionArrow) projectionArrow.remove();
         projectionArrow = L.polyline([Position, cogEnd], {
-            color: 'red',
+            color: testModeEnabled ? 'orange' : 'red', // Different color in test mode
             weight: 1,
             dashArray: '5, 5',
         }).addTo(markerLayer);
@@ -1044,16 +1092,19 @@
         });
 
         // Future projection icon (if speed > 0.5 knots)
-        if (mySpeedOverGround > 0.5) {
+        if (effectiveSOG > 0.5) {
             if (projectionHours === null || projectionHours === undefined) {
                 projectionHours = getRoundedHourTimestamp(store.get('timestamp')) - getRoundedHourTimestamp();
             }
-            const projected = computeProjection(lat, lon, cog, mySpeedOverGround, projectionHours);            
+            const projected = computeProjection(lat, lon, effectiveCOG, effectiveSOG, projectionHours);            
             // Display forecast icon at projected position
             if (forecastIcon) forecastIcon.remove();
             const icon = createRotatingBoatIcon(trueHeading, 0.6)
             forecastIcon = L.marker(projected, { icon }).addTo(markerLayer);
-            forecastIcon.bindTooltip(`Weather forecast in ${projectionHours} hours`, { permanent: false, direction: 'top', className: 'forecast-tooltip' });
+            const tooltipText = testModeEnabled ? 
+                `Weather forecast in ${projectionHours} hours (TEST MODE: SOG=${testSOG}kt, COG=${testCOG}°)` : 
+                `Weather forecast in ${projectionHours} hours`;
+            forecastIcon.bindTooltip(tooltipText, { permanent: false, direction: 'top', className: 'forecast-tooltip' });
 
             // Click on projection: weather at projection time
             forecastIcon.on('click', () => {
@@ -1090,6 +1141,10 @@
             return;
         }
         if (lastLatitude !== null && lastLongitude !== null) {
+            // Use test values if test mode is enabled
+            let effectiveSOG = testModeEnabled ? testSOG : mySpeedOverGround;
+            let effectiveCOG = testModeEnabled ? testCOG : myCourseOverGroundT;
+            
             const now = getRoundedHourTimestamp(Date.now());
             const ts = getRoundedHourTimestamp(store.get('timestamp'));
             // If timeline is at current time (±1h)
@@ -1097,7 +1152,7 @@
                 showMyPopup(lastLatitude, lastLongitude, false);
             } else if (projectionHours >= (1)) {
                 // Display on projected position if timeline in the future
-                const projected = computeProjection(lastLatitude, lastLongitude, myCourseOverGroundT, mySpeedOverGround, projectionHours);
+                const projected = computeProjection(lastLatitude, lastLongitude, effectiveCOG, effectiveSOG, projectionHours);
                 showMyPopup(projected.lat, projected.lng, true);
             } else {
                 // If no projection possible, display on current position
