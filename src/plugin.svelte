@@ -262,6 +262,7 @@
     let isConnected: boolean = false; // WebSocket connection status
     let connectionLostTimer: number | null = null; // Timer for connection lost alert
     let lastError: string = ''; // Store the last error to persist until valid frame
+    let errorList: string[] = []; // Store multiple errors
     let lastFrameReceived: number = Date.now(); // Timestamp of last received frame
     let noFrameTimer: number | null = null; // Timer for no frame detection
 
@@ -293,56 +294,60 @@
     /**
      * Processes each received NMEA/AIS frame.
      * Updates position, speed, heading, vessel name, etc.
+     * @returns {string|null} Frame type if successfully processed, null if error
      */
-    function processNMEA(data: string) {
+    function processNMEA(data: string): string | null {
         // Reset the no frame timer since we received a frame
         resetNoFrameTimer();
         
         if (!(data.startsWith('$') || data.startsWith('!'))) {
-            lastError = "[Err] Invalid NMEA frame";
-            return lastError;
+            addError("[Err] Invalid NMEA frame");
+            return null;
         }
         
         // Add frame to history
         addToNmeaHistory(data);
         
         const parts = data.split(',');
+        let frameType: string | null = null; // Track which frame type was processed
 
         // Decoding classic GPS frames
         if (data.includes('GLL')) {
             if (parts.length < 6) {
-                lastError = "[Err] Invalid GLL frame - insufficient parts";
-                return lastError;
+                addError("[Err] Invalid GLL frame - insufficient parts");
+                return null;
             }
             if (parts[6] === 'V') {
-                lastError = "[Err] Invalid GLL frame - status invalid";
-                return lastError;
+                addError("[Err] Invalid GLL frame - status invalid");
+                return null;
             }
             latitudesal = parseFloat(parts[1]);
             latDirection = parts[2];
             longitudesal = parseFloat(parts[3]);
             lonDirection = parts[4];
+            frameType = 'GLL';
         } else if (data.includes('GGA')) {
             if (parts.length < 7) {
-                lastError = "[Err] Invalid GGA frame - insufficient parts";
-                return lastError;
+                addError("[Err] Invalid GGA frame - insufficient parts");
+                return null;
             }
             if (parts[6] === '0' || parts[6] === 'V') {
-                lastError = "[Err] Invalid GGA frame - no GPS fix";
-                return lastError;
+                addError("[Err] Invalid GGA frame - no GPS fix");
+                return null;
             }
             latitudesal = parseFloat(parts[2]);
             latDirection = parts[3];
             longitudesal = parseFloat(parts[4]);
             lonDirection = parts[5];
+            frameType = 'GGA';
         } else if (data.includes('RMC')) {
             if (parts.length < 9) {
-                lastError = "[Err] Invalid RMC frame - insufficient parts";
-                return lastError;
+                addError("[Err] Invalid RMC frame - insufficient parts");
+                return null;
             }
             if (parts[2] === 'V') {
-                lastError = "[Err] Invalid RMC frame - status invalid";
-                return lastError;
+                addError("[Err] Invalid RMC frame - status invalid");
+                return null;
             }
             latitudesal = parseFloat(parts[3]);
             latDirection = parts[4];
@@ -350,10 +355,11 @@
             lonDirection = parts[6];
             speedOverGround = parseFloat(parts[7]);
             courseOverGroundT = parseFloat(parts[8]);
+            frameType = 'RMC';
         } else if (data.includes('VTG')) {
             if (parts.length < 6) {
-                lastError = "[Err] Invalid VTG frame - insufficient parts";
-                return lastError;
+                addError("[Err] Invalid VTG frame - insufficient parts");
+                return null;
             }
             courseOverGroundT = parseFloat(parts[1]);
             if (parts[2] === 'T') {
@@ -367,31 +373,31 @@
             } else if (parts[4] === 'M') {
                 // To be processed: $HCHDM
             }
+            frameType = 'VTG';
         } else if (data.includes('HDG')) {
             if (parts.length < 5) {
-                lastError = "[Err] Invalid HDG frame - insufficient parts";
-                return lastError;
+                addError("[Err] Invalid HDG frame - insufficient parts");
+                return null;
             }
             courseOverGroundM = parseFloat(parts[1]);
             varM = parseFloat(parts[4]);
+            frameType = 'HDG';
         } else if (data.includes('HDT')) {
             if (parts.length < 2) {
-                lastError = "[Err] Invalid HDT frame - insufficient parts";
-                return lastError;
+                addError("[Err] Invalid HDT frame - insufficient parts");
+                return null;
             }
             trueHeading = parseFloat(parts[1]);
-        } else {
-            // Not an error, just unsupported frame type
-            return ""; // Return empty string for unsupported but valid frames
+            frameType = 'HDT';
         }
-
+        
         // Basic AIVDO (VDO) decoding
         if (data.startsWith('!') && data.includes('VDO')) {
             // Example: !AIVDO,1,1,,B,13aG?P0P00PD;88MD5MTDww@2D0k,0*7C
             // Here, the AIS payload is in parts[5]
             if (parts.length < 6) {
-                lastError = "[Err] Invalid AIS VDO frame - insufficient parts";
-                return lastError;
+                addError("[Err] Invalid AIS VDO frame - insufficient parts");
+                return null;
             }
             const aisPayload = parts[5];
             if (aisPayload) {
@@ -426,21 +432,22 @@
                     mySpeedOverGround = sog;
                     lastLatitude = lat;
                     lastLongitude = lon;
-                    // Clear error on successful AIS processing
-                    lastError = '';
-                    clearErrorDisplay();
+                    // Return frame type for successful AIS VDO processing
+                    return 'AIS VDO';
                 } else {
                     data = `AIS VDO MMSI: ${mmsi} (type ${msgType})`;
+                    // Return frame type for successful AIS VDO processing (even if not position)
+                    return 'AIS VDO';
                 }
             }
-            return '';
+            return null; // Failed to process AIS VDO
         }
         // AIVDM (VDM) decoding - External AIS ships
         if (data.startsWith('!') && data.includes('AIVDM')) {
             const parts = data.split(',');
             if (parts.length < 6) {
-                lastError = "[Err] Invalid AIS AIVDM frame - insufficient parts";
-                return lastError;
+                addError("[Err] Invalid AIS AIVDM frame - insufficient parts");
+                return null;
             }
             const total = parseInt(parts[1]);
             const num = parseInt(parts[2]);
@@ -466,45 +473,42 @@
                 // Non-fragmented message
                 decodeAISMessage(aisPayload);
             }
-            return ''; // Don't process as own ship data
+            return 'AIS VDM'; // Return frame type for AIS VDM processing
         }
 
-        // Position variables update
-
-        
-        latitude = convertLatitude(latitudesal, latDirection);
-        longitude = convertLongitude(longitudesal, lonDirection);
-        myLatitude = displayLatitude(latitudesal, latDirection);
-        myLongitude = displayLongitude(longitudesal, lonDirection);
-        
-        if (courseOverGroundT !== null && courseOverGroundT !== undefined && !Number.isNaN(courseOverGroundT)) {
-            myCourseOverGroundT = parseFloat(courseOverGroundT.toFixed(2));
-        } else {
-            myCourseOverGroundT = myCourseOverGroundT; // If no data, keep the last value
-        }
-        if (speedOverGround !== null && speedOverGround !== undefined && !Number.isNaN(speedOverGround)) {
-            mySpeedOverGround = parseFloat(speedOverGround.toFixed(2));
-        } else {
-            mySpeedOverGround = mySpeedOverGround; // If no data, keep the last value
-        }
-        const newLat = latitude;
-        const newLon = longitude;
-        /*
-        if (lastLatitude !== null && lastLongitude !== null && newLat !== null && newLon !== null) {
-            courseOverGround = calculateBearing(lastLatitude, lastLongitude, newLat, newLon);
-        }
-        */
-        lastLatitude = newLat;
-        lastLongitude = newLon;
-        if (!Number.isNaN(newLat) && !Number.isNaN(newLon)) {
-            addBoatMarker(newLat, newLon, myCourseOverGroundT);
-            // Clear error if position is valid
-            lastError = '';
-            clearErrorDisplay();
+        // Position variables update (for GPS frames that have position data)
+        if (frameType && ['GLL', 'GGA', 'RMC'].includes(frameType)) {
+            latitude = convertLatitude(latitudesal, latDirection);
+            longitude = convertLongitude(longitudesal, lonDirection);
+            myLatitude = displayLatitude(latitudesal, latDirection);
+            myLongitude = displayLongitude(longitudesal, lonDirection);
+            
+            if (courseOverGroundT !== null && courseOverGroundT !== undefined && !Number.isNaN(courseOverGroundT)) {
+                myCourseOverGroundT = parseFloat(courseOverGroundT.toFixed(2));
+            } else {
+                myCourseOverGroundT = myCourseOverGroundT; // If no data, keep the last value
+            }
+            if (speedOverGround !== null && speedOverGround !== undefined && !Number.isNaN(speedOverGround)) {
+                mySpeedOverGround = parseFloat(speedOverGround.toFixed(2));
+            } else {
+                mySpeedOverGround = mySpeedOverGround; // If no data, keep the last value
+            }
+            const newLat = latitude;
+            const newLon = longitude;
+            /*
+            if (lastLatitude !== null && lastLongitude !== null && newLat !== null && newLon !== null) {
+                courseOverGround = calculateBearing(lastLatitude, lastLongitude, newLat, newLon);
+            }
+            */
+            lastLatitude = newLat;
+            lastLongitude = newLon;
+            if (!Number.isNaN(newLat) && !Number.isNaN(newLon)) {
+                addBoatMarker(newLat, newLon, myCourseOverGroundT);
+            }
         }
         
-        // Return empty string for successful processing
-        return '';
+        // Return the frame type if successfully processed
+        return frameType;
     }
 
     /**
@@ -515,6 +519,9 @@
         if (lastError.includes("No NMEA frames received")) {
             lastError = '';
         }
+        // Clear all errors when valid data is received
+        errorList = [];
+        lastError = '';
         const errorElement = document.getElementById("err");
         if (errorElement) {
             errorElement.innerHTML = "<p></p>";
@@ -522,13 +529,58 @@
     }
 
     /**
-     * Updates the error display with persistent error
+     * Removes errors from the error list based on frame type
+     * @param {string|string[]} frameTypes - Frame type(s) to remove errors for
+     */
+    function removeErrorsByType(frameTypes) {
+        const typesToRemove = Array.isArray(frameTypes) ? frameTypes : [frameTypes];
+        
+        // Remove errors that contain any of the specified frame types
+        errorList = errorList.filter(error => {
+            return !typesToRemove.some(type => error.includes(type));
+        });
+        
+        // Also clear lastError if it matches any of the types
+        if (typesToRemove.some(type => lastError.includes(type))) {
+            lastError = '';
+        }
+        
+        // Always clear the "no frames" error when any valid frame is received
+        errorList = errorList.filter(error => !error.includes("No NMEA frames received"));
+        if (lastError.includes("No NMEA frames received")) {
+            lastError = '';
+        }
+    }
+
+    /**
+     * Adds an error to the error list, avoiding duplicates
+     */
+    function addError(error: string) {
+        // Avoid adding duplicate errors
+        if (!errorList.includes(error)) {
+            errorList.push(error);
+            // Keep only the last 5 errors to avoid overflow
+            if (errorList.length > 5) {
+                errorList.shift();
+            }
+            // Update display immediately when a new error is added
+            updateErrorDisplay();
+        }
+        lastError = error; // Keep last error for compatibility
+    }
+
+    /**
+     * Updates the error display with all accumulated errors
      */
     function updateErrorDisplay() {
-        if (lastError) {
-            const errorElement = document.getElementById("err");
-            if (errorElement) {
-                errorElement.innerHTML = `<p class="error">${lastError}</p>`;
+        const errorElement = document.getElementById("err");
+        if (errorElement) {
+            if (errorList.length > 0) {
+                const errorHTML = errorList.map(err => `<p class="error">${err}</p>`).join('');
+                errorElement.innerHTML = errorHTML;
+            } else {
+                // Clear display when no errors remain
+                errorElement.innerHTML = "<p></p>";
             }
         }
     }
@@ -541,8 +593,7 @@
             clearTimeout(noFrameTimer);
         }
         noFrameTimer = setTimeout(() => {
-            lastError = "[Err] No NMEA frames received for more than 1 minute";
-            updateErrorDisplay();
+            addError("[Err] No NMEA frames received for more than 1 minute");
         }, 60000); // 60 seconds
     }
 
@@ -692,9 +743,6 @@
                     mySpeedOverGround = sog;
                     lastLatitude = lat;
                     lastLongitude = lon;
-                    // Clear error on successful AIS processing of own vessel
-                    lastError = '';
-                    clearErrorDisplay();
                 } else {
                     // This is an external vessel - add to AIS ships
                     updateAISShip(mmsi, { lat, lon, cog, sog, heading });
@@ -1135,6 +1183,14 @@
                 clearTimeout(connectionLostTimer);
                 connectionLostTimer = null;
             }
+            // Clear connection-related errors
+            errorList = errorList.filter(error => 
+                !error.includes("Connection lost") && 
+                !error.includes("Failed to connect") && 
+                !error.includes("No NMEA frames received")
+            );
+            lastError = '';
+            updateErrorDisplay();
             // Reset the no frame timer on connection
             resetNoFrameTimer();
         });
@@ -1142,7 +1198,7 @@
         socket.on('disconnect', (reason: string) => {
             console.log('WebSocket disconnected:', reason);
             isConnected = false;
-            document.getElementById("err")!.innerHTML = "<p>⚠️ Connection lost to NMEA server</p>";
+            addError("⚠️ Connection lost to NMEA server");
             
             // Stop the no frame timer when disconnected (connection issue, not frame issue)
             if (noFrameTimer) {
@@ -1161,7 +1217,7 @@
         socket.on('connect_error', (error: any) => {
             console.error('WebSocket connection error:', error);
             isConnected = false;
-            document.getElementById("err")!.innerHTML = "<p>❌ Failed to connect to NMEA server</p>";
+            addError("❌ Failed to connect to NMEA server");
         });
 
         socket.on('reconnect', (attemptNumber: number) => {
@@ -1172,20 +1228,26 @@
                 clearTimeout(connectionLostTimer);
                 connectionLostTimer = null;
             }
+            // Clear connection-related errors
+            errorList = errorList.filter(error => 
+                !error.includes("Connection lost") && 
+                !error.includes("Failed to connect") && 
+                !error.includes("No NMEA frames received")
+            );
+            lastError = '';
+            updateErrorDisplay();
             // Reset the no frame timer on reconnection
             resetNoFrameTimer();
-            document.getElementById("err")!.innerHTML = "<p>✅ Reconnected to NMEA server</p>";
-            setTimeout(() => {
-                document.getElementById("err")!.innerHTML = "<p></p>";
-            }, 3000); // Clear success message after 3 seconds
         });
 
         socket.on('nmea_data', (data: string) => {
-            let Result: string;
-            Result = processNMEA(data);
-            if (Result.startsWith('[Err]')) {
-                updateErrorDisplay();
+            const frameType = processNMEA(data);
+            // If a frame was successfully processed, remove errors for that frame type
+            if (frameType) {
+                removeErrorsByType(frameType);
             }
+            // Always update error display (to show remaining errors or clear if none)
+            updateErrorDisplay();
         });
 
         // Subscribe to Windy timeline changes
