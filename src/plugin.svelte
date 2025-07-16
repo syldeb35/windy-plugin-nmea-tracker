@@ -82,7 +82,7 @@
                 {followShip ? '🛑 Stop Tracking' : '▶️ Follow vessel'}
             </button> <br>
             <br>
-            <button id="button" on:click={showWeatherPopup}>🌬️ Show weather</button>
+            <button id="button" on:click={showWeatherPopup}>{buttonText}</button>
         </div>
     {/if}    
     <hr />
@@ -266,6 +266,7 @@
     let heurePrev: number | null = null; // for projection
     let followShip = false; // do not follow ship by default
     let vesselName = VESSEL;
+    let CurrentOverlay = 'Windy'; // Default overlay, can be changed later
 
     let socket: any = null;
     let markerLayer: any = null;
@@ -287,6 +288,7 @@
 
     let aisFragments: { [key: string]: { total: number, received: number, payloads: string[] } } = {};
     let unsubscribeTimeline: (() => void) | null = null;
+    let unsubscribeOverlay: (() => void) | null = null;
     let projectionHours: number | null = null; // for projection
     let isConnected: boolean = false; // WebSocket connection status
     let connectionLostTimer: number | null = null; // Timer for connection lost alert
@@ -299,6 +301,20 @@
     let testModeEnabled: boolean = false; // Enable/disable test mode
     let testSOG: number = 6; // Test Speed Over Ground in knots
     let testCOG: number = 45; // Test Course Over Ground in degrees
+
+    // Button text variables for reactive updates
+    let buttonText: string = "🌬️ Show Windy prediction";
+
+    /**
+     * Updates the button text based on current overlay and projection hours
+     */
+    function updateButtonText() {
+        if (projectionHours > 1) {
+            buttonText = `🌬️ Show ${CurrentOverlay} prediction (in ${projectionHours}h)`;
+        } else {
+            buttonText = `🌬️ Show ${CurrentOverlay} prediction`;
+        }
+    }
 
     /**
      * Adds NMEA frame type to history (keep last 10)
@@ -1312,16 +1328,24 @@
             console.log('Windy timeline changed, new timestamp:', ts);
             // You can trigger an action here, update a variable, etc.
             projectionHours = (getRoundedHourTimestamp(store.get('timestamp')) - getRoundedHourTimestamp()) / (3600 * 1000); // in hours
-            if (projectionHours > 1) {
-                document.getElementById('button').innerHTML = "🌬️ Show weather (in " + projectionHours + "h)";
-            } else {
-                document.getElementById('button').innerHTML = "🌬️ Show weather";
-            }
+            updateButtonText();
         });
         if (typeof unsub === 'function') {
             unsubscribeTimeline = unsub;
         } else {
             unsubscribeTimeline = null;
+        }
+
+        // Subscribe to Windy overlay changes
+        const unsubOverlay = store.on('overlay', (overlay: string) => {
+            console.log('Windy overlay changed, new overlay:', overlay);
+            CurrentOverlay = overlay;
+            updateButtonText();
+        });
+        if (typeof unsubOverlay === 'function') {
+            unsubscribeOverlay = unsubOverlay;
+        } else {
+            unsubscribeOverlay = null;
         }
     });
 
@@ -1354,6 +1378,9 @@
 
         // Unsubscribe from Windy timeline
         if (unsubscribeTimeline) unsubscribeTimeline();
+        
+        // Unsubscribe from Windy overlay changes
+        if (unsubscribeOverlay) unsubscribeOverlay();
     });
 
 </script>
