@@ -132,7 +132,7 @@
     </div>
     <div id="footer">
       <center>
-        <p>© 2025 Capt S. DEBRAY</p>
+        <p>© 2025 Capt S. DEBRAY - v{config.version}</p>
         <p><a href="https://github.com/syldeb35/windy-plugin-nmea-tracker" target="_blank">🛳️ Sources and info 🛳️</a></p>
       </center>
     </div>
@@ -151,6 +151,7 @@
     import metrics from '@windy/metrics';
     import io from './socket.io.min.js';
     import { createRotatingBoatIcon } from './boatIcon';
+    import config from './pluginConfig';
     
     // Use global Leaflet from Windy
     const L = (window as any).L;
