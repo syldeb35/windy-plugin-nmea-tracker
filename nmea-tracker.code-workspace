@@ -24,6 +24,9 @@
 			"rqst",
 			"unsub",
 			"XPOST"
-		]
+		],
+		"files.exclude": {
+			"**/.min.js": true
+		}
 	}
 }
