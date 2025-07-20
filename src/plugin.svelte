@@ -106,7 +106,7 @@
     <!-- Test Mode Controls -->
     <hr />
     <div class="test-mode-section">
-      <p style="font-weight: bold; margin-bottom: 10px;">🧪 Test Mode (for static vessel testing):</p>
+      <p style="font-weight: bold; margin-bottom: 10px;">🧪 Test Mode :</p>
       <label class="centered">
         <input type="checkbox" bind:checked={testModeEnabled} />
         Enable test mode
@@ -119,7 +119,15 @@
           </label>
           <label class="centered">
             Test COG (degrees):
-            <input type="number" bind:value={testCOG} min="0" max="360" step="1" style="width: 80px;" />
+            <input 
+              type="number" 
+              bind:value={testCOG} 
+              on:input={(e) => { testCOG = normalizeCOG(parseInt(e.target.value) || 0); }}
+              min="0" 
+              max="359" 
+              step="1" 
+              style="width: 80px;" 
+            />
           </label>
           <p style="font-size: 12px; color: #666; margin-top: 5px;">
             📝 Test values override real data for projections and weather forecasts
@@ -315,6 +323,18 @@
         } else {
             buttonText = `🌬️ Show ${CurrentOverlay} prediction`;
         }
+    }
+
+    /**
+     * Normalizes COG value to be between 0 and 359 degrees (cyclical)
+     */
+    function normalizeCOG(value: number): number {
+        if (value < 0) {
+            return 359;
+        } else if (value > 359) {
+            return 0;
+        }
+        return value;
     }
 
     /**
