@@ -121,10 +121,9 @@
             Test COG (degrees):
             <input 
               type="number" 
-              bind:value={testCOG} 
-              on:input={(e) => { testCOG = normalizeCOG(parseInt(e.target.value) || 0); }}
-              min="0" 
-              max="359" 
+              value={testCOG}
+              on:input={handleCOGInput}
+              on:change={handleCOGInput}
               step="1" 
               style="width: 80px;" 
             />
@@ -329,13 +328,43 @@
      * Normalizes COG value to be between 0 and 359 degrees (cyclical)
      */
     function normalizeCOG(value: number): number {
+        // Handle proper cyclical behavior for any value
         if (value < 0) {
-            return 359;
-        } else if (value > 359) {
-            return 0;
+            return ((value % 360) + 360) % 360;
+        } else if (value >= 360) {
+            return value % 360;
         }
         return value;
     }
+
+    /**
+     * Handles COG input changes with cyclical normalization
+     */
+    function handleCOGInput(event: Event) {
+        const target = event.target as HTMLInputElement;
+        const rawValue = parseInt(target.value) || 0;
+        testCOG = normalizeCOG(rawValue);
+        // Update the input field to reflect the normalized value
+        target.value = testCOG.toString();
+    }
+
+    /**
+     * Handles arrow key presses for cyclical COG behavior
+    function handleCOGKeydown(event: KeyboardEvent) {
+        const target = event.target as HTMLInputElement;
+        const currentValue = parseInt(target.value) || 0;
+        
+        if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            testCOG = normalizeCOG(currentValue + 1);
+            target.value = testCOG.toString();
+        } else if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            testCOG = normalizeCOG(currentValue - 1);
+            target.value = testCOG.toString();
+        }
+    }
+     */
 
     /**
      * Adds NMEA frame type to history (keep last 10)
