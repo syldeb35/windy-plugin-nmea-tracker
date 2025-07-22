@@ -138,10 +138,8 @@
         <p></p>
     </div>
     <div id="footer">
-      <center>
-        <p>© 2025 Capt S. DEBRAY - v{config.version}</p>
-        <p><a href="https://github.com/syldeb35/windy-plugin-nmea-tracker" target="_blank">🛳️ Sources and info 🛳️</a></p>
-      </center>
+      <p>© 2025 Capt S. DEBRAY - v{config.version}</p>
+      <p><a href="https://github.com/syldeb35/windy-plugin-nmea-tracker" target="_blank">🛳️ Sources and info 🛳️</a></p>
     </div>
 </section>
 
@@ -1498,10 +1496,18 @@
         color: #b366ff;
     }
     /* Styles for the footer */
-    #footer{
-        height: 100px;
-        position: absolute;
-        bottom: 0px;
+    #footer {
+        margin-top: 20px;
+        padding: 15px 0;
+        border-top: 1px solid #444;
+        text-align: center;
+        /* Remove absolute positioning to prevent overlap */
+        position: relative;
+    }
+    
+    /* Add bottom padding to plugin content to ensure space for footer */
+    .plugin__content {
+        padding-bottom: 20px;
     }
     
     /* AIS Ship marker styles */
