@@ -11,6 +11,7 @@
 			"bcast",
 			"bitstring",
 			"github",
+			"GPGGA",
 			"HCHDM",
 			"latitudesal",
 			"Lngs",
@@ -23,6 +24,7 @@
 			"rollup",
 			"rqst",
 			"unsub",
+			"wwaves",
 			"XPOST"
 		],
 		"files.exclude": {
