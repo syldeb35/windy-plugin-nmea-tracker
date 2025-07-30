@@ -34,9 +34,29 @@
         Vessel name:
         <input type="text" bind:value={vesselName} />
     </label> -->
-    <label class="centered">
-        Your MMSI:
-        <input type="text" bind:value={myMMSI} placeholder="e.g. 123456789" maxlength="9" />
+    <label class="right-aligned">
+        Server address : 
+        <input 
+            type="text" 
+            bind:value={serverHost} 
+            on:input={updateRoute}
+            placeholder="localhost or IP address" 
+            style="width: 100px;" 
+        />
+    </label>
+    <p style="font-size: 12px; color: #666; margin: 5px 0;">
+        🌐 Full server URL: <code>{route}</code>
+    </p>
+    
+    <label class="right-aligned">
+        Your MMSI : 
+        <input 
+            type="text" 
+            bind:value={myMMSI} 
+            placeholder="e.g. 123456789"
+            style="width: 100px;" 
+            maxlength="9" 
+            />
     </label>
     <p></p>
     <div class="centered">
@@ -164,6 +184,104 @@
     const title = 'NMEA tracker plugin';
     const VESSEL = 'YOUR BOAT';
     let route = 'https://localhost:5000'; // Replace with your NMEA server URL
+    
+     // Server configuration variables
+    let serverHost = 'localhost'; // Default server host
+    let serverPort = 5000; // Fixed port
+    
+    // Function to update the route when server host changes
+    function updateRoute() {
+        route = `https://${serverHost}:${serverPort}`;
+    }
+    
+    /**
+     * Creates and configures the WebSocket connection
+     */
+    function createSocketConnection() {
+        // Disconnect existing socket if any
+        if (socket) {
+            socket.disconnect();
+            socket = null;
+        }
+        
+        console.log('Connecting to NMEA server at:', route);
+        
+        // @ts-ignore: socket.io injected via global script
+        socket = io(route, {
+            transports: ['websocket'],
+            secure: true,
+            rejectUnauthorized: false // for self-signed
+        });
+
+        // Connection event handlers (same as before)
+        socket.on('connect', () => {
+            console.log('WebSocket connected to NMEA server');
+            isConnected = true;
+            if (connectionLostTimer) {
+                clearTimeout(connectionLostTimer);
+                connectionLostTimer = null;
+            }
+            errorList = errorList.filter(error => 
+                !error.includes("Connection lost") && 
+                !error.includes("Failed to connect") && 
+                !error.includes("No NMEA frames received")
+            );
+            lastError = '';
+            updateErrorDisplay();
+            resetNoFrameTimer();
+        });
+
+        socket.on('disconnect', (reason: string) => {
+            console.log('WebSocket disconnected:', reason);
+            isConnected = false;
+            addError("⚠️ Connection lost to NMEA server");
+            
+            if (noFrameTimer) {
+                clearTimeout(noFrameTimer);
+                noFrameTimer = null;
+            }
+            
+            connectionLostTimer = setTimeout(() => {
+                if (!isConnected) {
+                    alert('⚠️ NMEA Server Connection Lost!\n\nThe connection to the NMEA server has been lost for more than 10 seconds.\nPlease check:\n- NMEA server is running\n- Network connectivity\n- Server URL: ' + route);
+                }
+            }, 10000);
+        });
+
+        socket.on('connect_error', (error: any) => {
+            console.error('WebSocket connection error:', error);
+            isConnected = false;
+            addError("❌ Failed to connect to NMEA server");
+        });
+
+        socket.on('reconnect', (attemptNumber: number) => {
+            console.log('WebSocket reconnected after', attemptNumber, 'attempts');
+            isConnected = true;
+            if (connectionLostTimer) {
+                clearTimeout(connectionLostTimer);
+                connectionLostTimer = null;
+            }
+            errorList = errorList.filter(error => 
+                !error.includes("Connection lost") && 
+                !error.includes("Failed to connect") && 
+                !error.includes("No NMEA frames received")
+            );
+            lastError = '';
+            updateErrorDisplay();
+            resetNoFrameTimer();
+        });
+
+        socket.on('nmea_data', (data: string) => {
+            const frameType = processNMEA(data);
+            if (frameType) {
+                removeErrorsByType(frameType);
+            }
+            updateErrorDisplay();
+        });
+    }
+    
+    // Initialize route on component load
+    updateRoute();
     
     // Detect user's operating system with detailed macOS detection
     function detectOSAdvanced() {
@@ -1286,88 +1404,8 @@
         // Start the no frame detection timer
         startNoFrameTimer();
         
-        // @ts-ignore: socket.io injected via global script
-        socket = io(route, {
-            transports: ['websocket'],
-            secure: true,
-            rejectUnauthorized: false // for self-signed
-        });
-
-        // Connection event handlers
-        socket.on('connect', () => {
-            console.log('WebSocket connected to NMEA server');
-            isConnected = true;
-            // Clear the connection lost timer
-            if (connectionLostTimer) {
-                clearTimeout(connectionLostTimer);
-                connectionLostTimer = null;
-            }
-            // Clear connection-related errors
-            errorList = errorList.filter(error => 
-                !error.includes("Connection lost") && 
-                !error.includes("Failed to connect") && 
-                !error.includes("No NMEA frames received")
-            );
-            lastError = '';
-            updateErrorDisplay();
-            // Reset the no frame timer on connection
-            resetNoFrameTimer();
-        });
-
-        socket.on('disconnect', (reason: string) => {
-            console.log('WebSocket disconnected:', reason);
-            isConnected = false;
-            addError("⚠️ Connection lost to NMEA server");
-            
-            // Stop the no frame timer when disconnected (connection issue, not frame issue)
-            if (noFrameTimer) {
-                clearTimeout(noFrameTimer);
-                noFrameTimer = null;
-            }
-            
-            // Set a timer to show alert if disconnection persists
-            connectionLostTimer = setTimeout(() => {
-                if (!isConnected) {
-                    alert('⚠️ NMEA Server Connection Lost!\n\nThe connection to the NMEA server has been lost for more than 10 seconds.\nPlease check:\n- NMEA server is running\n- Network connectivity\n- Server URL: ' + route);
-                }
-            }, 10000); // 10 seconds
-        });
-
-        socket.on('connect_error', (error: any) => {
-            console.error('WebSocket connection error:', error);
-            isConnected = false;
-            addError("❌ Failed to connect to NMEA server");
-        });
-
-        socket.on('reconnect', (attemptNumber: number) => {
-            console.log('WebSocket reconnected after', attemptNumber, 'attempts');
-            isConnected = true;
-            // Clear the connection lost timer
-            if (connectionLostTimer) {
-                clearTimeout(connectionLostTimer);
-                connectionLostTimer = null;
-            }
-            // Clear connection-related errors
-            errorList = errorList.filter(error => 
-                !error.includes("Connection lost") && 
-                !error.includes("Failed to connect") && 
-                !error.includes("No NMEA frames received")
-            );
-            lastError = '';
-            updateErrorDisplay();
-            // Reset the no frame timer on reconnection
-            resetNoFrameTimer();
-        });
-
-        socket.on('nmea_data', (data: string) => {
-            const frameType = processNMEA(data);
-            // If a frame was successfully processed, remove errors for that frame type
-            if (frameType) {
-                removeErrorsByType(frameType);
-            }
-            // Always update error display (to show remaining errors or clear if none)
-            updateErrorDisplay();
-        });
+        // Create initial socket connection
+        createSocketConnection();
 
         // Subscribe to Windy timeline changes
         const unsub = store.on('timestamp', (ts: number) => {
@@ -1480,6 +1518,14 @@
         justify-content: center;
         text-align: center;
         align-items: center;
+    }
+    /* Specific alignment for server address and MMSI input fields */
+    .right-aligned {
+        display: flex;
+        justify-content: flex-end;
+        margin-right: 100px;
+        text-align: right;
+        align-items: right;
     }
     /* Styles for links */
     a {
