@@ -28,8 +28,26 @@
     >
         {title}
     </button>
-
     
+    {#if userOS === 'Windows'}
+        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/1W_CtJgLw57gbtDJlDJ5Fk_5hpp42NV6i/view?usp=drive_link" target="_blank">NMEA tracker server (for Windows systems)</a></strong></p>
+    {:else if userOS === 'Linux'}
+        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/1gtHy7I55g-o26V-Ryx_oOifvlxGAqIF6/view?usp=drive_link" target="_blank">NMEA tracker server (for Linux systems)</a></strong></p>
+    {:else if userOS.includes('macOS') && userOS.includes('Intel')}
+        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/13x7YSK_oX0mUgWyk-88h7bWsYqAyfaSx/view?usp=drive_link" target="_blank">NMEA tracker server (for macOS Intel)</a></strong></p>
+    {:else if userOS.includes('macOS') && userOS.includes('Apple Silicon')}
+        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/1N0-qNmHeDdbN0TmdcHszFqZVkFIdSrCW/view?usp=drive_link" target="_blank">NMEA tracker server (for macOS Apple Silicon)</a></strong></p>
+    {:else if userOS.includes('macOS')}
+        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/1N0-qNmHeDdbN0TmdcHszFqZVkFIdSrCW/view?usp=drive_link" target="_blank">NMEA tracker server (for macOS)</a></strong></p>
+    {:else}
+        <p>Prerequisite: <strong><a href="https://drive.google.com/drive/folders/1P1H36AiJA98XaYRdEsfCV8L59EiUXKAG?usp=drive_link" target="_blank">NMEA tracker server</a></strong></p>
+    {/if}
+    <p>Configure the server: <a href="{route}/config.html" target="_blank">Configuration</a></p>
+    <p>Test the server: <a href="{route}" target="_blank"><code>Testing</code></a></p>
+    <!-- <p>UDP: <code>{udpIp}:{udpPort}</code></p> -->
+    <!-- <p>TCP: <code>{tcpIp}:{tcpPort}</code></p> -->
+    <!-- <p>Request from: <strong>{requestIp}</strong></p> -->
+
     <!-- <label class="centered">
         Vessel name:
         <input type="text" bind:value={vesselName} />
@@ -63,25 +81,6 @@
         <button popovertarget="help">🛳️ <big>Help</big> 🛳️</button>
     </div>
     
-    {#if userOS === 'Windows'}
-        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/1W_CtJgLw57gbtDJlDJ5Fk_5hpp42NV6i/view?usp=drive_link" target="_blank">NMEA tracker server (for Windows systems)</a></strong></p>
-    {:else if userOS === 'Linux'}
-        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/1gtHy7I55g-o26V-Ryx_oOifvlxGAqIF6/view?usp=drive_link" target="_blank">NMEA tracker server (for Linux systems)</a></strong></p>
-    {:else if userOS.includes('macOS') && userOS.includes('Intel')}
-        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/13x7YSK_oX0mUgWyk-88h7bWsYqAyfaSx/view?usp=drive_link" target="_blank">NMEA tracker server (for macOS Intel)</a></strong></p>
-    {:else if userOS.includes('macOS') && userOS.includes('Apple Silicon')}
-        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/1N0-qNmHeDdbN0TmdcHszFqZVkFIdSrCW/view?usp=drive_link" target="_blank">NMEA tracker server (for macOS Apple Silicon)</a></strong></p>
-    {:else if userOS.includes('macOS')}
-        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/1N0-qNmHeDdbN0TmdcHszFqZVkFIdSrCW/view?usp=drive_link" target="_blank">NMEA tracker server (for macOS)</a></strong></p>
-    {:else}
-        <p>Prerequisite: <strong><a href="https://drive.google.com/drive/folders/1P1H36AiJA98XaYRdEsfCV8L59EiUXKAG?usp=drive_link" target="_blank">NMEA tracker server</a></strong></p>
-    {/if}
-    <p>Configure the server: <a href="{route}/config.html" target="_blank">Configuration</a></p>
-    <p>Test the server: <a href="{route}" target="_blank"><code>Testing</code></a></p>
-    <!-- <p>UDP: <code>{udpIp}:{udpPort}</code></p> -->
-    <!-- <p>TCP: <code>{tcpIp}:{tcpPort}</code></p> -->
-    <!-- <p>Request from: <strong>{requestIp}</strong></p> -->
-
     <hr />
 
     {#if nmeaHistory.length > 0}
