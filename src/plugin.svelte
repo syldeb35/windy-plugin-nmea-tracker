@@ -401,7 +401,8 @@
     let forecastLabel: any = null;
     let pathLatLngs: any[] = [];
     let openedPopup: any = null;
-    let aisShips: { [mmsi: string]: any } = {}; // Store AIS ships data
+    // Store AIS ships data globally so all functions can access it
+    let aisShips: { [mmsi: string]: any } = {};
 
     let udpIp = '0.0.0.0';
     let udpPort = 5005;
@@ -515,7 +516,7 @@
         // Reset the no frame timer since we received a frame
         resetNoFrameTimer();
         
-        if (!(data.startsWith('$') || data.startsWith('!'))) {
+        if (!data.startsWith('$') && !data.startsWith('!')) {
             addError("[Err] Invalid NMEA frame");
             return null;
         }
@@ -606,57 +607,45 @@
             frameType = 'HDT';
         }
         
+        // Position variables update (for GPS frames that have position data)
+        if (frameType && ['GLL', 'GGA', 'RMC'].includes(frameType)) {
+            latitude = convertLatitude(latitudesal, latDirection);
+            longitude = convertLongitude(longitudesal, lonDirection);
+            myLatitude = displayLatitude(latitudesal, latDirection);
+            myLongitude = displayLongitude(longitudesal, lonDirection);
+            
+            if (courseOverGroundT !== null && courseOverGroundT !== undefined && !Number.isNaN(courseOverGroundT)) {
+                myCourseOverGroundT = parseFloat(courseOverGroundT.toFixed(2));
+            } else {
+                myCourseOverGroundT = myCourseOverGroundT; // If no data, keep the last value
+            }
+            if (speedOverGround !== null && speedOverGround !== undefined && !Number.isNaN(speedOverGround)) {
+                mySpeedOverGround = parseFloat(speedOverGround.toFixed(2));
+            } else {
+                mySpeedOverGround = mySpeedOverGround; // If no data, keep the last value
+            }
+            const newLat = latitude;
+            const newLon = longitude;
+            /*
+            if (lastLatitude !== null && lastLongitude !== null && newLat !== null && newLon !== null) {
+                courseOverGround = calculateBearing(lastLatitude, lastLongitude, newLat, newLon);
+            }
+            */
+            lastLatitude = newLat;
+            lastLongitude = newLon;
+            if (!Number.isNaN(newLat) && !Number.isNaN(newLon)) {
+                addBoatMarker(newLat, newLon, myCourseOverGroundT);
+            }
+        }
+
+        // ...existing code...
         // Basic AIVDO (VDO) decoding
         if (data.startsWith('!') && data.includes('VDO')) {
             // Example: !AIVDO,1,1,,B,13aG?P0P00PD;88MD5MTDww@2D0k,0*7C
-            // Here, the AIS payload is in parts[5]
+            const parts = data.split(',');
             if (parts.length < 6) {
                 addError("[Err] Invalid AIS VDO frame - insufficient parts");
                 return null;
-            }
-            const aisPayload = parts[5];
-            if (aisPayload) {
-                const bitstring = ais6bitDecode(aisPayload);
-                const mmsi = parseInt(bitstring.slice(8, 38), 2);
-                
-                // Store our own MMSI for comparison if not manually set
-                if (!myMMSI || !isValidMMSI(myMMSI)) {
-                    myMMSI = mmsi.toString();
-                }
-                
-                // Check if this is our own vessel (either manual MMSI or auto-detected)
-                const isOwnVessel = (myMMSI && mmsi.toString() === myMMSI);
-                
-                // Message type (first 6 bits)
-                const msgType = parseInt(bitstring.slice(0, 6), 2);
-                // For messages 1, 2, 3 (position)
-                if ([1, 2, 3].includes(msgType)) {
-                    const latRaw = parseInt(bitstring.slice(89, 116), 2);
-                    const lonRaw = parseInt(bitstring.slice(61, 89), 2);
-                    let lat = (latRaw & 0x8000000) ? (latRaw - 0x10000000) : latRaw;
-                    let lon = (lonRaw & 0x8000000) ? (lonRaw - 0x10000000) : lonRaw;
-                    lat = lat / 600000.0;
-                    lon = lon / 600000.0;
-                    const cog = parseInt(bitstring.slice(116, 128), 2) / 10.0;
-                    const sog = parseInt(bitstring.slice(50, 60), 2) / 10.0;
-                    data = `AIS VDO MMSI: ${mmsi}\nLat: ${lat.toFixed(5)}\nLon: ${lon.toFixed(5)}\nCOG: ${cog}°\nSOG: ${sog} nds`;
-                    addBoatMarker(lat, lon, cog);
-                    myLatitude = lat.toFixed(5);
-                    myLongitude = lon.toFixed(5);
-                    myCourseOverGroundT = cog;
-                    mySpeedOverGround = sog;
-                    lastLatitude = lat;
-                    lastLongitude = lon;
-                    // Return frame type for successful AIS VDO processing
-                    return 'AIS VDO';
-                } else {
-                    data = `AIS VDO MMSI: ${mmsi} (type ${msgType})`;
-                    // Return frame type for successful AIS VDO processing (even if not position)
-                    return 'AIS VDO';
-                }
-            }
-            return null; // Failed to process AIS VDO
-        }
         // AIVDM (VDM) decoding - External AIS ships
         if (data.startsWith('!') && data.includes('AIVDM')) {
             const parts = data.split(',');
@@ -691,9 +680,9 @@
             return 'AIS VDM'; // Return frame type for AIS VDM processing
         }
 
-        // Position variables update (for GPS frames that have position data)
-        if (frameType && ['GLL', 'GGA', 'RMC'].includes(frameType)) {
-            latitude = convertLatitude(latitudesal, latDirection);
+        // Return the frame type if successfully processed
+        return frameType;
+    }
             longitude = convertLongitude(longitudesal, lonDirection);
             myLatitude = displayLatitude(latitudesal, latDirection);
             myLongitude = displayLongitude(longitudesal, lonDirection);
@@ -837,11 +826,14 @@
         else if (shipType >= 30 && shipType <= 39) color = '#8800ff'; // Fishing vessels - purple
         else if (shipType >= 40 && shipType <= 49) color = '#ffcc00'; // High speed craft - yellow
         
+        // Correction de l'orientation : 0° = Nord, rotation dans le sens horaire
+        const correctedHeading = (heading + 0) % 360; // Pas de correction supplémentaire nécessaire si les données sont correctes
+        
         const iconHtml = `
             <div class="ais-ship-icon" style="
                 width: ${size}px; 
                 height: ${size}px; 
-                transform: rotate(${heading}deg);
+                transform: rotate(${correctedHeading}deg);
                 transform-origin: center center;
             ">
                 <svg width="${size}" height="${size}" viewBox="0 0 24 24">
@@ -872,8 +864,11 @@
             aisShipsLayer.removeLayer(aisShips[shipKey].marker);
         }
         
-        // Create new marker
-        const icon = createAISShipIcon(data.cog || 0, data.shipType || 0);
+        // Use heading if available, otherwise use COG
+        const displayHeading = data.heading !== undefined && data.heading !== 511 ? data.heading : (data.cog || 0);
+        
+        // Create new marker with corrected heading
+        const icon = createAISShipIcon(displayHeading, data.shipType || 0);
         const marker = L.marker(position, { icon }).addTo(aisShipsLayer);
         
         // Create tooltip content
@@ -882,6 +877,7 @@
             Name: ${data.name || 'Unknown'}<br>
             Course: ${data.cog?.toFixed(1) || 'N/A'}°<br>
             Speed: ${data.sog?.toFixed(1) || 'N/A'} knots<br>
+            Heading: ${data.heading !== undefined && data.heading !== 511 ? data.heading + '°' : 'N/A'}<br>
             Type: ${getShipTypeName(data.shipType || 0)}
         `;
         
@@ -930,37 +926,52 @@
             }
         });
     }
-    function decodeAISMessage(aisPayload: string) {
+    // ...existing code...
+    function decodeAISMessage(aisPayload: string, isOwnVesselData: boolean = false) {
         if (!aisPayload) return;
         const bitstring = ais6bitDecode(aisPayload);
         const msgType = parseInt(bitstring.slice(0, 6), 2);
-        const mmsi = parseInt(bitstring.slice(8, 38), 2).toString(); // Extract MMSI from payload
+        const mmsi = parseInt(bitstring.slice(8, 38), 2).toString();
         
-        // Check if this is our own vessel
-        const isOwnVessel = (myMMSI && isValidMMSI(myMMSI) && mmsi === myMMSI);
+        // Check if this is our own vessel (either from VDO flag or MMSI match)
+        const isOwnVessel = isOwnVesselData || (myMMSI && isValidMMSI(myMMSI) && mmsi === myMMSI);
         
         if (msgType === 1 || msgType === 2 || msgType === 3) {
-            // Position Report (Class A)
-            const lat = (parseInt(bitstring.slice(89, 116), 2) - 134217728) / 600000;
-            const lon = (parseInt(bitstring.slice(61, 89), 2) - 134217728) / 600000;
-            const cog = parseInt(bitstring.slice(116, 128), 2) / 10; // Course over ground
-            const sog = parseInt(bitstring.slice(50, 60), 2) / 10; // Speed over ground
-            const heading = parseInt(bitstring.slice(128, 137), 2); // True heading
+            // Position Report (Class A) - Correction du décodage des coordonnées
+            const latRaw = parseInt(bitstring.slice(89, 116), 2);
+            const lonRaw = parseInt(bitstring.slice(61, 89), 2);
+            
+            // Correction du complément à deux
+            let lat = (latRaw & 0x4000000) ? (latRaw - 0x8000000) : latRaw;
+            let lon = (lonRaw & 0x4000000) ? (lonRaw - 0x8000000) : lonRaw;
+            
+            lat = lat / 600000.0;
+            lon = lon / 600000.0;
+            
+            const cog = parseInt(bitstring.slice(116, 128), 2) / 10.0;
+            const sog = parseInt(bitstring.slice(50, 60), 2) / 10.0;
+            const heading = parseInt(bitstring.slice(128, 137), 2);
             
             if (lat !== 91 && lon !== 181) { // Valid coordinates
                 if (isOwnVessel) {
-                    // This is our own vessel - update our position data
+                    // Store our own MMSI if not set
+                    if (!myMMSI || !isValidMMSI(myMMSI)) {
+                        myMMSI = mmsi;
+                    }
+                    
                     data = `AIS MMSI: ${mmsi} (Own vessel)\nLat: ${lat.toFixed(5)}\nLon: ${lon.toFixed(5)}\nCOG: ${cog}°\nSOG: ${sog} nds`;
                     addBoatMarker(lat, lon, cog);
-                    myLatitude = lat.toFixed(5);
-                    myLongitude = lon.toFixed(5);
+                    myLatitude = displayLatitude(lat);
+                    myLongitude = displayLongitude(lon);
                     myCourseOverGroundT = cog;
                     mySpeedOverGround = sog;
                     lastLatitude = lat;
                     lastLongitude = lon;
+                    trueHeading = heading !== 511 ? heading : cog; // Use heading if available
                 } else {
-                    // This is an external vessel - add to AIS ships
-                    updateAISShip(mmsi, { lat, lon, cog, sog, heading });
+                    // External vessel - use corrected heading
+                    const displayHeading = heading !== 511 ? heading : cog;
+                    updateAISShip(mmsi, { lat, lon, cog, sog, heading: displayHeading });
                 }
             }
         } else if (msgType === 5) {
@@ -970,24 +981,28 @@
             let name = '';
             for (let i = 0; i < nameBits.length; i += 6) {
                 const charCode = parseInt(nameBits.slice(i, i + 6), 2);
+                if (charCode === 0) break;
                 name += aisAscii(charCode);
             }
             name = name.replace(/@+$/, '').trim();
             
             if (isOwnVessel) {
-                // This is our own vessel - update vessel name
-                vesselName = name;
+                if (name && name !== '') {
+                    vesselName = name;
+                }
             } else {
-                // This is an external vessel - store static data
                 if (!aisShips[mmsi]) {
                     aisShips[mmsi] = { marker: null, lastUpdate: Date.now() };
                 }
-                aisShips[mmsi].name = name;
+                if (name && name !== '') {
+                    aisShips[mmsi].name = name;
+                }
                 aisShips[mmsi].shipType = shipType;
                 aisShips[mmsi].lastUpdate = Date.now();
             }
         }
     }
+// ...existing code...
     
     /**
      * Décode le payload 6 bits AIS en binaire
