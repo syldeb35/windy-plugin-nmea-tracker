@@ -512,6 +512,7 @@
      * Updates position, speed, heading, vessel name, etc.
      * @returns {string|null} Frame type if successfully processed, null if error
      */
+    // ...existing code...
     function processNMEA(data: string): string | null {
         // Reset the no frame timer since we received a frame
         resetNoFrameTimer();
@@ -626,11 +627,7 @@
             }
             const newLat = latitude;
             const newLon = longitude;
-            /*
-            if (lastLatitude !== null && lastLongitude !== null && newLat !== null && newLon !== null) {
-                courseOverGround = calculateBearing(lastLatitude, lastLongitude, newLat, newLon);
-            }
-            */
+            
             lastLatitude = newLat;
             lastLongitude = newLon;
             if (!Number.isNaN(newLat) && !Number.isNaN(newLon)) {
@@ -638,7 +635,6 @@
             }
         }
 
-        // ...existing code...
         // Basic AIVDO (VDO) decoding
         if (data.startsWith('!') && data.includes('VDO')) {
             // Example: !AIVDO,1,1,,B,13aG?P0P00PD;88MD5MTDww@2D0k,0*7C
@@ -646,6 +642,35 @@
             if (parts.length < 6) {
                 addError("[Err] Invalid AIS VDO frame - insufficient parts");
                 return null;
+            }
+            
+            const total = parseInt(parts[1]);
+            const num = parseInt(parts[2]);
+            const seq = parts[3];
+            const aisPayload = parts[5];
+            const fragKey = seq + '-' + parts[4];
+
+            if (total > 1) {
+                // Fragmented VDO message - same logic as VDM
+                if (!aisFragments[fragKey]) {
+                    aisFragments[fragKey] = { total, received: 0, payloads: [] };
+                }
+                aisFragments[fragKey].payloads[num - 1] = aisPayload;
+                aisFragments[fragKey].received++;
+
+                if (aisFragments[fragKey].received === total) {
+                    const fullPayload = aisFragments[fragKey].payloads.join('');
+                    delete aisFragments[fragKey];
+                    // Process as own vessel data
+                    decodeAISMessage(fullPayload, true); // true = own vessel
+                }
+            } else {
+                // Non-fragmented VDO message
+                decodeAISMessage(aisPayload, true); // true = own vessel
+            }
+            return 'AIS VDO';
+        }
+
         // AIVDM (VDM) decoding - External AIS ships
         if (data.startsWith('!') && data.includes('AIVDM')) {
             const parts = data.split(',');
@@ -680,37 +705,6 @@
             return 'AIS VDM'; // Return frame type for AIS VDM processing
         }
 
-        // Return the frame type if successfully processed
-        return frameType;
-    }
-            longitude = convertLongitude(longitudesal, lonDirection);
-            myLatitude = displayLatitude(latitudesal, latDirection);
-            myLongitude = displayLongitude(longitudesal, lonDirection);
-            
-            if (courseOverGroundT !== null && courseOverGroundT !== undefined && !Number.isNaN(courseOverGroundT)) {
-                myCourseOverGroundT = parseFloat(courseOverGroundT.toFixed(2));
-            } else {
-                myCourseOverGroundT = myCourseOverGroundT; // If no data, keep the last value
-            }
-            if (speedOverGround !== null && speedOverGround !== undefined && !Number.isNaN(speedOverGround)) {
-                mySpeedOverGround = parseFloat(speedOverGround.toFixed(2));
-            } else {
-                mySpeedOverGround = mySpeedOverGround; // If no data, keep the last value
-            }
-            const newLat = latitude;
-            const newLon = longitude;
-            /*
-            if (lastLatitude !== null && lastLongitude !== null && newLat !== null && newLon !== null) {
-                courseOverGround = calculateBearing(lastLatitude, lastLongitude, newLat, newLon);
-            }
-            */
-            lastLatitude = newLat;
-            lastLongitude = newLon;
-            if (!Number.isNaN(newLat) && !Number.isNaN(newLon)) {
-                addBoatMarker(newLat, newLon, myCourseOverGroundT);
-            }
-        }
-        
         // Return the frame type if successfully processed
         return frameType;
     }
@@ -926,6 +920,11 @@
             }
         });
     }
+    /**
+     * Decodes AIS message payload and updates vessel data
+     * @param aisPayload - The AIS payload string
+     * @param isOwnVesselData - Flag indicating if this is our own vessel data
+     */
     // ...existing code...
     function decodeAISMessage(aisPayload: string, isOwnVesselData: boolean = false) {
         if (!aisPayload) return;
@@ -960,7 +959,8 @@
                     }
                     
                     data = `AIS MMSI: ${mmsi} (Own vessel)\nLat: ${lat.toFixed(5)}\nLon: ${lon.toFixed(5)}\nCOG: ${cog}°\nSOG: ${sog} nds`;
-                    addBoatMarker(lat, lon, cog);
+                    
+                    // Update position variables correctly
                     myLatitude = displayLatitude(lat);
                     myLongitude = displayLongitude(lon);
                     myCourseOverGroundT = cog;
@@ -968,6 +968,9 @@
                     lastLatitude = lat;
                     lastLongitude = lon;
                     trueHeading = heading !== 511 ? heading : cog; // Use heading if available
+                    
+                    // Add boat marker
+                    addBoatMarker(lat, lon, cog);
                 } else {
                     // External vessel - use corrected heading
                     const displayHeading = heading !== 511 ? heading : cog;
@@ -1002,7 +1005,6 @@
             }
         }
     }
-// ...existing code...
     
     /**
      * Décode le payload 6 bits AIS en binaire
