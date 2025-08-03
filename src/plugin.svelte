@@ -2,7 +2,7 @@
     {title}
 </div>
 
-<div popover id="help" class="plugin-summary" style="border-radius:8px; padding:12px; margin-bottom:16px;">
+<div id="help" class="plugin-summary" style="border-radius:8px; padding:12px; margin-bottom:16px;">
     <strong>GPS position tracker Windy</strong><br>
     This plugin displays real-time vessel position on Windy map from NMEA or AIS data received via UDP, TCP or serial port.<br>
     <ul style="margin:8px 0 0 18px;">
@@ -78,7 +78,7 @@
     </label>
     <p></p>
     <div class="centered">
-        <button popovertarget="help">🛳️ <big>Help</big> 🛳️</button>
+        <button data-popovertarget="help">🛳️ <big>Help</big> 🛳️</button>
     </div>
     
     <hr />
@@ -169,7 +169,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { map } from '@windy/map';
     import { getLatLonInterpolator } from '@windy/interpolator';
-    import { overlaySettings } from '@windy/config';
+    //import { overlaySettings } from '@windy/config';
     import { wind2obj, wave2obj } from '@windy/utils';
     import store from '@windy/store';
     import metrics from '@windy/metrics';
@@ -432,7 +432,7 @@
      * Updates the button text based on current overlay and projection hours
      */
     function updateButtonText() {
-        if (projectionHours > 1) {
+        if (projectionHours !== null && projectionHours > 1) {
             buttonText = `🌬️ Show ${CurrentOverlay} prediction (in ${projectionHours}h)`;
         } else {
             buttonText = `🌬️ Show ${CurrentOverlay} prediction`;
@@ -592,10 +592,18 @@
         
         // Position variables update (for GPS frames that have position data)
         if (frameType && ['GLL', 'GGA', 'RMC'].includes(frameType)) {
-            latitude = convertLatitude(latitudesal, latDirection);
-            longitude = convertLongitude(longitudesal, lonDirection);
-            myLatitude = displayLatitude(latitudesal, latDirection);
-            myLongitude = displayLongitude(longitudesal, lonDirection);
+            latitude = (latitudesal !== null && latDirection !== null)
+                ? convertLatitude(latitudesal, latDirection)
+                : null;
+            longitude = (longitudesal !== null && lonDirection !== null)
+                ? convertLongitude(longitudesal, lonDirection)
+                : null;
+            myLatitude = (latitudesal !== null && latDirection !== null)
+                ? displayLatitude(latitudesal, latDirection)
+                : null;
+            myLongitude = (longitudesal !== null && lonDirection !== null)
+                ? displayLongitude(longitudesal, lonDirection)
+                : null;
             
             if (courseOverGroundT !== null && courseOverGroundT !== undefined && !Number.isNaN(courseOverGroundT)) {
                 myCourseOverGroundT = parseFloat(courseOverGroundT.toFixed(2));
@@ -612,7 +620,10 @@
             
             lastLatitude = newLat;
             lastLongitude = newLon;
-            if (!Number.isNaN(newLat) && !Number.isNaN(newLon)) {
+            if (
+                newLat !== null && newLon !== null &&
+                !Number.isNaN(newLat) && !Number.isNaN(newLon)
+            ) {
                 addBoatMarker(newLat, newLon, myCourseOverGroundT);
             }
         }
@@ -712,7 +723,7 @@
      * Removes errors from the error list based on frame type
      * @param {string|string[]} frameTypes - Frame type(s) to remove errors for
      */
-    function removeErrorsByType(frameTypes) {
+    function removeErrorsByType(frameTypes: string | string[]) {
         const typesToRemove = Array.isArray(frameTypes) ? frameTypes : [frameTypes];
         
         // Remove errors that contain any of the specified frame types
@@ -1098,7 +1109,7 @@
 
         openedPopup = popup;
 
-        getLatLonInterpolator().then(interpolator => {
+        getLatLonInterpolator().then((interpolator: any) => {
             if (!interpolator) {
                 popup.setContent('Weather layer not available.');
                 return;
@@ -1106,22 +1117,19 @@
 
             // Choose timestamp according to context
             let ts: number;
-            let forecastDate: Date;
             if (useProjectionTime) {
                 ts = getRoundedHourTimestamp(store.get('timestamp')); // projection time (forecast)
             } else {
                 ts = getRoundedHourTimestamp(Date.now()); // current time
             }
-            if (ts) {
-                forecastDate = new Date(ts);
-            }
+            const forecastDate = ts ? new Date(ts) : new Date();
 
             const overlay = store.get('overlay');
             const values = interpolator({ lat, lon });
             let content = `<div style="text-align: center;"><strong>${vesselName}</strong><br>φ = ${displayLatitude(lat)}, λ= ${displayLongitude(lon)}</div>`;
             if (projectionHours === 0) {
                 content += `<hr><div><small><strong>${overlay} actual forecast :</strong></small></div>`;
-            } else if (projectionHours > 0) {
+            } else if (projectionHours !== null && projectionHours > 0) {
                 content += `<hr><div><small><strong>${overlay} forecast in ${projectionHours} hours :</strong></small></div>`;
             }
             if (!Array.isArray(values)) {
@@ -1201,7 +1209,7 @@
             content += `<hr><div style="text-align: right;"><small><strong>Forecast date : </strong>${forecastDate.toUTCString()}</small></div>`;
             // Uncomment to display forecast date in the popup
             //content += `${forecastDate.toString()}</small>`;
-            popup.setContent(content);
+            content += `<hr><div style="text-align: right;"><small><strong>Forecast date : </strong>${forecastDate ? forecastDate.toUTCString() : ''}</small></div>`;
         });
     } // End showMyPopup
 
@@ -1246,7 +1254,7 @@
         }).addTo(markerLayer);
 
         // Future projection arrow (use effective values for test mode)
-        const cogEnd = computeProjection(lat, lon, effectiveCOG, effectiveSOG, projectionHours);
+        const cogEnd = computeProjection(lat, lon, effectiveCOG, effectiveSOG, projectionHours ?? undefined);
         if (projectionArrow) projectionArrow.remove();
         projectionArrow = L.polyline([Position, cogEnd], {
             color: testModeEnabled ? 'orange' : 'red', // Different color in test mode
@@ -1328,9 +1336,9 @@
             const now = getRoundedHourTimestamp(Date.now());
             const ts = getRoundedHourTimestamp(store.get('timestamp'));
             // If timeline is at current time (±1h)
-            if (projectionHours < (1)) {
+            if (projectionHours !== null && projectionHours < 1) {
                 showMyPopup(lastLatitude, lastLongitude, false);
-            } else if (projectionHours >= (1)) {
+            } else if (projectionHours !== null && projectionHours >= 1) {
                 // Display on projected position if timeline in the future
                 const projected = computeProjection(lastLatitude, lastLongitude, effectiveCOG, effectiveSOG, projectionHours);
                 showMyPopup(projected.lat, projected.lng, true);
