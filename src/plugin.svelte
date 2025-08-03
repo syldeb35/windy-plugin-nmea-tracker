@@ -48,10 +48,10 @@
     <!-- <p>TCP: <code>{tcpIp}:{tcpPort}</code></p> -->
     <!-- <p>Request from: <strong>{requestIp}</strong></p> -->
 
-    <!-- <label class="centered">
+    <label class="centered">
         Vessel name:
-        <input type="text" bind:value={vesselName} />
-    </label> -->
+        <input type="text" bind:value={vesselName} placeholder="Enter vessel name" />
+    </label>
     <label class="right-aligned">
         Server address : 
         <input 
@@ -181,7 +181,6 @@
     const L = (window as any).L;
     
     const title = 'NMEA tracker plugin';
-    const VESSEL = 'YOUR BOAT';
     let route = 'https://localhost:5000'; // Replace with your NMEA server URL
     
      // Server configuration variables
@@ -388,7 +387,7 @@
     let mySpeedOverGround: number = 0; // In knots
     let heurePrev: number | null = null; // for projection
     let followShip = false; // do not follow ship by default
-    let vesselName = VESSEL;
+    let vesselName = 'YOUR BOAT';
     let CurrentOverlay = 'Windy'; // Default overlay, can be changed later
 
     let socket: any = null;
@@ -464,23 +463,6 @@
         target.value = testCOG.toString();
     }
 
-    /**
-     * Handles arrow key presses for cyclical COG behavior
-    function handleCOGKeydown(event: KeyboardEvent) {
-        const target = event.target as HTMLInputElement;
-        const currentValue = parseInt(target.value) || 0;
-        
-        if (event.key === 'ArrowUp') {
-            event.preventDefault();
-            testCOG = normalizeCOG(currentValue + 1);
-            target.value = testCOG.toString();
-        } else if (event.key === 'ArrowDown') {
-            event.preventDefault();
-            testCOG = normalizeCOG(currentValue - 1);
-            target.value = testCOG.toString();
-        }
-    }
-     */
 
     /**
      * Adds NMEA frame type to history (keep last 10)

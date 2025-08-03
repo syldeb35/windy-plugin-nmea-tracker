@@ -13,6 +13,7 @@ import { less } from 'svelte-preprocess-less';
 import sveltePreprocess from 'svelte-preprocess';
 
 import { transformCodeToESMPlugin, keyPEM, certificatePEM } from '@windycom/plugin-devtools';
+import { windyImportsPlugin } from './src/windy-imports-plugin.js';
 
 const useSourceMaps = false; // Set to true if you want to generate source maps
 
