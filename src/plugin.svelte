@@ -30,97 +30,101 @@
     </button>
     
     {#if userOS === 'Windows'}
-        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/1W_CtJgLw57gbtDJlDJ5Fk_5hpp42NV6i/view?usp=drive_link" target="_blank">NMEA tracker server (for Windows)</a></strong></p>
+        <p style="margin-bottom: 12px;">Prerequisite: <strong><a href="https://drive.google.com/file/d/1W_CtJgLw57gbtDJlDJ5Fk_5hpp42NV6i/view?usp=drive_link" target="_blank">NMEA tracker server (for Windows)</a></strong></p>
     {:else if userOS === 'Linux'}
-        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/1gtHy7I55g-o26V-Ryx_oOifvlxGAqIF6/view?usp=drive_link" target="_blank">NMEA tracker server (for Linux)</a></strong></p>
+        <p style="margin-bottom: 12px;">Prerequisite: <strong><a href="https://drive.google.com/file/d/1gtHy7I55g-o26V-Ryx_oOifvlxGAqIF6/view?usp=drive_link" target="_blank">NMEA tracker server (for Linux)</a></strong></p>
     {:else if userOS.includes('macOS') && userOS.includes('Intel')}
-        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/13x7YSK_oX0mUgWyk-88h7bWsYqAyfaSx/view?usp=drive_link" target="_blank">NMEA tracker server (for macOS Intel)</a></strong></p>
+        <p style="margin-bottom: 12px;">Prerequisite: <strong><a href="https://drive.google.com/file/d/13x7YSK_oX0mUgWyk-88h7bWsYqAyfaSx/view?usp=drive_link" target="_blank">NMEA tracker server (for macOS Intel)</a></strong></p>
     {:else if userOS.includes('macOS') && userOS.includes('Apple Silicon')}
-        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/1N0-qNmHeDdbN0TmdcHszFqZVkFIdSrCW/view?usp=drive_link" target="_blank">NMEA tracker server (for macOS Apple Silicon)</a></strong></p>
+        <p style="margin-bottom: 12px;">Prerequisite: <strong><a href="https://drive.google.com/file/d/1N0-qNmHeDdbN0TmdcHszFqZVkFIdSrCW/view?usp=drive_link" target="_blank">NMEA tracker server (for macOS Apple Silicon)</a></strong></p>
     {:else if userOS.includes('macOS')}
-        <p>Prerequisite: <strong><a href="https://drive.google.com/file/d/1N0-qNmHeDdbN0TmdcHszFqZVkFIdSrCW/view?usp=drive_link" target="_blank">NMEA tracker server (for macOS)</a></strong></p>
+        <p style="margin-bottom: 12px;">Prerequisite: <strong><a href="https://drive.google.com/file/d/1N0-qNmHeDdbN0TmdcHszFqZVkFIdSrCW/view?usp=drive_link" target="_blank">NMEA tracker server (for macOS)</a></strong></p>
     {:else}
-        <p>Prerequisite: <strong><a href="https://drive.google.com/drive/folders/1P1H36AiJA98XaYRdEsfCV8L59EiUXKAG?usp=drive_link" target="_blank">NMEA tracker server</a></strong></p>
+        <p style="margin-bottom: 12px;">Prerequisite: <strong><a href="https://drive.google.com/drive/folders/1P1H36AiJA98XaYRdEsfCV8L59EiUXKAG?usp=drive_link" target="_blank">NMEA tracker server</a></strong></p>
     {/if}
-    <p>Configure the server: <a href="{route}/config.html" target="_blank">Configuration</a></p>
-    <p>Test the server: <a href="{route}" target="_blank"><code>Testing</code></a></p>
-    <!-- <p>UDP: <code>{udpIp}:{udpPort}</code></p> -->
-    <!-- <p>TCP: <code>{tcpIp}:{tcpPort}</code></p> -->
-    <!-- <p>Request from: <strong>{requestIp}</strong></p> -->
-
-    <label class="centered">
-        Vessel name:
-        <input type="text" bind:value={vesselName} placeholder="Enter vessel name" />
-    </label>
-    <label class="right-aligned">
-        Server address : 
+    <p style="margin-bottom: 12px;">Configure the server: <a href="{route}/config.html" target="_blank">Configuration</a></p>
+     <label class="right-aligned" style="margin-bottom: 12px;">
+        Server address : &nbsp; &nbsp;
         <input 
             type="text" 
             bind:value={serverHost} 
             on:input={updateRoute}
             placeholder="localhost or IP address" 
-            style="width: 100px;" 
+            style="width: 150px; height: 20px; font-weight: bold;"
         />
     </label>
-    <p style="font-size: 12px; color: #666; margin: 5px 0;">
-        🌐 Full server URL: <code>{route}</code>
-    </p>
-    
-    <label class="right-aligned">
-        Your MMSI : 
-        <input 
-            type="text" 
-            bind:value={myMMSI} 
-            placeholder="e.g. 123456789"
-            style="width: 100px;" 
-            maxlength="9" 
-            />
-    </label>
-    <p></p>
-    <div class="centered">
-        <button data-popovertarget="help">🛳️ <big>Help</big> 🛳️</button>
-    </div>
-    
-    <hr />
-
-    {#if nmeaHistory.length > 0}
-        <p><strong>Last received NMEA frames:</strong></p>
-        <p class="nmea-types">{nmeaHistory.join(', ')}</p>
-        <p><strong>Latitude:</strong> {myLatitude}</p>
-        <p><strong>Longitude:</strong> {myLongitude}</p>
-        <p><strong>Course over ground:</strong> 
-            {testModeEnabled ? `${testCOG}° (TEST)` : `${myCourseOverGroundT}°`}
-        </p>
-        <p><strong>Speed over ground:</strong> 
-            {testModeEnabled ? `${testSOG} knots (TEST)` : `${mySpeedOverGround} knots`}
-        </p>
-
-        <div class="plugin__buttons">
-            <button on:click={centerShip}>📍 Center on vessel</button>
-            <button on:click={toggleFollowShip}>
-                {followShip ? '🛑 Stop Tracking' : '▶️ Follow vessel'}
-            </button> <br>
-            <br>
-            <button id="button" on:click={showWeatherPopup}>{buttonText}</button>
-        </div>
-    {/if}    
-    <hr />
-    <p class="follow-state">
-      📡 Automatic tracking: {followShip ? 'Enabled' : 'Disabled'}
-    </p>
-    <p class="connection-state">
+    <p style="margin-bottom: 12px;">Test the server: <a href="{route}" target="_blank"><code>Testing</code></a></p>
+    <p class="connection-state" style="margin-bottom: 12px;">
       🔌 Connection: <span class={isConnected ? ' connected' : ' disconnected'}>
         {isConnected ? ' Connected' : ' Disconnected'}
       </span>
     </p>
+    <hr />
+    {#if !myMMSI}
+    <label class="mmsi-state">
+        Vessel name : &nbsp; &nbsp;
+        <input 
+            type="text" 
+            bind:value={vesselName} 
+            placeholder="Enter vessel name" 
+            style="width: 150px; height: 20px; font-weight: bold;"
+        />
+    </label>
+    {/if}
     {#if myMMSI}
+    <p class="mmsi-state">
+      🆔 Vessel name: {vesselName} {isValidMMSI(myMMSI) ? '✅' : '❌'}
+    </p>
     <p class="mmsi-state">
       🆔 MMSI: {myMMSI} {isValidMMSI(myMMSI) ? '✅' : '❌ Invalid format'}
     </p>
     {/if}
-    <p class="debug-info" style="font-size: 12px; color: #666; margin-top: 5px;">
-      💻 Detected OS: {userOS}
-    </p>
+    <hr />
+
+    {#if nmeaHistory.length > 0}
+        <!-- <p><strong>Last received NMEA frames:</strong></p>
+        <p class="nmea-types">{nmeaHistory.join(', ')}</p> -->
+        <p><strong>Latitude:</strong> {myLatitude}</p>
+        <p><strong>Longitude:</strong> {myLongitude}</p>
+        <p><strong>Course over ground:</strong> 
+            {testModeEnabled ? `${testCOG.toFixed(1)}° (TEST)` : `${myCourseOverGroundT.toFixed(1)}°`}
+        </p>
+        <p><strong>Speed over ground:</strong> 
+            {testModeEnabled ? `${testSOG.toFixed(1)} knots (TEST)` : `${mySpeedOverGround.toFixed(1)} knots`}
+        </p>
+        <div class="plugin__buttons__centered">
+            <button on:click={centerShip}>📍 Center on vessel</button>
+            <button on:click={toggleFollowShip}>
+                {followShip ? '🛑 Stop Tracking' : '▶️ Follow vessel'}
+            </button>
+        </div>
+        <div class="plugin__buttons__centered">
+            <button id="button" on:click={showWeatherPopup}>{buttonText}</button>
+        </div>
+    {/if}
+    <!-- Boat Icon Size Control -->
+    <hr />
+    <div class="icon-size-section">
+        <label for="boatIconSize" style="display: block; margin-bottom: 8px;">
+            <strong>🚢 Boat Icon Size: {boatIconSize.toFixed(1)}x</strong>
+        </label>
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 12px;">Small</span>
+            <input 
+                type="range" 
+                id="boatIconSize"
+                bind:value={boatIconSize}
+                min="0.5" 
+                max="2.0" 
+                step="0.1"
+                style="flex: 1;"
+            />
+            <span style="font-size: 12px;">Large</span>
+        </div>
+        <p style="font-size: 12px; color: #666; margin: 5px 0;">
+            Adjust the size of your boat icon on the map (0.5x to 2.0x)
+        </p>
+    </div>    
     
     <!-- Test Mode Controls -->
     <hr />
@@ -132,19 +136,26 @@
       </label>
       {#if testModeEnabled}
         <div style="margin-top: 10px;">
-          <label class="centered">
-            Test SOG (knots):
-            <input type="number" bind:value={testSOG} min="0" max="30" step="0.1" style="width: 80px;" />
+          <label class="right-aligned">
+            Test SOG (knots) : &nbsp; &nbsp;
+            <input
+                type="number"
+                bind:value={testSOG}
+                min="0"
+                max="30"
+                step="0.1"
+                style="width: 80px; font-weight: bold;"
+            />
           </label>
-          <label class="centered">
-            Test COG (degrees):
+          <label class="right-aligned">
+            Test COG (degrees) : &nbsp; &nbsp;
             <input 
               type="number" 
               value={testCOG}
               on:input={handleCOGInput}
               on:change={handleCOGInput}
               step="1" 
-              style="width: 80px;" 
+              style="width: 80px; font-weight: bold;" 
             />
           </label>
           <p style="font-size: 12px; color: #666; margin-top: 5px;">
@@ -157,8 +168,15 @@
         <p></p>
     </div>
     <div id="footer">
-      <p>© 2025 Capt S. DEBRAY - v{config.version}</p>
-      <p><a href="https://github.com/syldeb35/windy-plugin-nmea-tracker" target="_blank">🛳️ Sources and info 🛳️</a></p>
+    <div class="centered">
+        <button data-popovertarget="help">🛳️ <big>Help</big> 🛳️</button>
+    </div>
+        <br />
+        <p>© 2025 Capt S. DEBRAY - v{config.version}</p>
+        <p><a href="https://github.com/syldeb35/windy-plugin-nmea-tracker" target="_blank">🛳️ Sources and info 🛳️</a></p>
+        <p class="debug-info" style="font-size: 12px; color: #666; margin-top: 5px;">
+        💻 Detected OS: {userOS}
+        </p>
     </div>
 </section>
 
@@ -190,6 +208,12 @@
     // Function to update the route when server host changes
     function updateRoute() {
         route = `https://${serverHost}:${serverPort}`;
+        
+        // Reconnect to the new server if socket exists and is initialized
+        if (socket !== null && socket !== undefined) {
+            console.log('Server address changed, reconnecting to:', route);
+            createSocketConnection();
+        }
     }
     
     /**
@@ -269,17 +293,52 @@
             resetNoFrameTimer();
         });
 
-        socket.on('nmea_data', (data: string) => {
+        /*socket.on('nmea_data', (data: string) => {
             const frameType = processNMEA(data);
             if (frameType) {
                 removeErrorsByType(frameType);
             }
             updateErrorDisplay();
+        }); */
+
+        socket.on('nmea_data', (data: any) => {
+            try {
+                let nmeaString: string;
+                
+                // Gérer différents formats de données
+                if (typeof data === 'string') {
+                    nmeaString = data;
+                } else if (typeof data === 'object' && data !== null) {
+                    // Essayer différentes propriétés communes
+                    if (data.data && typeof data.data === 'string') {
+                        nmeaString = data.data;
+                    } else if (data.message && typeof data.message === 'string') {
+                        nmeaString = data.message;
+                    } else if (data.nmea && typeof data.nmea === 'string') {
+                        nmeaString = data.nmea;
+                    } else {
+                        // Si c'est un objet, essayer de le convertir en JSON puis en string
+                        nmeaString = JSON.stringify(data);
+                    }
+                } else {
+                    // Pour tous les autres types, convertir en string
+                    nmeaString = String(data);
+                }
+                
+                // Traiter la chaîne NMEA
+                const frameType = processNMEA(nmeaString);
+                if (frameType) {
+                    removeErrorsByType(frameType);
+                    isConnected = true;
+                }
+            } catch (error) {
+                console.warn('Erreur lors du traitement des données NMEA:', error, 'Données reçues:', data);
+                addError("[Err] Format de données NMEA invalide");
+            }
+            
+            updateErrorDisplay();
         });
     }
-    
-    // Initialize route on component load
-    updateRoute();
     
     // Detect user's operating system with detailed macOS detection
     function detectOSAdvanced() {
@@ -402,6 +461,8 @@
     let openedPopup: any = null;
     // Store AIS ships data globally so all functions can access it
     let aisShips: { [mmsi: string]: any } = {};
+    // Boat icon size control
+    let boatIconSize: number = 1.0; // Default size multiplier (0.5 to 2.0)
 
     let udpIp = '0.0.0.0';
     let udpPort = 5005;
@@ -409,7 +470,6 @@
     let tcpPort = 5006;
     let myMMSI = ''; // Our own MMSI for comparison
 
-    let aisFragments: { [key: string]: { total: number, received: number, payloads: string[] } } = {};
     let unsubscribeTimeline: (() => void) | null = null;
     let unsubscribeOverlay: (() => void) | null = null;
     let projectionHours: number | null = null; // for projection
@@ -427,6 +487,19 @@
 
     // Button text variables for reactive updates
     let buttonText: string = "🌬️ Show Windy prediction";
+
+    // Variables pour la gestion des fragments AIS (à ajouter dans les déclarations)
+    let aisFragments: { [key: string]: { 
+        total: number, 
+        received: number, 
+        payloads: string[], 
+        timestamp: number,
+        mmsi?: string 
+    } } = {};
+
+    // Timer pour nettoyer les fragments expirés
+    let fragmentCleanupTimer: number | null = null;
+
 
     /**
      * Updates the button text based on current overlay and projection hours
@@ -490,11 +563,107 @@
     }
 
     /**
+     * Nettoie les fragments AIS expirés (plus de 30 secondes)
+     */
+    function cleanupExpiredAISFragments() {
+        const now = Date.now();
+        const maxAge = 60 * 1000; // 60 secondes
+        
+        Object.keys(aisFragments).forEach(fragKey => {
+            if (now - aisFragments[fragKey].timestamp > maxAge) {
+                console.warn(`AIS fragment expired: ${fragKey}`);
+                delete aisFragments[fragKey];
+            }
+        });
+    }
+
+    /**
+     * Démarre le timer de nettoyage des fragments
+     */
+    function startFragmentCleanup() {
+        if (fragmentCleanupTimer) {
+            clearInterval(fragmentCleanupTimer);
+        }
+        // Nettoie toutes les 10 secondes
+        fragmentCleanupTimer = setInterval(cleanupExpiredAISFragments, 10000);
+    }
+
+    /**
+     * Traite un fragment AIS et gère l'assemblage
+     */
+    function processAISFragment(
+        total: number, 
+        num: number, 
+        seq: string, 
+        channel: string, 
+        aisPayload: string, 
+        isOwnVessel: boolean = false
+    ): boolean {
+        // Créer une clé unique basée sur plusieurs critères
+        const fragKey = `${seq || 'empty'}-${channel || 'A'}-${total}`;
+        
+        if (total > 1) {
+            // Message fragmenté
+            if (!aisFragments[fragKey]) {
+                aisFragments[fragKey] = { 
+                    total, 
+                    received: 0, 
+                    payloads: new Array(total), // Pré-allouer le tableau
+                    timestamp: Date.now()
+                };
+            }
+            
+            // Vérifier la cohérence
+            if (aisFragments[fragKey].total !== total) {
+                console.warn(`AIS fragment total mismatch for ${fragKey}: expected ${aisFragments[fragKey].total}, got ${total}`);
+                delete aisFragments[fragKey];
+                return false;
+            }
+            
+            // Ajouter le fragment (num est 1-indexé)
+            if (num >= 1 && num <= total) {
+                // Éviter les doublons
+                if (!aisFragments[fragKey].payloads[num - 1]) {
+                    aisFragments[fragKey].payloads[num - 1] = aisPayload;
+                    aisFragments[fragKey].received++;
+                    aisFragments[fragKey].timestamp = Date.now(); // Mettre à jour le timestamp
+                }
+                
+                // Vérifier si tous les fragments sont reçus
+                if (aisFragments[fragKey].received === total) {
+                    // Vérifier qu'aucun fragment n'est manquant
+                    const hasAllFragments = aisFragments[fragKey].payloads.every(payload => payload !== undefined);
+                    
+                    if (hasAllFragments) {
+                        const fullPayload = aisFragments[fragKey].payloads.join('');
+                        console.log(`AIS message assembled from ${total} fragments: ${fragKey}`);
+                        delete aisFragments[fragKey];
+                        decodeAISMessage(fullPayload, isOwnVessel);
+                        return true;
+                    } else {
+                        console.warn(`AIS fragments incomplete for ${fragKey}, missing fragments detected`);
+                        delete aisFragments[fragKey];
+                        return false;
+                    }
+                }
+            } else {
+                console.warn(`Invalid AIS fragment number ${num} for total ${total}`);
+                return false;
+            }
+        } else {
+            // Message non fragmenté
+            decodeAISMessage(aisPayload, isOwnVessel);
+            return true;
+        }
+        
+        return false; // Fragment en attente
+    }
+
+    /**
      * Processes each received NMEA/AIS frame.
      * Updates position, speed, heading, vessel name, etc.
      * @returns {string|null} Frame type if successfully processed, null if error
      */
-    // ...existing code...
     function processNMEA(data: string): string | null {
         // Reset the no frame timer since we received a frame
         resetNoFrameTimer();
@@ -606,12 +775,12 @@
                 : null;
             
             if (courseOverGroundT !== null && courseOverGroundT !== undefined && !Number.isNaN(courseOverGroundT)) {
-                myCourseOverGroundT = parseFloat(courseOverGroundT.toFixed(2));
+                myCourseOverGroundT = parseFloat(courseOverGroundT.toFixed(1));
             } else {
                 myCourseOverGroundT = myCourseOverGroundT; // If no data, keep the last value
             }
             if (speedOverGround !== null && speedOverGround !== undefined && !Number.isNaN(speedOverGround)) {
-                mySpeedOverGround = parseFloat(speedOverGround.toFixed(2));
+                mySpeedOverGround = parseFloat(speedOverGround.toFixed(1));
             } else {
                 mySpeedOverGround = mySpeedOverGround; // If no data, keep the last value
             }
@@ -628,9 +797,8 @@
             }
         }
 
-        // Basic AIVDO (VDO) decoding
+        // AIVDO (VDO) decoding
         if (data.startsWith('!') && data.includes('VDO')) {
-            // Example: !AIVDO,1,1,,B,13aG?P0P00PD;88MD5MTDww@2D0k,0*7C
             const parts = data.split(',');
             if (parts.length < 6) {
                 addError("[Err] Invalid AIS VDO frame - insufficient parts");
@@ -640,27 +808,10 @@
             const total = parseInt(parts[1]);
             const num = parseInt(parts[2]);
             const seq = parts[3];
+            const channel = parts[4];
             const aisPayload = parts[5];
-            const fragKey = seq + '-' + parts[4];
-
-            if (total > 1) {
-                // Fragmented VDO message - same logic as VDM
-                if (!aisFragments[fragKey]) {
-                    aisFragments[fragKey] = { total, received: 0, payloads: [] };
-                }
-                aisFragments[fragKey].payloads[num - 1] = aisPayload;
-                aisFragments[fragKey].received++;
-
-                if (aisFragments[fragKey].received === total) {
-                    const fullPayload = aisFragments[fragKey].payloads.join('');
-                    delete aisFragments[fragKey];
-                    // Process as own vessel data
-                    decodeAISMessage(fullPayload, true); // true = own vessel
-                }
-            } else {
-                // Non-fragmented VDO message
-                decodeAISMessage(aisPayload, true); // true = own vessel
-            }
+            
+            processAISFragment(total, num, seq, channel, aisPayload, true);
             return 'AIS VDO';
         }
 
@@ -671,33 +822,16 @@
                 addError("[Err] Invalid AIS AIVDM frame - insufficient parts");
                 return null;
             }
+            
             const total = parseInt(parts[1]);
             const num = parseInt(parts[2]);
-            const seq = parts[3]; // sequence identifier (can be empty)
+            const seq = parts[3];
+            const channel = parts[4];
             const aisPayload = parts[5];
-            const fragKey = seq + '-' + parts[4]; // unique key for fragmented message
-
-            if (total > 1) {
-                // Fragmented message
-                if (!aisFragments[fragKey]) {
-                    aisFragments[fragKey] = { total, received: 0, payloads: [] };
-                }
-                aisFragments[fragKey].payloads[num - 1] = aisPayload;
-                aisFragments[fragKey].received++;
-
-                // If all fragments are received
-                if (aisFragments[fragKey].received === total) {
-                    const fullPayload = aisFragments[fragKey].payloads.join('');
-                    delete aisFragments[fragKey];
-                    decodeAISMessage(fullPayload);
-                }
-            } else {
-                // Non-fragmented message
-                decodeAISMessage(aisPayload);
-            }
-            return 'AIS VDM'; // Return frame type for AIS VDM processing
+            
+            processAISFragment(total, num, seq, channel, aisPayload, false);
+            return 'AIS VDM';
         }
-
         // Return the frame type if successfully processed
         return frameType;
     }
@@ -813,18 +947,23 @@
         else if (shipType >= 30 && shipType <= 39) color = '#8800ff'; // Fishing vessels - purple
         else if (shipType >= 40 && shipType <= 49) color = '#ffcc00'; // High speed craft - yellow
         
-        // Correction de l'orientation : 0° = Nord, rotation dans le sens horaire
-        const correctedHeading = (heading + 0) % 360; // Pas de correction supplémentaire nécessaire si les données sont correctes
+        // Ensure heading is valid (0-359 degrees)
+        const validHeading = isNaN(heading) || heading === 511 ? 0 : ((heading % 360) + 360) % 360;
         
         const iconHtml = `
             <div class="ais-ship-icon" style="
                 width: ${size}px; 
                 height: ${size}px; 
-                transform: rotate(${correctedHeading}deg);
-                transform-origin: center center;
+                display: flex;
+                justify-content: center;
+                align-items: center;
             ">
-                <svg width="${size}" height="${size}" viewBox="0 0 24 24">
-                    <path d="M12 2L4 12h16L12 2z" fill="${color}" stroke="#000" stroke-width="1"/>
+                <svg width="${size}" height="${size}" viewBox="0 0 24 24" style="
+                    transform: rotate(${validHeading}deg);
+                    transform-origin: center center;
+                ">
+                    <path d="M12 2 L8 6 L6 12 L8 18 L16 18 L18 12 L16 6 Z" fill="${color}" stroke="#000" stroke-width="0.8"/>
+                    <circle cx="12" cy="12" r="1" fill="#fff"/>
                 </svg>
             </div>
         `;
@@ -874,12 +1013,32 @@
             className: 'ais-ship-tooltip' 
         });
         
-        // Store ship data
+                // Store ship data with consolidated structure
+        const existingData = aisShips[shipKey]?.data || {};
+        const name = data.name || aisShips[shipKey]?.name || 'Unknown';
+        const shipType = data.shipType || aisShips[shipKey]?.shipType || 0;
+        
         aisShips[shipKey] = {
+            ...aisShips[shipKey],
             marker: marker,
-            data: data,
+            data: { ...existingData, ...data },
+            name: name,
+            shipType: shipType,
             lastUpdate: Date.now()
         };
+        
+        // Update tooltip with latest name if it changed
+        if (aisShips[shipKey].name !== 'Unknown') {
+            const updatedTooltipContent = `
+                <strong>MMSI: ${mmsi}</strong><br>
+                Name: ${aisShips[shipKey].name}<br>
+                Course: ${data.cog?.toFixed(1) || 'N/A'}°<br>
+                Speed: ${data.sog?.toFixed(1) || 'N/A'} knots<br>
+                Heading: ${data.heading !== undefined && data.heading !== 511 ? data.heading + '°' : 'N/A'}<br>
+                Type: ${getShipTypeName(aisShips[shipKey].shipType)}
+            `;
+            marker.setTooltipContent(updatedTooltipContent);
+        }
     }
 
     /**
@@ -902,23 +1061,30 @@
      */
     function cleanupOldAISShips() {
         const now = Date.now();
-        const maxAge = 10 * 60 * 1000; // 10 minutes
+        const positionMaxAge = 10 * 60 * 1000; // 10 minutes for position data
+        const staticMaxAge = 30 * 60 * 1000; // 30 minutes for ships with static data (names)
         
         Object.keys(aisShips).forEach(mmsi => {
-            if (now - aisShips[mmsi].lastUpdate > maxAge) {
-                if (aisShips[mmsi].marker) {
-                    aisShipsLayer.removeLayer(aisShips[mmsi].marker);
+            const ship = aisShips[mmsi];
+            const age = now - ship.lastUpdate;
+            
+            // Use longer timeout for ships with names (static data)
+            const maxAge = ship.name && ship.name !== 'Unknown' ? staticMaxAge : positionMaxAge;
+            
+            if (age > maxAge) {
+                if (ship.marker) {
+                    aisShipsLayer.removeLayer(ship.marker);
                 }
                 delete aisShips[mmsi];
             }
         });
     }
+
     /**
      * Decodes AIS message payload and updates vessel data
      * @param aisPayload - The AIS payload string
      * @param isOwnVesselData - Flag indicating if this is our own vessel data
      */
-    // ...existing code...
     function decodeAISMessage(aisPayload: string, isOwnVesselData: boolean = false) {
         if (!aisPayload) return;
         const bitstring = ais6bitDecode(aisPayload);
@@ -929,14 +1095,17 @@
         const isOwnVessel = isOwnVesselData || (myMMSI && isValidMMSI(myMMSI) && mmsi === myMMSI);
         
         if (msgType === 1 || msgType === 2 || msgType === 3) {
-            // Position Report (Class A) - Correction du décodage des coordonnées
-            const latRaw = parseInt(bitstring.slice(89, 116), 2);
-            const lonRaw = parseInt(bitstring.slice(61, 89), 2);
+            // Position Report (Class A) - CORRECTION du décodage des coordonnées
+            // Dans l'AIS : longitude vient en premier (bits 61-88), puis latitude (bits 89-115)
+            const lonRaw = parseInt(bitstring.slice(61, 89), 2);  // 28 bits pour longitude
+            const latRaw = parseInt(bitstring.slice(89, 116), 2); // 27 bits pour latitude
             
-            // Correction du complément à deux
+            // Correction du complément à deux pour 28 bits (longitude)
+            let lon = (lonRaw & 0x8000000) ? (lonRaw - 0x10000000) : lonRaw;
+            // Correction du complément à deux pour 27 bits (latitude)  
             let lat = (latRaw & 0x4000000) ? (latRaw - 0x8000000) : latRaw;
-            let lon = (lonRaw & 0x4000000) ? (lonRaw - 0x8000000) : lonRaw;
             
+            // Conversion en degrés décimaux
             lat = lat / 600000.0;
             lon = lon / 600000.0;
             
@@ -951,13 +1120,13 @@
                         myMMSI = mmsi;
                     }
                     
-                    data = `AIS MMSI: ${mmsi} (Own vessel)\nLat: ${lat.toFixed(5)}\nLon: ${lon.toFixed(5)}\nCOG: ${cog}°\nSOG: ${sog} nds`;
+                    data = `AIS MMSI: ${mmsi} (Own vessel)\nLat: ${lat.toFixed(5)}\nLon: ${lon.toFixed(5)}\nCOG: ${cog.toFixed(1)}°\nSOG: ${sog.toFixed(1)} nds`;
                     
                     // Update position variables correctly
                     myLatitude = displayLatitude(lat);
                     myLongitude = displayLongitude(lon);
-                    myCourseOverGroundT = cog;
-                    mySpeedOverGround = sog;
+                    myCourseOverGroundT = parseFloat(cog.toFixed(1));;
+                    mySpeedOverGround = parseFloat(sog.toFixed(1));;
                     lastLatitude = lat;
                     lastLongitude = lon;
                     trueHeading = heading !== 511 ? heading : cog; // Use heading if available
@@ -987,14 +1156,37 @@
                     vesselName = name;
                 }
             } else {
+                // External vessel - update or create ship data
                 if (!aisShips[mmsi]) {
-                    aisShips[mmsi] = { marker: null, lastUpdate: Date.now() };
+                    aisShips[mmsi] = { 
+                        marker: null, 
+                        data: {},
+                        name: 'Unknown',
+                        shipType: 0,
+                        lastUpdate: Date.now() 
+                    };
                 }
+                
+                // Update name and ship type
                 if (name && name !== '') {
                     aisShips[mmsi].name = name;
                 }
                 aisShips[mmsi].shipType = shipType;
                 aisShips[mmsi].lastUpdate = Date.now();
+                
+                // Update existing marker tooltip if ship is already displayed
+                if (aisShips[mmsi].marker && aisShips[mmsi].data.lat) {
+                    const data = aisShips[mmsi].data;
+                    const updatedTooltipContent = `
+                        <strong>MMSI: ${mmsi}</strong><br>
+                        Name: ${aisShips[mmsi].name}<br>
+                        Course: ${data.cog?.toFixed(1) || 'N/A'}°<br>
+                        Speed: ${data.sog?.toFixed(1) || 'N/A'} knots<br>
+                        Heading: ${data.heading !== undefined && data.heading !== 511 ? data.heading + '°' : 'N/A'}<br>
+                        Type: ${getShipTypeName(aisShips[mmsi].shipType)}
+                    `;
+                    aisShips[mmsi].marker.setTooltipContent(updatedTooltipContent);
+                }
             }
         }
     }
@@ -1081,6 +1273,12 @@
         duration = duration ?? (Math.floor((ts - Date.now()) / 3600000) || 0); // in hours, if no timestamp we don't project
         if (duration > 360) duration = 0;
         if (duration < 1) duration = 0; // if timestamp in the past, we don't project
+        
+        //Si duration est 0, retourner la position exacte ***
+        if (duration === 0) {
+            return L.latLng(lat, lon);
+        }
+        
         // sog in knots → km/h (1.852) → m/s (÷3.6)
         const distanceMeters = sog * 1.852 * 1000 * duration; // in meters
         const R = 6371000; // Earth radius in m
@@ -1095,123 +1293,132 @@
         return L.latLng(toDegrees(φ2), toDegrees(λ2));
     }
     
-    /**
-     * Shows a Windy weather popup at the given position.
-     * @param useProjectionTime If true, uses Windy timestamp (forecast), otherwise current time.
-     */
-    function showMyPopup(lat: number, lon: number, useProjectionTime = false) {
-        openedPopup?.remove();
+   /**
+ * Shows a Windy weather popup at the given position.
+ * @param useProjectionTime If true, uses Windy timestamp (forecast), otherwise current time.
+ */
+function showMyPopup(lat: number, lon: number, useProjectionTime = false) {
+    openedPopup?.remove();
 
-        const popup = L.popup({ autoClose: true })
-            .setLatLng([lat, lon])
-            .setContent('<em>Loading weather...</em>')
-            .openOn(map);
+    const popup = L.popup({ autoClose: true })
+        .setLatLng([lat, lon])
+        .setContent('<em>Loading weather...</em>')
+        .openOn(map);
 
-        openedPopup = popup;
+    openedPopup = popup;
 
-        getLatLonInterpolator().then((interpolator: any) => {
-            if (!interpolator) {
-                popup.setContent('Weather layer not available.');
-                return;
-            }
+    // *** CORRECTION : Gestionnaire d'événement pour détecter la fermeture du popup ***
+    popup.on('remove', () => {
+        openedPopup = null;
+    });
 
-            // Choose timestamp according to context
-            let ts: number;
-            if (useProjectionTime) {
-                ts = getRoundedHourTimestamp(store.get('timestamp')); // projection time (forecast)
-            } else {
-                ts = getRoundedHourTimestamp(Date.now()); // current time
-            }
-            const forecastDate = ts ? new Date(ts) : new Date();
+    getLatLonInterpolator().then((interpolator: any) => {
+        if (!interpolator) {
+            popup.setContent('Weather layer not available.');
+            return;
+        }
 
-            const overlay = store.get('overlay');
-            const values = interpolator({ lat, lon });
-            let content = `<div style="text-align: center;"><strong>${vesselName}</strong><br>φ = ${displayLatitude(lat)}, λ= ${displayLongitude(lon)}</div>`;
-            if (projectionHours === 0) {
-                content += `<hr><div><small><strong>${overlay} actual forecast :</strong></small></div>`;
-            } else if (projectionHours !== null && projectionHours > 0) {
-                content += `<hr><div><small><strong>${overlay} forecast in ${projectionHours} hours :</strong></small></div>`;
-            }
-            if (!Array.isArray(values)) {
-                content += '❌ No interpolated data.';
-                popup.setContent(content);
-                return;
-            }
+        // Choose timestamp according to context
+        let ts: number;
+        if (useProjectionTime) {
+            ts = getRoundedHourTimestamp(store.get('timestamp')); // projection time (forecast)
+        } else {
+            ts = getRoundedHourTimestamp(Date.now()); // current time
+        }
+        const forecastDate = ts ? new Date(ts) : new Date();
 
-            if (overlay === 'wind') {
-                const { dir, wind } = wind2obj(values);
-                const speed = metrics.wind.convertValue(wind);
-                content += `💨 Wind: ${speed}<br>🧭 Direction: ${dir} °`;
+        const overlay = store.get('overlay');
+        const values = interpolator({ lat, lon });
+        let content = `<div style="text-align: center;"><strong>${vesselName}</strong><br>φ = ${displayLatitude(lat)}, λ= ${displayLongitude(lon)}</div>`;
+        if (projectionHours === 0) {
+            content += `<hr><div><small><strong>${overlay} actual forecast :</strong></small></div>`;
+        } else if (projectionHours !== null && projectionHours > 0) {
+            content += `<hr><div><small><strong>${overlay} forecast in ${projectionHours} hours :</strong></small></div>`;
+        }
+        if (!Array.isArray(values)) {
+            content += '❌ No interpolated data.';
+            popup.setContent(content);
+            return;
+        }
 
-            } else if (overlay === 'waves') {
-                const { period, dir } = wave2obj(values);
-                const waveHeight = metrics.waves.convertValue(values[2]);
-                const waveDir = ((dir % 360) + 360) % 360; // Normalize to 0-360°
-                const wavePeriod = period.toFixed(1);
-                content += `🌊 Height: ${waveHeight} <br>🧭 Direction: ${Math.round(waveDir)}°<br>⏱ Period: ${wavePeriod} s`;
+        if (overlay === 'wind') {
+            const { dir, wind } = wind2obj(values);
+            const speed = metrics.wind.convertValue(wind);
+            content += `💨 Wind: ${speed}<br>🧭 Direction: ${dir} °`;
+
+        } else if (overlay === 'waves') {
+            const { period, dir } = wave2obj(values);
+            const waveHeight = metrics.waves.convertValue(values[2]);
+            const waveDir = ((dir % 360) + 360) % 360; // Normalize to 0-360°
+            const wavePeriod = period.toFixed(1);
+            content += `🌊 Height: ${waveHeight} <br>🧭 Direction: ${Math.round(waveDir)}°<br>⏱ Period: ${wavePeriod} s`;
+        
+        } else if (overlay === 'wwaves') {
+            const { period, dir } = wave2obj(values);
+            const waveHeight = metrics.waves.convertValue(values[2]);
+            const waveDir = ((dir % 360) + 360) % 360; // Normalize to 0-360°
+            const wavePeriod = period.toFixed(1);
+            content += `🌊 Height: ${waveHeight} <br>🧭 Direction: ${Math.round(waveDir)}°<br>⏱ Period: ${wavePeriod} s`;
+        
+        } else if (overlay === 'gust') {
+            const gust = metrics.wind.convertValue(values[0]);
+            content += `💨 Gusts: ${gust} at ${Math.round(values[1])}m`;
+        
+        } else if (overlay === 'rain') {
+            const rain = values[0].toFixed(2);
+            content += `🌧️ Rain: ${rain} mm/h`;
+        
+        } else if (overlay === 'temp') {
+            const tempC = metrics.temp.convertValue(values[0]);
+            content += `🌡️ Temperature: ${tempC}`;
+        
+        } else if (overlay === 'pressure') {
+            const Press = metrics.pressure.convertValue(values[0]);
+            content += `📉 Pressure: ${Press} hPa`;
+        
+        } else if (overlay === 'clouds') {
+            content += `☁️ Cloud cover: ${Math.round(values[0])}%`;
+        
+        } else if (overlay === 'tide') {
+            const tideHeight = values[0];
+            content += `🌊 Tide: ${tideHeight.toFixed(2)} m`;
+        
+        } else if (overlay === 'currents') {
+            const currentSpeed = values[0];
+            const currentDir = values[1];
+            content += `🌊 Current: ${currentSpeed.toFixed(2)} m/s at ${Math.round(currentDir)}°`;
+        
+        } else if (overlay === 'swell1' || overlay === 'swell2' || overlay === 'swell3') {
+            // For swell overlays, direction conversion formula
+            console.log(`Swell ${overlay} data:`, values);
             
-            } else if (overlay === 'wwaves') {
-                const { period, dir } = wave2obj(values);
-                const waveHeight = metrics.waves.convertValue(values[2]);
-                const waveDir = ((dir % 360) + 360) % 360; // Normalize to 0-360°
-                const wavePeriod = period.toFixed(1);
-                content += `🌊 Height: ${waveHeight} <br>🧭 Direction: ${Math.round(waveDir)}°<br>⏱ Period: ${wavePeriod} s`;
+            const swellPeriod = values[0].toFixed(1);
+            let swellDir = values[1];
             
-            } else if (overlay === 'gust') {
-                const gust = metrics.wind.convertValue(values[0]);
-                content += `💨 Gusts: ${gust} at ${Math.round(values[1])}m`;
+            // Correct conversion formula based on calibration:
+            // 270° → raw: -0.18068928020111485
+            // 190° → raw: 10.719788777108018
+            let swellDirDeg = (270 - swellDir * 7.33) % 360;
+            if (swellDirDeg < 0) swellDirDeg += 360;
             
-            } else if (overlay === 'rain') {
-                const rain = values[0].toFixed(2);
-                content += `🌧️ Rain: ${rain} mm/h`;
-            
-            } else if (overlay === 'temp') {
-                const tempC = metrics.temp.convertValue(values[0]);
-                content += `🌡️ Temperature: ${tempC}`;
-            
-            } else if (overlay === 'pressure') {
-                const Press = metrics.pressure.convertValue(values[0]);
-                content += `📉 Pressure: ${Press} hPa`;
-            
-            } else if (overlay === 'clouds') {
-                content += `☁️ Cloud cover: ${Math.round(values[0])}%`;
-            
-            } else if (overlay === 'tide') {
-                const tideHeight = values[0];
-                content += `🌊 Tide: ${tideHeight.toFixed(2)} m`;
-            
-            } else if (overlay === 'currents') {
-                const currentSpeed = values[0];
-                const currentDir = values[1];
-                content += `🌊 Current: ${currentSpeed.toFixed(2)} m/s at ${Math.round(currentDir)}°`;
-            
-            } else if (overlay === 'swell1' || overlay === 'swell2' || overlay === 'swell3') {
-                // For swell overlays, direction conversion formula
-                console.log(`Swell ${overlay} data:`, values);
-                
-                const swellPeriod = values[0].toFixed(1);
-                let swellDir = values[1];
-                
-                // Correct conversion formula based on calibration:
-                // 270° → raw: -0.18068928020111485
-                // 190° → raw: 10.719788777108018
-                let swellDirDeg = (270 - swellDir * 7.33) % 360;
-                if (swellDirDeg < 0) swellDirDeg += 360;
-                
-                const swellHeight = metrics.waves.convertValue(values[2]);
-                const swellNum = overlay.slice(-1);
-                content += `🌊 Swell ${swellNum}: ${swellHeight}<br>🧭 Direction: ${Math.round(swellDirDeg)}°<br>⏱ Period: ${swellPeriod} s`;
-            
-            } else {
-                content += `ℹ️ No weather data available for ${overlay}.`;
-            }
-            // Add Windy API version and forecast date
-            content += `<hr><div style="text-align: right;"><small><strong>Forecast date : </strong>${forecastDate.toUTCString()}</small></div>`;
-            // Uncomment to display forecast date in the popup
-            //content += `${forecastDate.toString()}</small>`;
-            content += `<hr><div style="text-align: right;"><small><strong>Forecast date : </strong>${forecastDate ? forecastDate.toUTCString() : ''}</small></div>`;
-        });
-    } // End showMyPopup
+            const swellHeight = metrics.waves.convertValue(values[2]);
+            const swellNum = overlay.slice(-1);
+            content += `🌊 Swell ${swellNum}: ${swellHeight}<br>🧭 Direction: ${Math.round(swellDirDeg)}°<br>⏱ Period: ${swellPeriod} s`;
+        
+        } else {
+            content += `ℹ️ No weather data available for ${overlay}.`;
+        }
+        // Add Windy API version and forecast date
+        content += `<hr><div style="text-align: right;"><small><strong>Forecast date : </strong>${forecastDate.toUTCString()}</small></div>`;
+        
+        // *** CORRECTION : Mettre à jour le contenu du popup ! ***
+        popup.setContent(content);
+        
+    }).catch((error: unknown) => {
+        console.error('Error getting weather data:', error);
+        popup.setContent('❌ Error loading weather data.');
+    });
+} // End showMyPopup
 
     /**
      * Adds the vessel marker and projection on the map.
@@ -1263,7 +1470,7 @@
         }).addTo(markerLayer);
 
         // Main marker (current position)
-        const icon = createRotatingBoatIcon(trueHeading, 0.9);
+        const icon = createRotatingBoatIcon(trueHeading, 0.846008, boatIconSize);
         const marker = L.marker(Position, { icon }).addTo(markerLayer);
         marker.bindTooltip(vesselName, { permanent: false, direction: 'top', className: 'boat-tooltip' });
 
@@ -1281,13 +1488,17 @@
 
         // Future projection icon (if speed > 0.5 knots)
         if (effectiveSOG > 0.5) {
+            // *** CORRECTION : Calcul correct de projectionHours ***
             if (projectionHours === null || projectionHours === undefined) {
-                projectionHours = getRoundedHourTimestamp(store.get('timestamp')) - getRoundedHourTimestamp();
+                const now = getRoundedHourTimestamp(Date.now());
+                const ts = getRoundedHourTimestamp(store.get('timestamp'));
+                projectionHours = Math.max(0, (ts - now) / (3600 * 1000)); // en heures, minimum 0
             }
+            
             const projected = computeProjection(lat, lon, effectiveCOG, effectiveSOG, projectionHours);            
             // Display forecast icon at projected position
             if (forecastIcon) forecastIcon.remove();
-            const icon = createRotatingBoatIcon(trueHeading, 0.6)
+            const icon = createRotatingBoatIcon(trueHeading, 0.846008, boatIconSize * 0.67) // 67% de la taille principale pour la projection
             forecastIcon = L.marker(projected, { icon }).addTo(markerLayer);
             const tooltipText = testModeEnabled ? 
                 `Weather forecast in ${projectionHours} hours (TEST MODE: SOG=${testSOG}kt, COG=${testCOG}°)` : 
@@ -1396,8 +1607,18 @@
         projectionHours = 0; // Reset projection hours
     };
 
+    // Fonction pour mettre à jour l'icône quand la taille change
+    $: {
+        if (boatIconSize && lastLatitude !== null && lastLongitude !== null) {
+            // Redessiner le marqueur avec la nouvelle taille
+            addBoatMarker(lastLatitude, lastLongitude, myCourseOverGroundT);
+        }
+    }
     // WebSocket initialization to receive NMEA/AIS frames
     onMount(() => {
+        // Initialize route on component load
+        updateRoute();
+
         // Initialize marker layer when component mounts and map is available
         markerLayer = L.layerGroup().addTo(map);
         
@@ -1410,6 +1631,9 @@
         // Start the no frame detection timer
         startNoFrameTimer();
         
+        // Démarrer le nettoyage des fragments AIS
+        startFragmentCleanup();
+
         // Create initial socket connection
         createSocketConnection();
 
@@ -1440,6 +1664,7 @@
             unsubscribeOverlay = null;
         }
     });
+
 
     // Cleanup when plugin closes
     onDestroy(() => {
@@ -1473,7 +1698,15 @@
         
         // Unsubscribe from Windy overlay changes
         if (unsubscribeOverlay) unsubscribeOverlay();
-    });
+            // Arrêter le timer de nettoyage des fragments
+        if (fragmentCleanupTimer) {
+            clearInterval(fragmentCleanupTimer);
+            fragmentCleanupTimer = null;
+        }
+    
+        // Nettoyer les fragments en attente
+        aisFragments = {};
+});
 
 </script>
 
@@ -1489,8 +1722,61 @@
         padding: 5px 10px;
         font-size: 14px;
     }
+    .plugin__buttons__centered button {
+        display: flex;
+        justify-content: center;
+        text-align: center;
+        align-items: center;
+        margin: 5px;
+        padding: 5px 10px;
+        font-size: 14px;
+        width: 75%;
+    }
+    .plugin__buttons__centered {
+        display: flex;
+        justify-content: center;
+        text-align: center;
+        align-items: center;
+    }
     .rotatable {
         transform-origin: center center;
+    }
+
+    /* Boat icon size control styles */
+    .icon-size-section {
+        margin: 10px 0;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .icon-size-section input[type="range"] {
+        background: #333;
+        height: 6px;
+        border-radius: 3px;
+        outline: none;
+        
+        &::-webkit-slider-thumb {
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #4db8ff;
+            cursor: pointer;
+            border: 2px solid #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        &::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #4db8ff;
+            cursor: pointer;
+            border: 2px solid #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
     }
     .error {
         color: red;
@@ -1507,7 +1793,11 @@
         color: red;
     }
     .mmsi-state {
-        margin-top: 10px;
+        display: flex;
+        justify-content: flex-start;
+        margin-right: 75px;
+        text-align: right;
+        align-items: left;
         font-weight: bold;
         color: #0066cc;
     }
@@ -1525,11 +1815,11 @@
         text-align: center;
         align-items: center;
     }
-    /* Specific alignment for server address and MMSI input fields */
+    /* Specific alignment for server address  */
     .right-aligned {
         display: flex;
         justify-content: flex-end;
-        margin-right: 100px;
+        margin-right: 75px;
         text-align: right;
         align-items: right;
     }
