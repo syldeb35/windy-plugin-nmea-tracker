@@ -444,7 +444,7 @@
     let varM: number = 0; // Magnetic variation
     let speedOverGround: number = 0; // In knots
     let mySpeedOverGround: number = 0; // In knots
-    let heurePrev: number | null = null; // for projection
+    //let heurePrev: number | null = null; // for projection
     let followShip = false; // do not follow ship by default
     let vesselName = 'YOUR BOAT';
     let CurrentOverlay = 'Windy'; // Default overlay, can be changed later
@@ -456,7 +456,6 @@
     let projectionArrow: any = null;
     let headingArrow: any = null;
     let forecastIcon: any = null;
-    let forecastLabel: any = null;
     let pathLatLngs: any[] = [];
     let openedPopup: any = null;
     // Store AIS ships data globally so all functions can access it
@@ -464,10 +463,6 @@
     // Boat icon size control
     let boatIconSize: number = 1.0; // Default size multiplier (0.5 to 2.0)
 
-    let udpIp = '0.0.0.0';
-    let udpPort = 5005;
-    let tcpIp = '0.0.0.0';
-    let tcpPort = 5006;
     let myMMSI = ''; // Our own MMSI for comparison
 
     let unsubscribeTimeline: (() => void) | null = null;
