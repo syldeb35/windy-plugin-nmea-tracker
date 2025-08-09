@@ -700,6 +700,12 @@
      * @returns {boolean} True if coordinates are valid
      */
     function validateCoordinates(lat: number, lon: number): boolean {
+        // First check if values are finite numbers (not NaN, Infinity, etc.)
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+            console.warn(`Invalid coordinate values: lat=${lat}, lon=${lon} (not finite numbers)`);
+            return false;
+        }
+        
         // Check basic bounds
         if (lat < -90 || lat > 90) {
             console.warn(`Invalid latitude: ${lat}°`);
@@ -716,8 +722,9 @@
             return false;
         }
         
-        return true;
+        return true; // All validations passed
     }
+
     /**
      * Validates position jump - rejects positions that jump more than reasonable distance
      * @param {number} newLat - New latitude in decimal degrees
@@ -821,9 +828,15 @@
                 addError("[Err] Invalid GLL frame - status invalid");
                 return null;
             }
-            latitudesal = parseFloat(parts[1]);
+            const parsedLat = parseFloat(parts[1]);
+            const parsedLon = parseFloat(parts[3]);
+            if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLon)) {
+                addError("[Err] Invalid GLL frame - invalid coordinates");
+                return null;
+            }
+            latitudesal = parsedLat;
             latDirection = parts[2];
-            longitudesal = parseFloat(parts[3]);
+            longitudesal = parsedLon;
             lonDirection = parts[4];
             frameType = 'GLL';
         } else if (data.includes('GGA')) {
@@ -835,9 +848,15 @@
                 addError("[Err] Invalid GGA frame - no GPS fix");
                 return null;
             }
-            latitudesal = parseFloat(parts[2]);
+            const parsedLat = parseFloat(parts[2]);
+            const parsedLon = parseFloat(parts[4]);
+            if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLon)) {
+                addError("[Err] Invalid GGA frame - invalid coordinates");
+                return null;
+            }
+            latitudesal = parsedLat;
             latDirection = parts[3];
-            longitudesal = parseFloat(parts[4]);
+            longitudesal = parsedLon;
             lonDirection = parts[5];
             frameType = 'GGA';
         } else if (data.includes('RMC')) {
@@ -849,9 +868,15 @@
                 addError("[Err] Invalid RMC frame - status invalid");
                 return null;
             }
-            latitudesal = parseFloat(parts[3]);
+            const parsedLat = parseFloat(parts[3]);
+            const parsedLon = parseFloat(parts[5]);
+            if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLon)) {
+                addError("[Err] Invalid RMC frame - invalid coordinates");
+                return null;
+            }
+            latitudesal = parsedLat;
             latDirection = parts[4];
-            longitudesal = parseFloat(parts[5]);
+            longitudesal = parsedLon;
             lonDirection = parts[6];
             speedOverGround = parseFloat(parts[7]);
             courseOverGroundT = parseFloat(parts[8]);
@@ -945,7 +970,9 @@
                 lastLatitude = newLat;
                 lastLongitude = newLon;
                 if (!Number.isNaN(newLat) && !Number.isNaN(newLon)) {
-                    addBoatMarker(newLat, newLon, myCourseOverGroundT);
+                    // Ensure COG is a valid number before passing to addBoatMarker
+                    const validCOG = Number.isFinite(myCourseOverGroundT) ? myCourseOverGroundT : 0;
+                    addBoatMarker(newLat, newLon, validCOG);
                 }
             }
         }
@@ -1246,8 +1273,16 @@
         const msgType = parseInt(bitstring.slice(0, 6), 2);
         const mmsi = parseInt(bitstring.slice(8, 38), 2).toString();
         
-        // Check if this is our own vessel (either from VDO flag or MMSI match)
-        const isOwnVessel = isOwnVesselData || (myMMSI && isValidMMSI(myMMSI) && mmsi === myMMSI);
+        // Check if this is our own vessel - prioritize MMSI match over VDO flag
+        let isOwnVessel = false;
+        
+        // If we have a known MMSI, use it for comparison
+        if (myMMSI && isValidMMSI(myMMSI)) {
+            isOwnVessel = (mmsi === myMMSI);
+        } else if (isOwnVesselData) {
+            // Only trust VDO flag if we don't have a confirmed MMSI yet
+            isOwnVessel = true;
+        }
         
         if (msgType === 1 || msgType === 2 || msgType === 3) {
             // Position Report (Class A) - CORRECTION du décodage des coordonnées
@@ -1271,6 +1306,11 @@
             if (lat !== 91 && lon !== 181) { // Valid coordinates
             // Validate position jump for own vessel before accepting new AIS coordinates
             if (isOwnVessel) {
+                // Log for debugging if needed
+                if (mmsi !== myMMSI) {
+                    console.log(`Warning: VDO message with different MMSI ${mmsi} vs known ${myMMSI}`);
+                }
+                
                 // First check if coordinates are valid
                 if (!validateCoordinates(lat, lon)) {
                     console.warn(`AIS invalid coordinates for own vessel MMSI ${mmsi} - position rejected`);
@@ -1309,8 +1349,9 @@
                     lastLongitude = lon;
                     trueHeading = heading !== 511 ? heading : cog;
                     
-                    // Add boat marker
-                    addBoatMarker(lat, lon, cog);
+                    // Add boat marker with validated COG
+                    const validCOG = Number.isFinite(cog) ? cog : 0;
+                    addBoatMarker(lat, lon, validCOG);
                 } else {
                     // External vessel - use corrected heading
                     const displayHeading = heading !== 511 ? heading : cog;
@@ -1395,6 +1436,12 @@
      * Convert NMEA latitude/longitude to decimal
      */
     function convertLatitude(value: number, dir: string): number {
+        // Validate input to prevent NaN
+        if (!Number.isFinite(value) || !dir) {
+            console.warn(`Invalid latitude data: value=${value}, dir=${dir}`);
+            return 0; // Return a safe default
+        }
+        
         const degrees = Math.floor(value / 100);
         const minutes = value - (degrees * 100);
         let lat = degrees + (minutes / 60);
@@ -1402,6 +1449,12 @@
     }
 
     function convertLongitude(value: number, dir: string): number {
+        // Validate input to prevent NaN
+        if (!Number.isFinite(value) || !dir) {
+            console.warn(`Invalid longitude data: value=${value}, dir=${dir}`);
+            return 0; // Return a safe default
+        }
+        
         const degrees = Math.floor(value / 100);
         const minutes = value - (degrees * 100);
         let lon = degrees + (minutes / 60);
@@ -1605,6 +1658,15 @@ function showMyPopup(lat: number, lon: number, useProjectionTime = false) {
     function addBoatMarker(lat: number, lon: number, cog: number) {
         if (!map || !markerLayer) return;
 
+        // Validate input parameters to prevent NaN errors
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+            console.warn(`Invalid coordinates in addBoatMarker: lat=${lat}, lon=${lon}`);
+            return;
+        }
+        
+        // Ensure COG is a valid number, default to 0 if not
+        const validCOG = Number.isFinite(cog) ? cog : 0;
+
         const Position = L.latLng(lat, lon);
         markerLayer.clearLayers();
         pathLatLngs.push(Position);
@@ -1788,8 +1850,9 @@ function showMyPopup(lat: number, lon: number, useProjectionTime = false) {
     // Fonction pour mettre à jour l'icône quand la taille change
     $: {
         if (boatIconSize && lastLatitude !== null && lastLongitude !== null) {
-            // Redessiner le marqueur avec la nouvelle taille
-            addBoatMarker(lastLatitude, lastLongitude, myCourseOverGroundT);
+            // Redessiner le marqueur avec la nouvelle taille - validate COG first
+            const validCOG = Number.isFinite(myCourseOverGroundT) ? myCourseOverGroundT : 0;
+            addBoatMarker(lastLatitude, lastLongitude, validCOG);
         }
     }
     // WebSocket initialization to receive NMEA/AIS frames
