@@ -46,7 +46,9 @@
      <label class="right-aligned" style="margin-bottom: 12px;">
         Server address : &nbsp; &nbsp;
         <input 
-            type="text" 
+            type="text"
+            id="serverHost"
+            name="serverHost"
             bind:value={serverHost} 
             on:input={updateRoute}
             placeholder="localhost or IP address" 
@@ -64,7 +66,9 @@
     <label class="mmsi-state">
         Vessel name : &nbsp; &nbsp;
         <input 
-            type="text" 
+            type="text"
+            id="vesselName"
+            name="vesselName"
             bind:value={vesselName} 
             placeholder="Enter vessel name" 
             style="width: 150px; height: 20px; font-weight: bold;"
@@ -131,7 +135,12 @@
     <div class="test-mode-section">
       <p style="font-weight: bold; margin-bottom: 10px;">🧪 Test Mode :</p>
       <label class="centered">
-        <input type="checkbox" bind:checked={testModeEnabled} />
+                <input
+                    type="checkbox"
+                    id="testModeEnabled"
+                    name="testModeEnabled"
+                    bind:checked={testModeEnabled}
+                />
         Enable test mode
       </label>
       {#if testModeEnabled}
@@ -140,6 +149,8 @@
             Test SOG (knots) : &nbsp; &nbsp;
             <input
                 type="number"
+                id="testSOG"
+                name="testSOG"
                 bind:value={testSOG}
                 min="0"
                 max="30"
@@ -151,6 +162,8 @@
             Test COG (degrees) : &nbsp; &nbsp;
             <input 
               type="number" 
+              id="testCOG"
+              name="testCOG"
               value={testCOG}
               on:input={handleCOGInput}
               on:change={handleCOGInput}
