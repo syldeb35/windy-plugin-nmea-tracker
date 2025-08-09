@@ -232,7 +232,17 @@
         socket = io(route, {
             transports: ['websocket'],
             secure: true,
-            rejectUnauthorized: false // for self-signed
+            rejectUnauthorized: false, // for self-signed certificates
+            // Add these timeout configurations:
+            timeout: 120000,           // Connection timeout: 2 minutes
+            pingTimeout: 120000,       // How long to wait for ping response: 2 minutes  
+            pingInterval: 30000,       // How often to send pings: 30 seconds
+            forceNew: false,           // Don't force new connection on reconnect
+            reconnection: true,        // Enable automatic reconnection
+            reconnectionDelay: 1000,   // Initial delay before reconnection
+            reconnectionDelayMax: 5000, // Maximum delay between reconnections
+            maxReconnectionAttempts: 5, // Maximum number of reconnection attempts
+            upgrade: true              // Allow transport upgrades
         });
 
         // Connection event handlers (same as before)
@@ -448,7 +458,7 @@
     let followShip = false; // do not follow ship by default
     let vesselName = 'YOUR BOAT';
     let CurrentOverlay = 'Windy'; // Default overlay, can be changed later
-
+    let lastDataUpdateTime: number = 0;
     let socket: any = null;
     let markerLayer: any = null;
     let aisShipsLayer: any = null; // Layer for AIS ships
@@ -653,7 +663,128 @@
         
         return false; // Fragment en attente
     }
+    /**
+     * Validates NMEA sentence checksum
+     * @param {string} nmeaSentence - Complete NMEA sentence including checksum
+     * @returns {boolean} True if checksum is valid
+     */
+    function validateNMEAChecksum(nmeaSentence: string): boolean {
+        // Remove any whitespace/newlines
+        const sentence = nmeaSentence.trim();
+        
+        // Check if sentence has proper format (starts with $ or !, ends with *XX)
+        const checksumMatch = sentence.match(/^[!$].+\*([0-9A-Fa-f]{2})$/);
+        if (!checksumMatch) {
+            // No checksum found - some NMEA sentences might not have one
+            return true; // Accept sentences without checksum for now
+        }
+        
+        const providedChecksum = checksumMatch[1].toUpperCase();
+        const sentenceToCheck = sentence.substring(1, sentence.indexOf('*')); // Remove $ and *XX
+        
+        // Calculate XOR checksum
+        let calculatedChecksum = 0;
+        for (let i = 0; i < sentenceToCheck.length; i++) {
+            calculatedChecksum ^= sentenceToCheck.charCodeAt(i);
+        }
+        
+        const calculatedHex = calculatedChecksum.toString(16).toUpperCase().padStart(2, '0');
+        
+        return providedChecksum === calculatedHex;
+    }
 
+    /**
+     * Validates if coordinates are within valid Earth bounds
+     * @param {number} lat - Latitude in decimal degrees
+     * @param {number} lon - Longitude in decimal degrees
+     * @returns {boolean} True if coordinates are valid
+     */
+    function validateCoordinates(lat: number, lon: number): boolean {
+        // Check basic bounds
+        if (lat < -90 || lat > 90) {
+            console.warn(`Invalid latitude: ${lat}°`);
+            return false;
+        }
+        if (lon < -180 || lon > 180) {
+            console.warn(`Invalid longitude: ${lon}°`);
+            return false;
+        }
+        
+        // Check for obviously invalid coordinates (0,0 might be valid in Gulf of Guinea)
+        if (lat === 0 && lon === 0) {
+            console.warn('Suspicious coordinates: 0,0 - possibly invalid');
+            return false;
+        }
+        
+        return true;
+    }
+    /**
+     * Validates position jump - rejects positions that jump more than reasonable distance
+     * @param {number} newLat - New latitude in decimal degrees
+     * @param {number} newLon - New longitude in decimal degrees
+     * @param {number} sog - Speed over ground in knots (optional, for dynamic validation)
+     * @returns {boolean} True if position change is acceptable
+     */
+    function validatePositionJump(newLat: number, newLon: number, sog?: number): boolean {
+        // If no previous position, accept any position
+        if (lastLatitude === null || lastLongitude === null) {
+            return true;
+        }
+        
+        // Calculate distance between old and new position using Haversine formula
+        const distance = calculateDistance(lastLatitude, lastLongitude, newLat, newLon);
+        
+        // Dynamic validation based on speed and time
+        let maxJumpKM = 1.852; // Default: 1 nautical mile
+        
+        // If we have speed information, calculate reasonable distance
+        if (sog && sog > 0) {
+            // Calculate time since last position update (assuming max 60 seconds between updates)
+            const maxTimeBetweenUpdates = 60; // seconds
+            const maxDistanceAtSpeed = (sog * 1.852 * maxTimeBetweenUpdates) / 3600; // km
+            
+            // Allow up to 3x the expected distance to account for course changes
+            maxJumpKM = Math.max(maxDistanceAtSpeed * 3, 1.852); // At least 1 NM
+            
+            // But never allow more than 20 NM jump (37 km) - clearly erroneous
+            maxJumpKM = Math.min(maxJumpKM, 37);
+        } else {
+            // Without speed info, use fixed limits based on distance
+            if (distance > 37) { // > 20 NM is clearly wrong
+                maxJumpKM = 1.852; // Strict limit
+            } else if (distance > 9.26) { // > 5 NM might be wrong
+                maxJumpKM = 5.556; // 3 NM limit
+            }
+        }
+        
+        if (distance > maxJumpKM) {
+            console.warn(`Position jump detected: ${distance.toFixed(3)}km > ${maxJumpKM.toFixed(3)}km limit. SOG: ${sog || 'unknown'} knots. Rejecting position.`);
+            return false;
+        }
+        
+        return true;
+    }
+
+    /**
+     * Calculate distance between two positions using Haversine formula
+     * @param {number} lat1 - Latitude 1 in decimal degrees
+     * @param {number} lon1 - Longitude 1 in decimal degrees  
+     * @param {number} lat2 - Latitude 2 in decimal degrees
+     * @param {number} lon2 - Longitude 2 in decimal degrees
+     * @returns {number} Distance in kilometers
+     */
+    function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+        const R = 6371; // Earth's radius in km
+        const dLat = toRadians(lat2 - lat1);
+        const dLon = toRadians(lon2 - lon1);
+        const a = 
+            Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * 
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c;
+    }
+    
     /**
      * Processes each received NMEA/AIS frame.
      * Updates position, speed, heading, vessel name, etc.
@@ -667,6 +798,12 @@
             addError("[Err] Invalid NMEA frame");
             return null;
         }
+        
+        // Validate NMEA checksum
+        if (!validateNMEAChecksum(data)) {
+            addError("[Err] NMEA checksum validation failed");
+            return null;
+        }    
         
         // Add frame to history
         addToNmeaHistory(data);
@@ -762,35 +899,58 @@
             longitude = (longitudesal !== null && lonDirection !== null)
                 ? convertLongitude(longitudesal, lonDirection)
                 : null;
-            myLatitude = (latitudesal !== null && latDirection !== null)
-                ? displayLatitude(latitudesal, latDirection)
-                : null;
-            myLongitude = (longitudesal !== null && lonDirection !== null)
-                ? displayLongitude(longitudesal, lonDirection)
-                : null;
             
-            if (courseOverGroundT !== null && courseOverGroundT !== undefined && !Number.isNaN(courseOverGroundT)) {
-                myCourseOverGroundT = parseFloat(courseOverGroundT.toFixed(1));
-            } else {
-                myCourseOverGroundT = myCourseOverGroundT; // If no data, keep the last value
+            // Validate position jump before accepting new coordinates
+            if (latitude !== null && longitude !== null) {
+                // First check if coordinates are valid
+                if (!validateCoordinates(latitude, longitude)) {
+                    addError("[Err] Invalid coordinates - frame rejected");
+                    return frameType;
+                }
+                
+                // Pass speed if available for better validation
+                const currentSpeed = speedOverGround && !Number.isNaN(speedOverGround) ? speedOverGround : undefined;
+                if (!validatePositionJump(latitude, longitude, currentSpeed)) {
+                    addError("[Err] Position jump detected - frame rejected");
+                    return frameType; // Return frameType to indicate frame was processed but position rejected
+                }
             }
-            if (speedOverGround !== null && speedOverGround !== undefined && !Number.isNaN(speedOverGround)) {
-                mySpeedOverGround = parseFloat(speedOverGround.toFixed(1));
-            } else {
-                mySpeedOverGround = mySpeedOverGround; // If no data, keep the last value
+            
+            const currentTime = Date.now();
+            
+            // Only update if this is more recent data
+            if (currentTime > lastDataUpdateTime) {
+                myLatitude = (latitudesal !== null && latDirection !== null)
+                    ? displayLatitude(latitudesal, latDirection)
+                    : null;
+                myLongitude = (longitudesal !== null && lonDirection !== null)
+                    ? displayLongitude(longitudesal, lonDirection)
+                    : null;
+                
+                if (courseOverGroundT !== null && courseOverGroundT !== undefined && !Number.isNaN(courseOverGroundT)) {
+                    myCourseOverGroundT = parseFloat(courseOverGroundT.toFixed(1));
+                }
+                if (speedOverGround !== null && speedOverGround !== undefined && !Number.isNaN(speedOverGround)) {
+                    mySpeedOverGround = parseFloat(speedOverGround.toFixed(1));
+                }
+                
+                lastDataUpdateTime = currentTime;
             }
+
+            // Always update internal position for mapping (only if validation passed)
             const newLat = latitude;
             const newLon = longitude;
             
-            lastLatitude = newLat;
-            lastLongitude = newLon;
-            if (
-                newLat !== null && newLon !== null &&
-                !Number.isNaN(newLat) && !Number.isNaN(newLon)
-            ) {
-                addBoatMarker(newLat, newLon, myCourseOverGroundT);
+            if (newLat !== null && newLon !== null) {
+                lastLatitude = newLat;
+                lastLongitude = newLon;
+                if (!Number.isNaN(newLat) && !Number.isNaN(newLon)) {
+                    addBoatMarker(newLat, newLon, myCourseOverGroundT);
+                }
             }
         }
+
+
 
         // AIVDO (VDO) decoding
         if (data.startsWith('!') && data.includes('VDO')) {
@@ -1109,6 +1269,21 @@
             const heading = parseInt(bitstring.slice(128, 137), 2);
             
             if (lat !== 91 && lon !== 181) { // Valid coordinates
+            // Validate position jump for own vessel before accepting new AIS coordinates
+            if (isOwnVessel) {
+                // First check if coordinates are valid
+                if (!validateCoordinates(lat, lon)) {
+                    console.warn(`AIS invalid coordinates for own vessel MMSI ${mmsi} - position rejected`);
+                    return; // Reject this AIS position update
+                }
+                
+                // Then check position jump with speed
+                if (!validatePositionJump(lat, lon, sog)) {
+                    console.warn(`AIS position jump detected for own vessel MMSI ${mmsi} - position rejected`);
+                    return; // Reject this AIS position update
+                }
+            }
+    
                 if (isOwnVessel) {
                     // Store our own MMSI if not set
                     if (!myMMSI || !isValidMMSI(myMMSI)) {
@@ -1117,14 +1292,22 @@
                     
                     data = `AIS MMSI: ${mmsi} (Own vessel)\nLat: ${lat.toFixed(5)}\nLon: ${lon.toFixed(5)}\nCOG: ${cog.toFixed(1)}°\nSOG: ${sog.toFixed(1)} nds`;
                     
-                    // Update position variables correctly
-                    myLatitude = displayLatitude(lat);
-                    myLongitude = displayLongitude(lon);
-                    myCourseOverGroundT = parseFloat(cog.toFixed(1));;
-                    mySpeedOverGround = parseFloat(sog.toFixed(1));;
+                    const currentTime = Date.now();
+                    
+                    // Only update display if this is more recent data
+                    if (currentTime > lastDataUpdateTime) {
+                        myLatitude = displayLatitude(lat);
+                        myLongitude = displayLongitude(lon);
+                        myCourseOverGroundT = parseFloat(cog.toFixed(1));
+                        mySpeedOverGround = parseFloat(sog.toFixed(1));
+                        
+                        lastDataUpdateTime = currentTime;
+                    }
+                    
+                    // Always update internal position for mapping
                     lastLatitude = lat;
                     lastLongitude = lon;
-                    trueHeading = heading !== 511 ? heading : cog; // Use heading if available
+                    trueHeading = heading !== 511 ? heading : cog;
                     
                     // Add boat marker
                     addBoatMarker(lat, lon, cog);
