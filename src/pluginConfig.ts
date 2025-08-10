@@ -10,8 +10,6 @@ const config: ExternalPluginConfig = {
     repository: 'https://github.com/syldeb35/windy-plugin-nmea-tracker',
     desktopUI: 'rhpane',
     mobileUI: 'fullscreen',
-    //desktopUI: 'embedded',
-    //mobileUI: 'small',
     routerPath: '/nmea-tracker',
     private: true,
     // This plugin is private and not intended for public use.
