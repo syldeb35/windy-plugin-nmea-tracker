@@ -9,22 +9,83 @@ jobs:
         env:
             WINDY_API_KEY: '${{ secrets.WINDY_API_KEY }}'
         steps:
-            - uses: actions/checkout@v2
-            - name: Build
+            - uses: actions/checkout@v4  # Updated from v2
+            
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                node-version: '18'
+                cache: 'npm'
+            
+            - name: Install dependencies
+              run: npm ci  # More reliable than npm install
+              
+            - name: Build plugin
+              run: npm run build
+              
+            - name: Check build output
               run: |
-                  npm install
-                  npm run build
-            - name: Publish Plugin
+                echo "Contents of dist directory:"
+                ls -la dist/
+                if [ ! -f "dist/plugin.json" ]; then
+                  echo "Error: plugin.json not found in dist directory"
+                  exit 1
+                fi
+                echo "plugin.json contents:"
+                cat dist/plugin.json
+            
+            - name: Verify API Key
               run: |
-                  if [ -z "$WINDY_API_KEY" ]; then
-                    echo "Secret WINDY_API_KEY is not configured" >&2
-                    exit 1
-                  fi
-                  cd dist
-                  echo "Creating plugin archive..."
-                  echo "{\"repositoryName\": \"${{ github.repository }}\", \"commitSha\": \"${{ github.sha }}\", \"repositoryOwner\": \"${{ github.repository_owner }}\"}" > /tmp/plugin-info.json
-                  mv plugin.json /tmp
-                  jq -s '.[0] * .[1]' /tmp/plugin.json /tmp/plugin-info.json > plugin.json
-                  tar cf ../plugin.tar .
-                  echo "Publishing plugin..."
-                  curl -s --fail-with-body -XPOST 'https://node.windy.com/plugins/v1.0/upload' -H "x-windy-api-key: ${WINDY_API_KEY}" -F "plugin_archive=@../plugin.tar"
+                if [ -z "$WINDY_API_KEY" ]; then
+                  echo "Error: WINDY_API_KEY is not set" >&2
+                  exit 1
+                fi
+                echo "API Key is configured (length: ${#WINDY_API_KEY})"
+            
+            - name: Create and publish plugin archive
+              run: |
+                cd dist
+                echo "Creating plugin archive..."
+                
+                # Create plugin info
+                echo "{\"repositoryName\": \"${{ github.repository }}\", \"commitSha\": \"${{ github.sha }}\", \"repositoryOwner\": \"${{ github.repository_owner }}\"}" > /tmp/plugin-info.json
+                
+                # Backup original plugin.json
+                cp plugin.json /tmp/plugin-original.json
+                
+                # Merge plugin info
+                jq -s '.[0] * .[1]' /tmp/plugin-original.json /tmp/plugin-info.json > plugin.json
+                
+                echo "Final plugin.json:"
+                cat plugin.json
+                
+                # Create archive
+                tar cf ../plugin.tar .
+                
+                echo "Archive contents:"
+                tar -tf ../plugin.tar
+                
+                echo "Publishing plugin..."
+                
+                # Use more verbose curl with better error handling
+                response=$(curl -w "HTTPSTATUS:%{http_code}\nSIZE:%{size_download}" \
+                  -s \
+                  -X POST \
+                  'https://node.windy.com/plugins/v1.0/upload' \
+                  -H "x-windy-api-key: ${WINDY_API_KEY}" \
+                  -F "plugin_archive=@../plugin.tar")
+                
+                # Extract HTTP status
+                http_code=$(echo "$response" | grep HTTPSTATUS | cut -d: -f2)
+                body=$(echo "$response" | sed -E 's/HTTPSTATUS:[0-9]{3}//g' | sed -E 's/SIZE:[0-9]+//g')
+                
+                echo "HTTP Status: $http_code"
+                echo "Response body: $body"
+                
+                if [ "$http_code" -ne 200 ]; then
+                  echo "Error: HTTP $http_code"
+                  echo "Response: $body"
+                  exit 1
+                fi
+                
+                echo "Plugin published successfully!"
