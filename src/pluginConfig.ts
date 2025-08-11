@@ -11,7 +11,7 @@ const config: ExternalPluginConfig = {
     desktopUI: 'rhpane',
     mobileUI: 'fullscreen',
     routerPath: '/nmea-tracker',
-    private: true,
+    // private: true,
     // This plugin is private and not intended for public use.
     // It is used internally by CMA CGM for testing purposes.
     // It is not available in the Windy plugin store.
