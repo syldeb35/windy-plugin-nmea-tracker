@@ -2,20 +2,51 @@
     {title}
 </div>
 
-<div id="help" class="plugin-summary" style="border-radius:8px; padding:12px; margin-bottom:16px;">
-    <strong>GPS position tracker Windy</strong><br>
-    This plugin displays real-time vessel position on Windy map from NMEA or AIS data received via UDP, TCP or serial port.<br>
-    <ul style="margin:8px 0 0 18px;">
-        <li>Display of last received NMEA frame</li>
-        <li>Vessel latitude, longitude, course and speed over ground</li>
-        <li>Vessel name (if available via AIS type 5)</li>
-        <li>Track history and future position projection</li>
-        <li>Weather forecast at vessel position</li>
-        <li>Configurable connection (UDP, TCP, Serial)</li>
-        <li>AIS class A decoding (fragmented messages handling)</li>
-    </ul>
-    <br>
-    <span style="font-size:90%"><strong>Ideal for navigation, fleet tracking or experimenting with real-time NMEA/AIS data.</strong></span>
+<div id="help" class="plugin-summary" style="border-radius:8px; padding:12px; margin-bottom:16px; display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); z-index:9999; background:#3c3c3c; color:white; box-shadow: 0 4px 20px rgba(0,0,0,0.5); max-width:450px; max-height:80vh; overflow-y:auto; border: 1px solid #555;">
+    <div style="text-align: center; margin-bottom: 15px;">
+        <strong style="color:white; font-size: 18px;">🛳️ NMEA Tracker Help 🛳️</strong>
+    </div>
+    
+    <div style="color:white; line-height: 1.4;">
+        <p><strong>📍 What does this plugin do?</strong></p>
+        <p style="margin-bottom: 12px;">Track your vessel's real-time position on the Windy map using NMEA or AIS data from your GPS/navigation system.</p>
+        
+        <p><strong>🔧 How to get started:</strong></p>
+        <ol style="margin: 8px 0 12px 20px; color:white;">
+            <li><strong>Configure your server:</strong> Click the "Configuration" link to set up your data source (UDP, TCP, or Serial port)</li>
+            <li><strong>Enter server address:</strong> Type your server's IP address or use "localhost" for local connections</li>
+            <li><strong>Connect:</strong> The plugin will automatically connect and display your vessel's position</li>
+        </ol>
+        
+        <p><strong>⭐ Key Features:</strong></p>
+        <ul style="margin: 8px 0 12px 18px; color:white;">
+            <li>📡 <strong>Real-time tracking</strong> - See your vessel move live on the map</li>
+            <li>🎯 <strong>Position details</strong> - View latitude, longitude, course, and speed</li>
+            <li>🏷️ <strong>Vessel identification</strong> - Shows vessel name from AIS data</li>
+            <li>📈 <strong>Track history</strong> - Visual trail of your vessel's path</li>
+            <li>🌤️ <strong>Weather at position</strong> - Get forecast for your current location</li>
+            <li>🎮 <strong>Test mode</strong> - Simulate movement for testing</li>
+        </ul>
+        
+        <p><strong>🎛️ Control buttons:</strong></p>
+        <ul style="margin: 8px 0 12px 18px; color:white;">
+            <li><strong>📍 Center on vessel</strong> - Jump to your current position</li>
+            <li><strong>▶️ Follow vessel</strong> - Auto-track your movement</li>
+            <li><strong>🌤️ Weather</strong> - View weather forecast at your position</li>
+        </ul>
+        
+        <div style="background: rgba(255,255,255,0.1); padding: 10px; border-radius: 5px; margin: 12px 0;">
+            <strong>💡 Tip:</strong> If you don't see your position, check that your NMEA/AIS data is being received and that the server connection is active (green "Connected" status).
+        </div>
+        
+        <p style="font-size: 90%; color: #ccc; margin-top: 15px; text-align: center;">
+            Perfect for sailing, motor boating, commercial vessels, and maritime enthusiasts!
+        </p>
+    </div>
+    
+    <div style="text-align: center; margin-top: 15px;">
+        <button on:click={toggleHelp} style="background: #ff4444; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;">✕ Close Help</button>
+    </div>
 </div>
 
 <section class="plugin__content">
@@ -182,7 +213,7 @@
     </div>
     <div id="footer">
     <div class="centered">
-        <button data-popovertarget="help">🛳️ <big>Help</big> 🛳️</button>
+                <button on:click={toggleHelp}>🛳️ <big>Help</big> 🛳️</button>
     </div>
         <br />
         <p>© 2025 Capt S. DEBRAY - v{config.version}</p>
@@ -1536,133 +1567,141 @@
 
         return L.latLng(toDegrees(φ2), toDegrees(λ2));
     }
-    
+    let helpVisible = false;
+
+    function toggleHelp() {
+        helpVisible = !helpVisible;
+        const helpDiv = document.getElementById('help');
+        if (helpDiv) {
+            helpDiv.style.display = helpVisible ? 'block' : 'none';
+        }
+    }
    /**
- * Shows a Windy weather popup at the given position.
- * @param useProjectionTime If true, uses Windy timestamp (forecast), otherwise current time.
- */
-function showMyPopup(lat: number, lon: number, useProjectionTime = false) {
-    openedPopup?.remove();
+     * Shows a Windy weather popup at the given position.
+     * @param useProjectionTime If true, uses Windy timestamp (forecast), otherwise current time.
+     */
+    function showMyPopup(lat: number, lon: number, useProjectionTime = false) {
+        openedPopup?.remove();
 
-    const popup = L.popup({ autoClose: true })
-        .setLatLng([lat, lon])
-        .setContent('<em>Loading weather...</em>')
-        .openOn(map);
+        const popup = L.popup({ autoClose: true })
+            .setLatLng([lat, lon])
+            .setContent('<em>Loading weather...</em>')
+            .openOn(map);
 
-    openedPopup = popup;
+        openedPopup = popup;
 
-    // *** CORRECTION : Gestionnaire d'événement pour détecter la fermeture du popup ***
-    popup.on('remove', () => {
-        openedPopup = null;
-    });
+        // *** CORRECTION : Gestionnaire d'événement pour détecter la fermeture du popup ***
+        popup.on('remove', () => {
+            openedPopup = null;
+        });
 
-    getLatLonInterpolator().then((interpolator: any) => {
-        if (!interpolator) {
-            popup.setContent('Weather layer not available.');
-            return;
-        }
+        getLatLonInterpolator().then((interpolator: any) => {
+            if (!interpolator) {
+                popup.setContent('Weather layer not available.');
+                return;
+            }
 
-        // Choose timestamp according to context
-        let ts: number;
-        if (useProjectionTime) {
-            ts = getRoundedHourTimestamp(store.get('timestamp')); // projection time (forecast)
-        } else {
-            ts = getRoundedHourTimestamp(Date.now()); // current time
-        }
-        const forecastDate = ts ? new Date(ts) : new Date();
+            // Choose timestamp according to context
+            let ts: number;
+            if (useProjectionTime) {
+                ts = getRoundedHourTimestamp(store.get('timestamp')); // projection time (forecast)
+            } else {
+                ts = getRoundedHourTimestamp(Date.now()); // current time
+            }
+            const forecastDate = ts ? new Date(ts) : new Date();
 
-        const overlay = store.get('overlay');
-        const values = interpolator({ lat, lon });
-        let content = `<div style="text-align: center;"><strong>${vesselName}</strong><br>φ = ${displayLatitude(lat)}, λ= ${displayLongitude(lon)}</div>`;
-        if (projectionHours === 0) {
-            content += `<hr><div><small><strong>${overlay} actual forecast :</strong></small></div>`;
-        } else if (projectionHours !== null && projectionHours > 0) {
-            content += `<hr><div><small><strong>${overlay} forecast in ${projectionHours} hours :</strong></small></div>`;
-        }
-        if (!Array.isArray(values)) {
-            content += '❌ No interpolated data.';
+            const overlay = store.get('overlay');
+            const values = interpolator({ lat, lon });
+            let content = `<div style="text-align: center;"><strong>${vesselName}</strong><br>φ = ${displayLatitude(lat)}, λ= ${displayLongitude(lon)}</div>`;
+            if (projectionHours === 0) {
+                content += `<hr><div><small><strong>${overlay} actual forecast :</strong></small></div>`;
+            } else if (projectionHours !== null && projectionHours > 0) {
+                content += `<hr><div><small><strong>${overlay} forecast in ${projectionHours} hours :</strong></small></div>`;
+            }
+            if (!Array.isArray(values)) {
+                content += '❌ No interpolated data.';
+                popup.setContent(content);
+                return;
+            }
+
+            if (overlay === 'wind') {
+                const { dir, wind } = wind2obj(values);
+                const speed = metrics.wind.convertValue(wind);
+                content += `💨 Wind: ${speed}<br>🧭 Direction: ${dir} °`;
+
+            } else if (overlay === 'waves') {
+                const { period, dir } = wave2obj(values);
+                const waveHeight = metrics.waves.convertValue(values[2]);
+                const waveDir = ((dir % 360) + 360) % 360; // Normalize to 0-360°
+                const wavePeriod = period.toFixed(1);
+                content += `🌊 Height: ${waveHeight} <br>🧭 Direction: ${Math.round(waveDir)}°<br>⏱ Period: ${wavePeriod} s`;
+            
+            } else if (overlay === 'wwaves') {
+                const { period, dir } = wave2obj(values);
+                const waveHeight = metrics.waves.convertValue(values[2]);
+                const waveDir = ((dir % 360) + 360) % 360; // Normalize to 0-360°
+                const wavePeriod = period.toFixed(1);
+                content += `🌊 Height: ${waveHeight} <br>🧭 Direction: ${Math.round(waveDir)}°<br>⏱ Period: ${wavePeriod} s`;
+            
+            } else if (overlay === 'gust') {
+                const gust = metrics.wind.convertValue(values[0]);
+                content += `💨 Gusts: ${gust} at ${Math.round(values[1])}m`;
+            
+            } else if (overlay === 'rain') {
+                const rain = values[0].toFixed(2);
+                content += `🌧️ Rain: ${rain} mm/h`;
+            
+            } else if (overlay === 'temp') {
+                const tempC = metrics.temp.convertValue(values[0]);
+                content += `🌡️ Temperature: ${tempC}`;
+            
+            } else if (overlay === 'pressure') {
+                const Press = metrics.pressure.convertValue(values[0]);
+                content += `📉 Pressure: ${Press} hPa`;
+            
+            } else if (overlay === 'clouds') {
+                content += `☁️ Cloud cover: ${Math.round(values[0])}%`;
+            
+            } else if (overlay === 'tide') {
+                const tideHeight = values[0];
+                content += `🌊 Tide: ${tideHeight.toFixed(2)} m`;
+            
+            } else if (overlay === 'currents') {
+                const currentSpeed = values[0];
+                const currentDir = values[1];
+                content += `🌊 Current: ${currentSpeed.toFixed(2)} m/s at ${Math.round(currentDir)}°`;
+            
+            } else if (overlay === 'swell1' || overlay === 'swell2' || overlay === 'swell3') {
+                // For swell overlays, direction conversion formula
+                console.log(`Swell ${overlay} data:`, values);
+                
+                const swellPeriod = values[0].toFixed(1);
+                let swellDir = values[1];
+                
+                // Correct conversion formula based on calibration:
+                // 270° → raw: -0.18068928020111485
+                // 190° → raw: 10.719788777108018
+                let swellDirDeg = (270 - swellDir * 7.33) % 360;
+                if (swellDirDeg < 0) swellDirDeg += 360;
+                
+                const swellHeight = metrics.waves.convertValue(values[2]);
+                const swellNum = overlay.slice(-1);
+                content += `🌊 Swell ${swellNum}: ${swellHeight}<br>🧭 Direction: ${Math.round(swellDirDeg)}°<br>⏱ Period: ${swellPeriod} s`;
+            
+            } else {
+                content += `ℹ️ No weather data available for ${overlay}.`;
+            }
+            // Add Windy API version and forecast date
+            content += `<hr><div style="text-align: right;"><small><strong>Forecast date : </strong>${forecastDate.toUTCString()}</small></div>`;
+            
+            // *** CORRECTION : Mettre à jour le contenu du popup ! ***
             popup.setContent(content);
-            return;
-        }
-
-        if (overlay === 'wind') {
-            const { dir, wind } = wind2obj(values);
-            const speed = metrics.wind.convertValue(wind);
-            content += `💨 Wind: ${speed}<br>🧭 Direction: ${dir} °`;
-
-        } else if (overlay === 'waves') {
-            const { period, dir } = wave2obj(values);
-            const waveHeight = metrics.waves.convertValue(values[2]);
-            const waveDir = ((dir % 360) + 360) % 360; // Normalize to 0-360°
-            const wavePeriod = period.toFixed(1);
-            content += `🌊 Height: ${waveHeight} <br>🧭 Direction: ${Math.round(waveDir)}°<br>⏱ Period: ${wavePeriod} s`;
-        
-        } else if (overlay === 'wwaves') {
-            const { period, dir } = wave2obj(values);
-            const waveHeight = metrics.waves.convertValue(values[2]);
-            const waveDir = ((dir % 360) + 360) % 360; // Normalize to 0-360°
-            const wavePeriod = period.toFixed(1);
-            content += `🌊 Height: ${waveHeight} <br>🧭 Direction: ${Math.round(waveDir)}°<br>⏱ Period: ${wavePeriod} s`;
-        
-        } else if (overlay === 'gust') {
-            const gust = metrics.wind.convertValue(values[0]);
-            content += `💨 Gusts: ${gust} at ${Math.round(values[1])}m`;
-        
-        } else if (overlay === 'rain') {
-            const rain = values[0].toFixed(2);
-            content += `🌧️ Rain: ${rain} mm/h`;
-        
-        } else if (overlay === 'temp') {
-            const tempC = metrics.temp.convertValue(values[0]);
-            content += `🌡️ Temperature: ${tempC}`;
-        
-        } else if (overlay === 'pressure') {
-            const Press = metrics.pressure.convertValue(values[0]);
-            content += `📉 Pressure: ${Press} hPa`;
-        
-        } else if (overlay === 'clouds') {
-            content += `☁️ Cloud cover: ${Math.round(values[0])}%`;
-        
-        } else if (overlay === 'tide') {
-            const tideHeight = values[0];
-            content += `🌊 Tide: ${tideHeight.toFixed(2)} m`;
-        
-        } else if (overlay === 'currents') {
-            const currentSpeed = values[0];
-            const currentDir = values[1];
-            content += `🌊 Current: ${currentSpeed.toFixed(2)} m/s at ${Math.round(currentDir)}°`;
-        
-        } else if (overlay === 'swell1' || overlay === 'swell2' || overlay === 'swell3') {
-            // For swell overlays, direction conversion formula
-            console.log(`Swell ${overlay} data:`, values);
             
-            const swellPeriod = values[0].toFixed(1);
-            let swellDir = values[1];
-            
-            // Correct conversion formula based on calibration:
-            // 270° → raw: -0.18068928020111485
-            // 190° → raw: 10.719788777108018
-            let swellDirDeg = (270 - swellDir * 7.33) % 360;
-            if (swellDirDeg < 0) swellDirDeg += 360;
-            
-            const swellHeight = metrics.waves.convertValue(values[2]);
-            const swellNum = overlay.slice(-1);
-            content += `🌊 Swell ${swellNum}: ${swellHeight}<br>🧭 Direction: ${Math.round(swellDirDeg)}°<br>⏱ Period: ${swellPeriod} s`;
-        
-        } else {
-            content += `ℹ️ No weather data available for ${overlay}.`;
-        }
-        // Add Windy API version and forecast date
-        content += `<hr><div style="text-align: right;"><small><strong>Forecast date : </strong>${forecastDate.toUTCString()}</small></div>`;
-        
-        // *** CORRECTION : Mettre à jour le contenu du popup ! ***
-        popup.setContent(content);
-        
-    }).catch((error: unknown) => {
-        console.error('Error getting weather data:', error);
-        popup.setContent('❌ Error loading weather data.');
-    });
-} // End showMyPopup
+        }).catch((error: unknown) => {
+            console.error('Error getting weather data:', error);
+            popup.setContent('❌ Error loading weather data.');
+        });
+    } // End showMyPopup
 
     /**
      * Adds the vessel marker and projection on the map.
