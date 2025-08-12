@@ -101,6 +101,8 @@
             id="vesselName"
             name="vesselName"
             bind:value={vesselName} 
+            on:blur={handleVesselNameChange}
+            on:input={handleVesselNameChange}
             placeholder="Enter vessel name" 
             style="width: 150px; height: 20px; font-weight: bold;"
         />
@@ -500,7 +502,7 @@
     let mySpeedOverGround: number = 0; // In knots
     //let heurePrev: number | null = null; // for projection
     let followShip = false; // do not follow ship by default
-    let vesselName = 'YOUR BOAT';
+    let vesselName = loadVesselName(); // Load from localStorage or default
     let CurrentOverlay = 'Windy'; // Default overlay, can be changed later
     let lastDataUpdateTime: number = 0;
     let socket: any = null;
@@ -549,6 +551,42 @@
     // Timer pour nettoyer les fragments expirés
     let fragmentCleanupTimer: number | null = null;
 
+    /**
+     * Load vessel name from localStorage
+     */
+    function loadVesselName(): string {
+        try {
+            const saved = localStorage.getItem('windy-nmea-vessel-name');
+            return saved || 'YOUR BOAT';
+        } catch (error) {
+            console.warn('Failed to load vessel name from localStorage:', error);
+            return 'YOUR BOAT';
+        }
+    }
+
+    /**
+     * Save vessel name to localStorage
+     */
+    function saveVesselName(name: string): void {
+        try {
+            localStorage.setItem('windy-nmea-vessel-name', name);
+            console.log('Vessel name saved:', name);
+        } catch (error) {
+            console.warn('Failed to save vessel name to localStorage:', error);
+        }
+    }
+
+    /**
+     * Handle vessel name input changes
+     */
+    function handleVesselNameChange(event: Event): void {
+        const target = event.target as HTMLInputElement;
+        const name = target.value.trim();
+        if (name) {
+            vesselName = name;
+            saveVesselName(name);
+        }
+    }
 
     /**
      * Updates the button text based on current overlay and projection hours
@@ -1417,6 +1455,7 @@
             if (isOwnVessel) {
                 if (name && name !== '') {
                     vesselName = name;
+                    saveVesselName(name); // Save AIS-received name too
                 }
             } else {
                 // External vessel - update or create ship data
