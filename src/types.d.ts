@@ -28,10 +28,11 @@ declare module '@windy/interfaces' {
 }
 
 declare module '@windy/broadcast' {
-    const bcast: {
-        emit: (event: string, data?: any) => void;
-        on: (event: string, callback: Function) => void;
-    };
+    export interface WindyBroadcast {
+        emit(event: string, data?: any): void;
+        on(event: string, callback: Function): void;
+    }
+    const bcast: WindyBroadcast;
     export default bcast;
 }
 
@@ -48,24 +49,37 @@ declare module '@windy/config' {
 }
 
 declare module '@windy/utils' {
-    export function wind2obj(values: any): { dir: number, wind: number };
+    export interface WindDataResult {
+        dir: number;
+        wind: number;
+    }
+    
+    export interface WaveDataResult {
+        period: number;
+        dir: number;
+    }
+    
+    export function wind2obj(values: number[] | any[]): WindDataResult;
+    export function wave2obj(values: number[] | any[]): WaveDataResult;
 }
 
 declare module '@windy/store' {
-    const store: {
-        get: (key: string) => any;
-        set: (key: string, value: any) => void;
-        on: (key: string, callback: (value: any) => void) => (() => void) | void;
-    };
+    export interface WindyStoreInterface {
+        get(key: string): any;
+        set(key: string, value: any): void;
+        on(key: string, callback: (value: any) => void): (() => void) | void;
+    }
+    const store: WindyStoreInterface;
     export default store;
 }
 
 declare module '@windy/metrics' {
-    const metrics: {
-        wind: { convertValue: (value: number) => string };
-        waves: { convertValue: (value: number) => string };
-        temp: { convertValue: (value: number) => string };
-        pressure: { convertValue: (value: number) => string };
-    };
+    export interface WindyMetrics {
+        wind: { convertValue(value: number): string };
+        waves: { convertValue(value: number): string };
+        temp: { convertValue(value: number): string };
+        pressure: { convertValue(value: number): string };
+    }
+    const metrics: WindyMetrics;
     export default metrics;
 }

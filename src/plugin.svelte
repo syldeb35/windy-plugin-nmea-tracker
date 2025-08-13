@@ -229,18 +229,34 @@
 
 
 <script lang="ts">
-    import bcast from "@windy/broadcast";
+    import bcastImport from "@windy/broadcast";
     import { onMount, onDestroy } from 'svelte';
     import { map } from '@windy/map';
     import { getLatLonInterpolator } from '@windy/interpolator';
     //import { overlaySettings } from '@windy/config';
     import { wind2obj, wave2obj } from '@windy/utils';
     import store from '@windy/store';
-    import metrics from '@windy/metrics';
+    import metricsImport from '@windy/metrics';
     import io from './socket.io.min.js';
     import { createRotatingBoatIcon } from './boatIcon';
     import config from './pluginConfig';
-    
+
+    // Explicit type assertions to avoid TypeScript module confusion
+    const bcast = bcastImport as {
+        emit: (event: string, data?: any) => void;
+        on: (event: string, callback: Function) => void;
+    };
+
+    const metrics = (metricsImport as unknown) as {
+        wind: { convertValue: (value: number) => string };
+        waves: { convertValue: (value: number) => string };
+        temp: { convertValue: (value: number) => string };
+        pressure: { convertValue: (value: number) => string };
+    };
+
+    // Add explicit type assertion if needed
+    const windyStore = store as any;
+
     // Use global Leaflet from Windy
     const L = (window as any).L;
     
@@ -1583,7 +1599,7 @@
      * Calculate the projected position of the vessel based on heading/speed and Windy timestamp
      */
     function computeProjection(lat: number, lon: number, cog: number, sog: number, duration?: number): any {
-        const ts = store.get('timestamp');
+        const ts = (store as any).get('timestamp')
         duration = duration ?? (Math.floor((ts - Date.now()) / 3600000) || 0); // in hours, if no timestamp we don't project
         if (duration > 360) duration = 0;
         if (duration < 1) duration = 0; // if timestamp in the past, we don't project
@@ -1643,13 +1659,13 @@
             // Choose timestamp according to context
             let ts: number;
             if (useProjectionTime) {
-                ts = getRoundedHourTimestamp(store.get('timestamp')); // projection time (forecast)
+                ts = getRoundedHourTimestamp((store as any).get('timestamp')); // projection time (forecast)
             } else {
                 ts = getRoundedHourTimestamp(Date.now()); // current time
             }
             const forecastDate = ts ? new Date(ts) : new Date();
 
-            const overlay = store.get('overlay');
+            const overlay = (store as any).get('overlay');
             const values = interpolator({ lat, lon });
             let content = `<div style="text-align: center;"><strong>${vesselName}</strong><br>φ = ${displayLatitude(lat)}, λ= ${displayLongitude(lon)}</div>`;
             if (projectionHours === 0) {
@@ -1664,7 +1680,7 @@
             }
 
             if (overlay === 'wind') {
-                const { dir, wind } = wind2obj(values);
+                const { dir, wind } = wind2obj(values) as { dir: number; wind: number };
                 const speed = metrics.wind.convertValue(wind);
                 content += `💨 Wind: ${speed}<br>🧭 Direction: ${dir} °`;
 
@@ -1813,7 +1829,7 @@
                 return;
             }
             // Round to the nearest full hour (in ms)
-            store.set('timestamp', getRoundedHourTimestamp());
+            (store as any).set('timestamp', getRoundedHourTimestamp());
             showMyPopup(lat, lon, false);
         });
 
@@ -1822,7 +1838,7 @@
             // *** CORRECTION : Calcul correct de projectionHours ***
             if (projectionHours === null || projectionHours === undefined) {
                 const now = getRoundedHourTimestamp(Date.now());
-                const ts = getRoundedHourTimestamp(store.get('timestamp'));
+                const ts = getRoundedHourTimestamp((store as any).get('timestamp'));
                 projectionHours = Math.max(0, (ts - now) / (3600 * 1000)); // en heures, minimum 0
             }
             
@@ -1876,7 +1892,7 @@
             let effectiveCOG = testModeEnabled ? testCOG : myCourseOverGroundT;
             
             const now = getRoundedHourTimestamp(Date.now());
-            const ts = getRoundedHourTimestamp(store.get('timestamp'));
+            const ts = getRoundedHourTimestamp((store as any).get('timestamp'));
             // If timeline is at current time (±1h)
             if (projectionHours !== null && projectionHours < 1) {
                 showMyPopup(lastLatitude, lastLongitude, false);
@@ -1975,7 +1991,7 @@
             // For example:
             console.log('Windy timeline changed, new timestamp:', ts);
             // You can trigger an action here, update a variable, etc.
-            projectionHours = (getRoundedHourTimestamp(store.get('timestamp')) - getRoundedHourTimestamp()) / (3600 * 1000); // in hours
+            projectionHours = (getRoundedHourTimestamp((store as any).get('timestamp')) - getRoundedHourTimestamp()) / (3600 * 1000); // in hours
             updateButtonText();
         });
         if (typeof unsub === 'function') {
