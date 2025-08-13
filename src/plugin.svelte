@@ -1722,22 +1722,19 @@
                 content += `🌊 Tide: ${tideHeight.toFixed(2)} m`;
             
             } else if (overlay === 'currents') {
-                const currentSpeed = values[0];
-                const currentDir = values[1];
-                content += `🌊 Current: ${currentSpeed.toFixed(2)} m/s at ${Math.round(currentDir)}°`;
-            
+                const u = values[0];
+                const v = values[1];
+                content += `🌊 Current: ${Math.sqrt(u * u + v * v).toFixed(2)} m/s at ${Math.round(Math.atan2(v, u) * 180 / Math.PI)}°`;
+
             } else if (overlay === 'swell1' || overlay === 'swell2' || overlay === 'swell3') {
                 // For swell overlays, direction conversion formula
                 console.log(`Swell ${overlay} data:`, values);
                 
-                const swellPeriod = values[0].toFixed(1);
-                let swellDir = values[1];
-                
-                // Correct conversion formula based on calibration:
-                // 270° → raw: -0.18068928020111485
-                // 190° → raw: 10.719788777108018
-                let swellDirDeg = (270 - swellDir * 7.33) % 360;
-                if (swellDirDeg < 0) swellDirDeg += 360;
+                const u = values[0];
+                const v = values[1];
+
+                const swellDirDeg = Math.round(Math.atan2(v, u) * 180 / Math.PI); // Convert to degrees
+                const swellPeriod = Math.sqrt(u * u + v * v).toFixed(2);
                 
                 const swellHeight = metrics.waves.convertValue(values[2]);
                 const swellNum = overlay.slice(-1);
