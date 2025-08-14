@@ -1,50 +1,50 @@
-﻿{
-    "name":  "windy-plugin-nmea-tracker",
-    "version":  "1.0.6",
-    "description":  "Gps tracker",
-    "main":  "dist/plugin.min.js",
-    "type":  "module",
-    "scripts":  {
-        "start":  "rollup -w -c",
-        "build":  "cross-env SERVE=false rollup -c",
-        "serve":  "rollup -w -c",
-        "windy":  "start https://www.windy.com/?plugin=https://localhost:9999/plugin.js",
-        "version:patch":  "npm version patch",
-        "version:minor":  "npm version minor",
-        "version:major":  "npm version major",
-        "release":  "npm run version:patch && git push origin main --tags",
-        "release:minor":  "npm run version:minor && git push origin main --tags",
-        "release:major":  "npm run version:major && git push origin main --tags"
+{
+    "name": "windy-plugin-nmea-tracker",
+    "version": "1.0.7",
+    "description": "Gps tracker",
+    "main": "dist/plugin.min.js",
+    "type": "module",
+    "scripts": {
+        "start": "rollup -w -c",
+        "build": "cross-env SERVE=false rollup -c",
+        "serve": "rollup -w -c",
+        "windy": "start https://www.windy.com/?plugin=https://localhost:9999/plugin.js",
+        "version:patch": "npm version patch",
+        "version:minor": "npm version minor",
+        "version:major": "npm version major",
+        "release": "npm run version:patch && git push origin main --tags",
+        "release:minor": "npm run version:minor && git push origin main --tags",
+        "release:major": "npm run version:major && git push origin main --tags"
     },
-    "repository":  {
-        "type":  "git",
-        "url":  "git+https://github.com/syldeb35/windy-plugin-nmea-tracker.git"
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/syldeb35/windy-plugin-nmea-tracker.git"
     },
-    "keywords":  [
+    "keywords": [
         "windy",
         "windy.com",
         "plugins"
     ],
-    "author":  "Sylvain DEBRAY, CMA CGM",
-    "license":  "ISC",
-    "dependencies":  {
-        "@windycom/plugin-devtools":  "^3.0.1"
+    "author": "Sylvain DEBRAY, CMA CGM",
+    "license": "ISC",
+    "dependencies": {
+        "@windycom/plugin-devtools": "^3.0.1"
     },
-    "devDependencies":  {
-        "@rollup/plugin-commonjs":  "^28.0.6",
-        "@rollup/plugin-node-resolve":  "^16.0.1",
-        "@rollup/plugin-terser":  "^0.4.4",
-        "@rollup/plugin-typescript":  "^12.1.4",
-        "@types/node":  "^24.2.1",
-        "cross-env":  "^10.0.0",
-        "less":  "^4.4.0",
-        "rollup":  "^4.46.2",
-        "rollup-plugin-cleanup":  "^3.2.1",
-        "rollup-plugin-serve":  "^3.0.0",
-        "rollup-plugin-svelte":  "^7.2.2",
-        "rollup-plugin-swc3":  "^0.12.1",
-        "svelte":  "^4.2.8",
-        "svelte-preprocess":  "^6.0.3",
-        "typescript":  "^5.9.2"
+    "devDependencies": {
+        "@rollup/plugin-commonjs": "^28.0.6",
+        "@rollup/plugin-node-resolve": "^16.0.1",
+        "@rollup/plugin-terser": "^0.4.4",
+        "@rollup/plugin-typescript": "^12.1.4",
+        "@types/node": "^24.2.1",
+        "cross-env": "^10.0.0",
+        "less": "^4.4.0",
+        "rollup": "^4.46.2",
+        "rollup-plugin-cleanup": "^3.2.1",
+        "rollup-plugin-serve": "^3.0.0",
+        "rollup-plugin-svelte": "^7.2.2",
+        "rollup-plugin-swc3": "^0.12.1",
+        "svelte": "^4.2.8",
+        "svelte-preprocess": "^6.0.3",
+        "typescript": "^5.9.2"
     }
 }
