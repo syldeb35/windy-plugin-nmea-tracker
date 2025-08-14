@@ -26,6 +26,7 @@
             <li>📈 <strong>Track history</strong> - Visual trail of your vessel's path</li>
             <li>🌤️ <strong>Weather at position</strong> - Get forecast for your current location</li>
             <li>🎮 <strong>Test mode</strong> - Simulate movement for testing</li>
+            <li>🗺️ <strong>GPX route navigation</strong> - Upload and follow sailing routes</li>
         </ul>
         
         <p><strong>🎛️ Control buttons:</strong></p>
@@ -210,6 +211,67 @@
         </div>
       {/if}
     </div>
+    <!-- GPX Route Controls -->
+    <hr />
+    <div class="gpx-route-section">
+        <p style="font-weight: bold; margin-bottom: 10px;">🗺️ GPX Route Navigation :</p>
+        
+        <!-- GPX File Upload -->
+        <div style="margin-bottom: 10px;">
+            <label for="gpxFileInput" style="display: block; margin-bottom: 5px; font-weight: bold;">
+                📄 Upload GPX Route:
+            </label>
+            <input
+                type="file"
+                id="gpxFileInput"
+                name="gpxFileInput"
+                accept=".gpx"
+                on:change={handleGpxFileUpload}
+                style="width: 100%; margin-bottom: 5px;"
+            />
+            {#if routeFileName}
+                <p style="font-size: 12px; color: #0a0; margin: 2px 0;">
+                    ✅ Loaded: {routeFileName}
+                </p>
+            {/if}
+        </div>
+
+        <!-- Route Status Display -->
+        {#if isRouteLoaded && gpxRoute.length > 0}
+            <div style="background: rgba(0,100,0,0.1); padding: 8px; border-radius: 4px; margin-bottom: 10px;">
+                <p style="font-size: 12px; margin: 2px 0;">
+                    📍 Waypoints: {gpxRoute.length} | Distance: {routeDistance.toFixed(1)} NM
+                </p>
+                {#if estimatedTimeToCompletion > 0}
+                    <p style="font-size: 12px; margin: 2px 0;">
+                        ⏱️ ETC: {Math.floor(estimatedTimeToCompletion)}h {Math.floor((estimatedTimeToCompletion % 1) * 60)}min
+                    </p>
+                {/if}
+                <p style="font-size: 12px; margin: 2px 0;">
+                    🎯 Progress: {Math.round(routeProgress * 100)}% | Next: Waypoint {closestWaypointIndex + 1}
+                </p>
+            </div>
+
+            <!-- Route Controls -->
+            <div class="plugin__buttons__centered" style="margin-bottom: 10px;">
+                <label class="centered">
+                    <input
+                        type="checkbox"
+                        bind:checked={showRouteWaypoints}
+                        on:change={toggleRouteWaypoints}
+                    />
+                    Show waypoints
+                </label>
+                <button on:click={clearRoute} style="background: #ff4444; margin-left: 10px;">
+                    🗑️ Clear Route
+                </button>
+            </div>
+
+            <p style="font-size: 11px; color: #666; margin-top: 5px;">
+                🧭 Vessel will be projected along the route based on current/test speed
+            </p>
+        {/if}
+    </div>
     <div class="error" id="err">
         <p></p>
     </div>
@@ -364,14 +426,6 @@
             updateErrorDisplay();
             resetNoFrameTimer();
         });
-
-        /*socket.on('nmea_data', (data: string) => {
-            const frameType = processNMEA(data);
-            if (frameType) {
-                removeErrorsByType(frameType);
-            }
-            updateErrorDisplay();
-        }); */
 
         socket.on('nmea_data', (data: any) => {
             try {
@@ -566,6 +620,23 @@
 
     // Timer pour nettoyer les fragments expirés
     let fragmentCleanupTimer: any | null = null;
+
+    // Add new variables for route timing
+    let routeStartTime: Date | null = null; // Departure time from GPX
+    let routeProjectionActive: boolean = false; // Flag to indicate route-based projection
+    
+    // GPX Route variables
+    let gpxRoute: Array<{lat: number, lon: number, name?: string, time?: Date}> = []; // Route waypoints  
+    let routeLayer: any = null; // Layer for displaying the route
+    let routeMarkers: any = null; // Layer for route waypoints
+    let isRouteLoaded: boolean = false; // Flag to track if route is loaded
+    let routeProgress: number = 0; // Current progress along route (0-1)
+    let routeProjectionIcon: any = null; // Projected position along route
+    let routeDistance: number = 0; // Total route distance in nautical miles
+    let estimatedTimeToCompletion: number = 0; // ETC in hours
+    let showRouteWaypoints: boolean = true; // Show/hide waypoint markers
+    let closestWaypointIndex: number = 0; // Index of closest waypoint to current position
+    let routeFileName: string = ''; // Name of loaded GPX file
 
     /**
      * Load vessel name from localStorage
@@ -1594,9 +1665,446 @@
         }
         return ('000' + deg).slice(-3) + '° ' + ('0' + ((Math.floor(min * 1000) / 1000).toFixed(4))).slice(-7) + "' " + hemisphere;
     }
-    
     /**
-     * Calculate the projected position of the vessel based on heading/speed and Windy timestamp
+     * Handles GPX file upload and parsing
+     */
+    function handleGpxFileUpload(event: Event): void {
+        const target = event.target as HTMLInputElement;
+        const file = target.files?.[0];
+        
+        if (!file || !file.name.toLowerCase().endsWith('.gpx')) {
+            addError("[Err] Please select a valid GPX file");
+            return;
+        }
+        
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const gpxContent = e.target?.result as string;
+                parseGpxContent(gpxContent, file.name);
+            } catch (error) {
+                console.error('Error reading GPX file:', error);
+                addError("[Err] Failed to read GPX file");
+            }
+        };
+        reader.readAsText(file);
+    }
+
+    /**
+     * Parses GPX XML content and extracts waypoints with departure time extraction
+     */
+    function parseGpxContent(gpxXml: string, fileName: string): void {
+        try {
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(gpxXml, 'text/xml');
+            
+            // Check for parsing errors
+            const parserError = xmlDoc.querySelector('parsererror');
+            if (parserError) {
+                throw new Error('Invalid GPX XML format');
+            }
+            
+            const waypoints: Array<{lat: number, lon: number, name?: string, time?: Date}> = [];
+            
+            // PRIORITY 1: Extract route points (rtept) from route blocks - most appropriate for navigation
+            const routePoints = xmlDoc.querySelectorAll('rte rtept');
+            routePoints.forEach((rtept, index) => {
+                const lat = parseFloat(rtept.getAttribute('lat') || '0');
+                const lon = parseFloat(rtept.getAttribute('lon') || '0');
+                
+                if (validateCoordinates(lat, lon)) {
+                    const nameElement = rtept.querySelector('name');
+                    const timeElement = rtept.querySelector('time');
+                    
+                    waypoints.push({
+                        lat,
+                        lon,
+                        name: nameElement?.textContent || `Route Point ${index + 1}`,
+                        time: timeElement?.textContent ? new Date(timeElement.textContent) : undefined
+                    });
+                }
+            });
+                
+            // PRIORITY 2: If no route points, try track points (trkpt) - GPS tracks
+            if (waypoints.length === 0) {
+                const trackPoints = xmlDoc.querySelectorAll('trkpt');
+                trackPoints.forEach((trkpt, index) => {
+                    const lat = parseFloat(trkpt.getAttribute('lat') || '0');
+                    const lon = parseFloat(trkpt.getAttribute('lon') || '0');
+                    
+                    if (validateCoordinates(lat, lon)) {
+                        const nameElement = trkpt.querySelector('name');
+                        const timeElement = trkpt.querySelector('time');
+                        
+                        waypoints.push({
+                            lat,
+                            lon,
+                            name: nameElement?.textContent || `Track Point ${index + 1}`,
+                            time: timeElement?.textContent ? new Date(timeElement.textContent) : undefined
+                        });
+                    }
+                });
+            }
+
+            // PRIORITY 3: If still no points, try regular waypoints (wpt) - individual waypoints
+            if (waypoints.length === 0) {
+                const wptPoints = xmlDoc.querySelectorAll('wpt');
+                wptPoints.forEach((wpt, index) => {
+                    const lat = parseFloat(wpt.getAttribute('lat') || '0');
+                    const lon = parseFloat(wpt.getAttribute('lon') || '0');
+                    
+                    if (validateCoordinates(lat, lon)) {
+                        const nameElement = wpt.querySelector('name');
+                        const timeElement = wpt.querySelector('time');
+                        
+                        waypoints.push({
+                            lat,
+                            lon,
+                            name: nameElement?.textContent || `Waypoint ${index + 1}`,
+                            time: timeElement?.textContent ? new Date(timeElement.textContent) : undefined
+                        });
+                    }
+                });
+            }
+            
+            if (waypoints.length < 2) {
+                addError("[Err] GPX file must contain at least 2 waypoints");
+                return;
+            }
+            
+            // Extract departure time from first waypoint
+            routeStartTime = waypoints[0].time || null;
+            
+            // Success - load the route
+            gpxRoute = waypoints;
+            routeFileName = fileName;
+            isRouteLoaded = true;
+            routeProjectionActive = true; // Enable route-based projection
+            calculateRouteDistance();
+            displayRoute();
+            
+            console.log(`GPX route loaded: ${waypoints.length} waypoints from ${fileName}`);
+            if (routeStartTime) {
+                console.log(`Departure time: ${routeStartTime.toISOString()}`);
+            }
+            
+            // Clear any existing errors
+            removeErrorsByType(['GPX', 'route']);
+            
+        } catch (error) {
+            console.error('Error parsing GPX:', error);
+            addError("[Err] Invalid GPX file format");
+        }
+    }
+
+    /**
+     * Calculates total route distance and updates route metrics
+     */
+    function calculateRouteDistance(): void {
+        if (gpxRoute.length < 2) return;
+        
+        let totalDistanceKm = 0;
+        
+        for (let i = 0; i < gpxRoute.length - 1; i++) {
+            const dist = calculateDistance(
+                gpxRoute[i].lat, gpxRoute[i].lon,
+                gpxRoute[i + 1].lat, gpxRoute[i + 1].lon
+            );
+            totalDistanceKm += dist;
+        }
+        
+        // Convert to nautical miles
+        routeDistance = totalDistanceKm / 1.852;
+    }
+
+    /**
+     * Displays the route on the map
+     */
+    function displayRoute(): void {
+        if (!map || !isRouteLoaded || gpxRoute.length < 2) return;
+        
+        // Clear existing route display
+        clearRouteDisplay();
+        
+        // Create route layer group
+        routeLayer = L.layerGroup().addTo(map);
+        routeMarkers = L.layerGroup().addTo(map);
+        
+        // Create route line
+        const routeLatLngs = gpxRoute.map(wp => L.latLng(wp.lat, wp.lon));
+        const routeLine = L.polyline(routeLatLngs, {
+            color: '#ff6600',
+            weight: 3,
+            opacity: 0.7,
+            dashArray: '8, 8'
+        }).addTo(routeLayer);
+        
+        // Add waypoint markers if enabled
+        if (showRouteWaypoints) {
+            displayRouteWaypoints();
+        }
+        
+        // Fit map to route bounds
+        const group = new L.featureGroup(routeLatLngs.map(ll => L.marker(ll)));
+        map.fitBounds(group.getBounds().pad(0.1));
+    }
+
+    /**
+     * Displays waypoint markers on the route
+     */
+    function displayRouteWaypoints(): void {
+        if (!routeMarkers || !isRouteLoaded) return;
+        
+        routeMarkers.clearLayers();
+        
+        gpxRoute.forEach((waypoint, index) => {
+            const isStart = index === 0;
+            const isEnd = index === gpxRoute.length - 1;
+            const isCurrent = index === closestWaypointIndex;
+            
+            let color = '#ff6600'; // Default orange
+            let icon = '📍';
+            
+            if (isStart) {
+                color = '#00ff00';
+                icon = '🟢';
+            } else if (isEnd) {
+                color = '#ff0000'; 
+                icon = '🏁';
+            } else if (isCurrent) {
+                color = '#ffff00';
+                icon = '🎯';
+            }
+            
+            const waypointIcon = L.divIcon({
+                html: `<div style="background: ${color}; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 12px;">${icon}</div>`,
+                className: 'waypoint-marker',
+                iconSize: [20, 20],
+                iconAnchor: [10, 10]
+            });
+            
+            const marker = L.marker([waypoint.lat, waypoint.lon], { icon: waypointIcon })
+                .addTo(routeMarkers);
+            
+            marker.bindTooltip(
+                `${waypoint.name || `Waypoint ${index + 1}`}<br>
+                ${displayLatitude(waypoint.lat)}<br>
+                ${displayLongitude(waypoint.lon)}`,
+                { permanent: false, direction: 'top' }
+            );
+        });
+    }
+
+    /**
+     * Toggles waypoint markers visibility
+     */
+    function toggleRouteWaypoints(): void {
+        if (!routeMarkers) return;
+        
+        if (showRouteWaypoints) {
+            displayRouteWaypoints();
+        } else {
+            routeMarkers.clearLayers();
+        }
+    }
+
+    /**
+     * Clears the loaded route and removes it from the map
+     * Enhanced route clearing with projection reset
+     */
+    function clearRoute(): void {
+        gpxRoute = [];
+        isRouteLoaded = false;
+        routeFileName = '';
+        routeProgress = 0;
+        closestWaypointIndex = 0;
+        routeDistance = 0;
+        estimatedTimeToCompletion = 0;
+        routeStartTime = null;
+        routeProjectionActive = false; // Disable route-based projection
+        
+        clearRouteDisplay();
+        
+        // Reset file input
+        const fileInput = document.getElementById('gpxFileInput') as HTMLInputElement;
+        if (fileInput) {
+            fileInput.value = '';
+        }
+        
+        console.log('GPX route cleared');
+        
+        // Redraw markers to restore traditional projection arrows
+        if (lastLatitude !== null && lastLongitude !== null) {
+            const validCOG = Number.isFinite(myCourseOverGroundT) ? myCourseOverGroundT : 0;
+            addBoatMarker(lastLatitude, lastLongitude, validCOG);
+        }
+    }
+
+    /**
+     * Clears route display elements from the map
+     */
+    function clearRouteDisplay(): void {
+        if (routeLayer) {
+            routeLayer.clearLayers();
+            map.removeLayer(routeLayer);
+            routeLayer = null;
+        }
+        if (routeMarkers) {
+            routeMarkers.clearLayers(); 
+            map.removeLayer(routeMarkers);
+            routeMarkers = null;
+        }
+        if (routeProjectionIcon) {
+            routeProjectionIcon.remove();
+            routeProjectionIcon = null;
+        }
+    }
+
+    /**
+     * Finds the closest waypoint to current position and calculates progress
+     */
+    function updateRouteProgress(): void {
+        if (!isRouteLoaded || !lastLatitude || !lastLongitude) return;
+        
+        let closestDistance = Infinity;
+        let closestIndex = 0;
+        let totalProgress = 0;
+        
+        // Find closest waypoint
+        gpxRoute.forEach((waypoint, index) => {
+            const distance = calculateDistance(lastLatitude!, lastLongitude!, waypoint.lat, waypoint.lon);
+            if (distance < closestDistance) {
+                closestDistance = distance;
+                closestIndex = index;
+            }
+        });
+        
+        closestWaypointIndex = closestIndex;
+        
+        // Calculate progress along route
+        let distanceCovered = 0;
+        for (let i = 0; i < closestIndex; i++) {
+            if (i < gpxRoute.length - 1) {
+                distanceCovered += calculateDistance(
+                    gpxRoute[i].lat, gpxRoute[i].lon,
+                    gpxRoute[i + 1].lat, gpxRoute[i + 1].lon
+                );
+            }
+        }
+        
+        // Add partial distance to current segment
+        if (closestIndex > 0 && closestIndex < gpxRoute.length) {
+            const segmentStart = gpxRoute[closestIndex - 1];
+            const segmentDistance = calculateDistance(
+                segmentStart.lat, segmentStart.lon,
+                gpxRoute[closestIndex].lat, gpxRoute[closestIndex].lon
+            );
+            const currentSegmentDistance = calculateDistance(
+                lastLatitude!, lastLongitude!,
+                segmentStart.lat, segmentStart.lon
+            );
+            
+            distanceCovered += Math.min(currentSegmentDistance, segmentDistance);
+        }
+        
+        routeProgress = Math.min(distanceCovered / (routeDistance * 1.852), 1.0); // Convert NM to km
+        
+        // Calculate ETC based on current/test speed
+        const effectiveSpeed = testModeEnabled ? testSOG : mySpeedOverGround;
+        if (effectiveSpeed > 0) {
+            const remainingDistance = (routeDistance * (1 - routeProgress));
+            estimatedTimeToCompletion = remainingDistance / effectiveSpeed;
+        }
+    }
+
+    /**
+     * Projects vessel position along the loaded route with timing consideration and heading calculation
+     */
+    function computeRouteProjection(currentSOG: number, duration: number): {lat: number, lon: number, heading: number} | null {
+        if (!isRouteLoaded || gpxRoute.length < 2 || currentSOG <= 0) return null;
+        
+        let timeElapsedHours: number;
+        let currentIndex: number;
+        let currentLat: number;
+        let currentLon: number;
+        
+        if (routeStartTime) {
+            // When we have a departure time, calculate from route start to target projection time
+            const targetTime = (store as any).get('timestamp'); // Windy target timestamp
+            const routeStartTimeMs = routeStartTime.getTime();
+            
+            // Calculate elapsed time from route start to target projection time
+            timeElapsedHours = (targetTime - routeStartTimeMs) / (1000 * 3600);
+            
+            // Start from the beginning of the route
+            currentIndex = 0;
+            currentLat = gpxRoute[0].lat;
+            currentLon = gpxRoute[0].lon;
+            
+            console.log(`Route projection: ${timeElapsedHours.toFixed(2)} hours from departure time`);
+        } else {
+            // No departure time - use traditional approach from current position
+            timeElapsedHours = duration / 3600; // Convert seconds to hours
+            currentIndex = closestWaypointIndex;
+            currentLat = lastLatitude || gpxRoute[currentIndex].lat;
+            currentLon = lastLongitude || gpxRoute[currentIndex].lon;
+            
+            console.log(`Route projection: ${timeElapsedHours.toFixed(2)} hours from current position`);
+        }
+        
+        // If projection time is in the past relative to route start, return route start position
+        if (timeElapsedHours < 0) {
+            console.log('Projection time is before route start time');
+            return {
+                lat: gpxRoute[0].lat,
+                lon: gpxRoute[0].lon,
+                heading: gpxRoute.length > 1 ? calculateBearing(gpxRoute[0].lat, gpxRoute[0].lon, gpxRoute[1].lat, gpxRoute[1].lon) : 0
+            };
+        }
+        
+        const distanceToTravel = (currentSOG * 1.852 * timeElapsedHours); // Distance in km
+        let remainingDistance = distanceToTravel;
+        
+        // Travel along the route
+        while (remainingDistance > 0 && currentIndex < gpxRoute.length - 1) {
+            const nextWaypoint = gpxRoute[currentIndex + 1];
+            const segmentDistance = calculateDistance(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon);
+            
+            if (segmentDistance <= remainingDistance) {
+                // Move to next waypoint
+                remainingDistance -= segmentDistance;
+                currentLat = nextWaypoint.lat;
+                currentLon = nextWaypoint.lon;
+                currentIndex++;
+            } else {
+                // Interpolate position along current segment
+                const ratio = remainingDistance / segmentDistance;
+                const deltaLat = nextWaypoint.lat - currentLat;
+                const deltaLon = nextWaypoint.lon - currentLon;
+                
+                currentLat += deltaLat * ratio;
+                currentLon += deltaLon * ratio;
+                remainingDistance = 0;
+            }
+        }
+        
+        // Calculate heading for the projected position
+        let heading = 0;
+        if (currentIndex < gpxRoute.length - 1) {
+            // Use bearing to next waypoint
+            const nextWaypoint = gpxRoute[currentIndex + 1];
+            heading = calculateBearing(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon);
+        } else if (currentIndex > 0) {
+            // Use bearing from previous waypoint if at end of route
+            const prevWaypoint = gpxRoute[currentIndex - 1];
+            heading = calculateBearing(prevWaypoint.lat, prevWaypoint.lon, currentLat, currentLon);
+        }
+        
+        return { lat: currentLat, lon: currentLon, heading };
+    }
+
+    /**
+     * Calculate the projected position of the vessel based on route or heading/speed and Windy timestamp
      */
     function computeProjection(lat: number, lon: number, cog: number, sog: number, duration?: number): any {
         const ts = (store as any).get('timestamp')
@@ -1604,12 +2112,20 @@
         if (duration > 360) duration = 0;
         if (duration < 1) duration = 0; // if timestamp in the past, we don't project
         
-        //Si duration est 0, retourner la position exacte ***
+        // If duration is 0, return the position exactly
         if (duration === 0) {
             return L.latLng(lat, lon);
         }
         
-        // sog in knots → km/h (1.852) → m/s (÷3.6)
+        // Use route projection if route is loaded and active
+        if (isRouteLoaded && routeProjectionActive && gpxRoute.length > 0) {
+            const routeProjection = computeRouteProjection(sog, duration * 3600); // Convert hours to seconds
+            if (routeProjection) {
+                return L.latLng(routeProjection.lat, routeProjection.lon);
+            }
+        }
+        
+        // Fallback to traditional COG/SOG projection
         const distanceMeters = sog * 1.852 * 1000 * duration; // in meters
         const R = 6371000; // Earth radius in m
         const δ = distanceMeters / R; // in radians
@@ -1622,6 +2138,7 @@
 
         return L.latLng(toDegrees(φ2), toDegrees(λ2));
     }
+
     let helpVisible = false;
 
     function toggleHelp() {
@@ -1767,6 +2284,7 @@
     /**
      * Adds the vessel marker and projection on the map.
      * Handles clicks on icons to display weather at current or projected time.
+     * Enhanced addBoatMarker with route-aware projection and heading calculation.
      */
     function addBoatMarker(lat: number, lon: number, cog: number) {
         if (!map || !markerLayer) return;
@@ -1776,7 +2294,12 @@
             console.warn(`Invalid coordinates in addBoatMarker: lat=${lat}, lon=${lon}`);
             return;
         }
-        
+
+        // Update route progress if route is loaded
+        if (isRouteLoaded) {
+            updateRouteProgress();
+        }
+
         // Ensure COG is a valid number, default to 0 if not
         const validCOG = Number.isFinite(cog) ? cog : 0;
 
@@ -1804,23 +2327,36 @@
             boatPath.setLatLngs(pathLatLngs);
         }
 
-        // Heading direction arrow
-        const headingEnd = computeProjection(lat, lon, trueHeading, 6, 24);
-        if (headingArrow) headingArrow.remove();
-        headingArrow = L.polyline([Position, headingEnd], {
-            color: 'blue',
-            weight: 2,
-            dashArray: '10, 10',
-        }).addTo(markerLayer);
+        // Only show arrows when NOT following a route
+        if (!routeProjectionActive) {
+            // Heading direction arrow
+            const headingEnd = computeProjection(lat, lon, trueHeading, 6, 24);
+            if (headingArrow) headingArrow.remove();
+            headingArrow = L.polyline([Position, headingEnd], {
+                color: 'blue',
+                weight: 2,
+                dashArray: '10, 10',
+            }).addTo(markerLayer);
 
-        // Future projection arrow (use effective values for test mode)
-        const cogEnd = computeProjection(lat, lon, effectiveCOG, effectiveSOG, projectionHours ?? undefined);
-        if (projectionArrow) projectionArrow.remove();
-        projectionArrow = L.polyline([Position, cogEnd], {
-            color: testModeEnabled ? 'orange' : 'red', // Different color in test mode
-            weight: 1,
-            dashArray: '5, 5',
-        }).addTo(markerLayer);
+            // Future projection arrow (use effective values for test mode)
+            const cogEnd = computeProjection(lat, lon, effectiveCOG, effectiveSOG, projectionHours ?? undefined);
+            if (projectionArrow) projectionArrow.remove();
+            projectionArrow = L.polyline([Position, cogEnd], {
+                color: testModeEnabled ? 'orange' : 'red', // Different color in test mode
+                weight: 1,
+                dashArray: '5, 5',
+            }).addTo(markerLayer);
+        } else {
+            // Remove arrows when following route
+            if (headingArrow) {
+                headingArrow.remove();
+                headingArrow = null;
+            }
+            if (projectionArrow) {
+                projectionArrow.remove();
+                projectionArrow = null;
+            }
+        }
 
         // Main marker (current position)
         const icon = createRotatingBoatIcon(trueHeading, 0.846008, boatIconSize);
@@ -1841,18 +2377,35 @@
 
         // Future projection icon (if speed > 0.5 knots)
         if (effectiveSOG > 0.5) {
-            // *** CORRECTION : Calcul correct de projectionHours ***
+            // Calculate projection hours
             if (projectionHours === null || projectionHours === undefined) {
                 const now = getRoundedHourTimestamp(Date.now());
                 const ts = getRoundedHourTimestamp((store as any).get('timestamp'));
                 projectionHours = Math.max(0, (ts - now) / (3600 * 1000)); // en heures, minimum 0
             }
             
-            const projected = computeProjection(lat, lon, effectiveCOG, effectiveSOG, projectionHours);            
-            // Display forecast icon at projected position
+            // Get projected position and heading
+            let projectedHeading = trueHeading; // Default to current heading
+            let projected: any;
+            
+            if (isRouteLoaded && routeProjectionActive && gpxRoute.length > 0) {
+                // Use route-based projection with correct heading
+                const routeProjection = computeRouteProjection(effectiveSOG, projectionHours * 3600);
+                if (routeProjection) {
+                    projected = L.latLng(routeProjection.lat, routeProjection.lon);
+                    projectedHeading = routeProjection.heading; // Use route heading
+                } else {
+                    projected = computeProjection(lat, lon, effectiveCOG, effectiveSOG, projectionHours);
+                }
+            } else {
+                projected = computeProjection(lat, lon, effectiveCOG, effectiveSOG, projectionHours);
+            }
+            
+            // Display forecast icon at projected position with correct heading
             if (forecastIcon) forecastIcon.remove();
-            const icon = createRotatingBoatIcon(trueHeading, 0.846008, boatIconSize * 0.67) // 67% de la taille principale pour la projection
-            forecastIcon = L.marker(projected, { icon }).addTo(markerLayer);
+            const projectedIcon = createRotatingBoatIcon(projectedHeading, 0.846008, boatIconSize * 0.67); // Use route heading
+            forecastIcon = L.marker(projected, { icon: projectedIcon }).addTo(markerLayer);
+            
             const tooltipText = testModeEnabled ? 
                 `Weather forecast in ${projectionHours} hours (TEST MODE: SOG=${testSOG}kt, COG=${testCOG}°)` : 
                 `Weather forecast in ${projectionHours} hours`;
@@ -1867,14 +2420,22 @@
                 }
                 showMyPopup(projected.lat, projected.lng, true);
             });
+
+            // Dynamic rotation of the projected icon
+            const projectedIconDiv = forecastIcon.getElement()?.querySelector('.rotatable') as HTMLElement;
+            if (projectedIconDiv) {
+                projectedIconDiv.style.transformOrigin = '12px 12px';
+                projectedIconDiv.style.transform = `rotateZ(${projectedHeading}deg)`;
+            }
         }
 
-        // Dynamic rotation of the icon
+        // Dynamic rotation of the main icon
         const iconDiv = marker.getElement()?.querySelector('.rotatable') as HTMLElement;
         if (iconDiv) {
             iconDiv.style.transformOrigin = '12px 12px';
             iconDiv.style.transform = `rotateZ(${trueHeading}deg)`;
         }
+        
         // Automatic vessel tracking
         if (followShip) {
             map.setView(Position);
@@ -2057,7 +2618,10 @@
             clearInterval(fragmentCleanupTimer);
             fragmentCleanupTimer = null;
         }
-    
+
+        // Clear route display
+        clearRouteDisplay();
+
         // Nettoyer les fragments en attente
         aisFragments = {};
 });
