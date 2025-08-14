@@ -1,0 +1,249 @@
+name: Build and Release Plugin
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+      - feature/*
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create GitHub Release'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Build plugin
+        run: npm run build
+        
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+          
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          cd dist
+          
+          # Create plugin info with git information
+          echo "{
+            \"repositoryName\": \"${{ github.repository }}\",
+            \"commitSha\": \"${{ github.sha }}\",
+            \"repositoryOwner\": \"${{ github.repository_owner }}\",
+            \"buildTime\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
+            \"version\": \"${{ steps.version.outputs.version }}\",
+            \"branch\": \"${{ github.ref_name }}\"
+          }" > plugin-info.json
+          
+          # Create windy-plugin.zip (for direct loading in windy.com/developer)
+          echo "Creating windy-plugin.zip for direct loading..."
+          zip -r ../release/windy-plugin.zip . -x "*.tar"
+          
+          # Create plugin.tar for Windy API
+          echo "Creating plugin.tar for Windy API..."
+          tar cf ../release/plugin.tar .
+          
+          # Create standalone distribution
+          echo "Creating standalone distribution..."
+          mkdir -p ../release/standalone
+          cp plugin.js ../release/standalone/
+          cp plugin.min.js ../release/standalone/
+          cp plugin.json ../release/standalone/
+          cp screenshot.jpg ../release/standalone/ 2>/dev/null || true
+          
+          # Create installation README
+          cat > ../release/standalone/README.md << 'EOF'
+          # NMEA Tracker Plugin Installation
+          
+          ## Option 1: Load in Windy Developer Mode
+          1. Go to [windy.com/developer](https://www.windy.com/developer)
+          2. Upload the `windy-plugin.zip` file
+          3. The plugin will be loaded automatically
+          
+          ## Option 2: Local Development
+          1. Extract all files to a local directory
+          2. Start a local web server in the directory
+          3. Go to windy.com and add `?plugin=http://localhost:YOUR_PORT/plugin.js`
+          
+          ## Files:
+          - `plugin.js` - Development version with readable code
+          - `plugin.min.js` - Minified production version  
+          - `plugin.json` - Plugin manifest
+          - `screenshot.jpg` - Plugin screenshot (if available)
+          EOF
+          
+          # List created files
+          echo "Created release files:"
+          find ../release -type f -exec ls -lh {} \;
+          
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-build-${{ steps.version.outputs.version }}
+          path: release/
+          retention-days: 90
+          
+  test-plugin:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin-build-${{ needs.build.outputs.version }}
+          path: release/
+          
+      - name: Test plugin structure
+        run: |
+          echo "Testing plugin structure..."
+          
+          # Check required files exist
+          test -f release/windy-plugin.zip || { echo "Missing windy-plugin.zip"; exit 1; }
+          test -f release/plugin.tar || { echo "Missing plugin.tar"; exit 1; }
+          test -f release/standalone/plugin.js || { echo "Missing plugin.js"; exit 1; }
+          test -f release/standalone/plugin.min.js || { echo "Missing plugin.min.js"; exit 1; }
+          test -f release/standalone/plugin.json || { echo "Missing plugin.json"; exit 1; }
+          
+          # Test ZIP contents
+          echo "Testing ZIP contents..."
+          unzip -l release/windy-plugin.zip
+          
+          # Test plugin.json validity
+          echo "Testing plugin.json validity..."
+          cat release/standalone/plugin.json | jq . > /dev/null || { echo "Invalid JSON in plugin.json"; exit 1; }
+          
+          echo "All tests passed!"
+          
+  release:
+    runs-on: ubuntu-latest
+    needs: [build, test-plugin]
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.create_release == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Download build artifacts  
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin-build-${{ needs.build.outputs.version }}
+          path: release/
+          
+      - name: Create Release Notes
+        run: |
+          cat > release-notes.md << 'EOF'
+          ## 🚢 NMEA Tracker Plugin v${{ needs.build.outputs.version }}
+          
+          ### 📦 Installation Options
+          
+          **Option 1: Windy Developer (Recommended)**
+          1. Download `windy-plugin.zip`
+          2. Go to [windy.com/developer](https://www.windy.com/developer)
+          3. Upload the ZIP file
+          
+          **Option 2: Manual Installation**  
+          1. Download `standalone.zip`
+          2. Extract to a web server directory
+          3. Load via `windy.com?plugin=YOUR_SERVER/plugin.js`
+          
+          ### 🔧 For Developers
+          - `plugin.tar` - For Windy API publishing
+          - Source code available in this repository
+          
+          ### ✨ Features
+          - Real-time NMEA/AIS data tracking
+          - GPX route import and projection
+          - Weather forecast integration
+          - Marine traffic display (AIS ships)
+          - Vessel projection with route following
+          
+          Built from commit: `${{ github.sha }}`
+          EOF
+          
+      - name: Create standalone archive
+        run: |
+          cd release
+          zip -r standalone.zip standalone/
+          
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: NMEA Tracker v${{ needs.build.outputs.version }}
+          body_path: release-notes.md
+          files: |
+            release/windy-plugin.zip
+            release/standalone.zip  
+            release/plugin.tar
+          draft: false
+          prerelease: ${{ contains(github.ref, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+  publish-to-windy:
+    runs-on: ubuntu-latest
+    needs: [build, test-plugin]
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'syldeb35/windy-plugin-nmea-tracker'
+    environment: windy-production
+    
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin-build-${{ needs.build.outputs.version }}
+          path: release/
+          
+      - name: Publish to Windy
+        env:
+          WINDY_API_KEY: ${{ secrets.WINDY_API_KEY }}
+        run: |
+          echo "Publishing to Windy..."
+          
+          response=$(curl -w "HTTPSTATUS:%{http_code}" \
+            -s \
+            -X POST \
+            'https://node.windy.com/plugins/v1.0/upload' \
+            -H "x-windy-api-key: ${WINDY_API_KEY}" \
+            -F "plugin_archive=@release/plugin.tar")
+          
+          http_code=$(echo "$response" | grep HTTPSTATUS | cut -d: -f2)
+          body=$(echo "$response" | sed -E 's/HTTPSTATUS:[0-9]{3}//g')
+          
+          echo "HTTP Status: $http_code"
+          echo "Response: $body"
+          
+          if [ "$http_code" -ne 200 ]; then
+            echo "Error publishing to Windy"
+            exit 1
+          fi
+          
+          echo "Successfully published to Windy!"

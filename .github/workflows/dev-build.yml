@@ -1,0 +1,52 @@
+name: Development Build
+
+on:
+  push:
+    branches-ignore:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  dev-build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Lint and type check
+        run: |
+          # Add linting if you have it configured
+          echo "Running checks..."
+          
+      - name: Build plugin
+        run: npm run build
+        
+      - name: Test build output
+        run: |
+          test -f dist/plugin.js || { echo "Missing plugin.js"; exit 1; }
+          test -f dist/plugin.min.js || { echo "Missing plugin.min.js"; exit 1; }
+          test -f dist/plugin.json || { echo "Missing plugin.json"; exit 1; }
+          
+          # Validate JSON
+          cat dist/plugin.json | jq . > /dev/null
+          
+          echo "Build successful!"
+          
+      - name: Upload development build
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-build-${{ github.sha }}
+          path: dist/
+          retention-days: 7
