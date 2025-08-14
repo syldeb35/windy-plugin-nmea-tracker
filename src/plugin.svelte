@@ -541,11 +541,11 @@
     let unsubscribeOverlay: (() => void) | null = null;
     let projectionHours: number | null = null; // for projection
     let isConnected: boolean = false; // WebSocket connection status
-    let connectionLostTimer: number | null = null; // Timer for connection lost alert
+    let connectionLostTimer: any | null = null; // Timer for connection lost alert
     let lastError: string = ''; // Store the last error to persist until valid frame
     let errorList: string[] = []; // Store multiple errors
     let lastFrameReceived: number = Date.now(); // Timestamp of last received frame
-    let noFrameTimer: number | null = null; // Timer for no frame detection
+    let noFrameTimer: any | null = null; // Timer for no frame detection
 
     // Test mode variables for when vessel is stopped
     let testModeEnabled: boolean = false; // Enable/disable test mode
@@ -565,7 +565,7 @@
     } } = {};
 
     // Timer pour nettoyer les fragments expirés
-    let fragmentCleanupTimer: number | null = null;
+    let fragmentCleanupTimer: any | null = null;
 
     /**
      * Load vessel name from localStorage
@@ -1715,7 +1715,7 @@
                 content += `📉 Pressure: ${Press} hPa`;
             
             } else if (overlay === 'clouds') {
-                content += `☁️ Cloud cover: ${Math.round(values[0])}%`;
+                content += `☁️ Cloud cover: ${Math.round(values[0])} %`;
             
             } else if (overlay === 'tide') {
                 const tideHeight = values[0];
@@ -1724,8 +1724,17 @@
             } else if (overlay === 'currents') {
                 const u = values[0];
                 const v = values[1];
-                content += `🌊 Current: ${Math.sqrt(u * u + v * v).toFixed(2)} m/s at ${Math.round(Math.atan2(v, u) * 180 / Math.PI)}°`;
-
+                content += `🌊 Current: ${(Math.sqrt(u * u + v * v) * 3600/1852).toFixed(2)} Knots <br> Carrying to: ${Math.round(Math.atan2(u, v) * 180 / Math.PI)}°`;
+            
+            } else if (overlay === 'currentsTide') {
+                const u = values[0];
+                const v = values[1];
+                content += `🌊 Current: ${(Math.sqrt(u * u + v * v) * 3600/1852).toFixed(2)} Knots <br> Carrying to: ${Math.round(Math.atan2(u, v) * 180 / Math.PI)}°`;
+            
+            } else if (overlay === 'sst') {
+                const seaTemp = metrics.temp.convertValue(values[0]);
+                content += `🌊 Sea Temperature: ${seaTemp}`;
+            
             } else if (overlay === 'swell1' || overlay === 'swell2' || overlay === 'swell3') {
                 // For swell overlays, direction conversion formula
                 console.log(`Swell ${overlay} data:`, values);
