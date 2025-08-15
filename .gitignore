@@ -70,3 +70,11 @@ coverage/
 # ESLint cache
 .eslintcache
 
+# Packaging test
+*.tgz
+*.zip
+
+# local server
+serve-plugin.*
+plugin-server.html
+STANDALONE-SERVER.md

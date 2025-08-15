@@ -44,3 +44,16 @@ Navigation, fleet tracking, onboard weather monitoring, or experimenting with re
   - AIS parser completed
   - Various bugfix
   - Add test mode
+- 1.0.3
+  - Various bugfix
+- 1.0.4
+  - Ship's icon variable size
+- 1.0.5
+  - Various bugfix
+- 1.0.6
+  - Various bugfix
+- 1.0.7
+  - Adding gpx import
+  - gpx route on the chart
+  - Projected ship follow the route.
+  
