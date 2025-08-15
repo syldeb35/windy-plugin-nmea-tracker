@@ -2,7 +2,7 @@
     {title}
 </div>
 
-<div id="help" class="plugin-summary" style="border-radius:8px; padding:12px; margin-bottom:16px; display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); z-index:9999; background:#3c3c3c; color:white; box-shadow: 0 4px 20px rgba(0,0,0,0.5); max-width:450px; max-height:80vh; overflow-y:auto; border: 1px solid #555;">
+<div id="help" class="plugin-summary" style="border-radius:8px; padding:12px; margin-bottom:16px; display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); z-index:9999; background:#3c3c3c; color:white; box-shadow: 0 4px 20px rgba(0,0,0,0.5); max-width:600px; max-height:80vh; overflow-y:auto; border: 1px solid #555;">
     <div style="text-align: center; margin-bottom: 15px;">
         <strong style="color:white; font-size: 18px;">🛳️ NMEA Tracker Help 🛳️</strong>
     </div>
@@ -28,7 +28,23 @@
             <li>🎮 <strong>Test mode</strong> - Simulate movement for testing</li>
             <li>🗺️ <strong>GPX route navigation</strong> - Upload and follow sailing routes</li>
         </ul>
-        
+         <!-- Layer Organization Section -->
+        <hr />
+        <div class="layer-organization-section">
+            <p style="font-weight: bold; margin-bottom: 10px;">📚 Icon Layer Organization:</p>
+            <div style="background: #f8f9fa; padding: 10px; border-radius: 5px; margin-bottom: 10px;">
+                <div style="font-size: 12px; color: #666; line-height: 1.4;">
+                    <div style="margin-bottom: 5px;">🔝 <strong>Top Layer:</strong> Your Ship (always visible on top)</div>
+                    <div style="margin-bottom: 5px;">📍 <strong>Middle Layer:</strong> Route Waypoints & Lines</div>
+                    <div style="margin-bottom: 5px;">🚢 <strong>Bottom Layer:</strong> Other AIS Ships</div>
+                </div>
+            </div>
+            <p style="font-size: 11px; color: #888; margin: 5px 0;">
+                This organization ensures your ship icon is always visible above other elements, 
+                waypoints are visible above other ships, and everything maintains proper visibility.
+            </p>
+        </div>
+        <hr />
         <p><strong>🎛️ Control buttons:</strong></p>
         <ul style="margin: 8px 0 12px 18px; color:white;">
             <li><strong>📍 Center on vessel</strong> - Jump to your current position</li>
@@ -163,7 +179,6 @@
             Adjust the size of your boat icon on the map (0.5x to 2.0x)
         </p>
     </div>    
-    
     <!-- Test Mode Controls -->
     <hr />
     <div class="test-mode-section">
@@ -1346,7 +1361,10 @@
         
         // Create new marker with corrected heading
         const icon = createAISShipIcon(displayHeading, data.shipType || 0);
-        const marker = L.marker(position, { icon }).addTo(aisShipsLayer);
+        const marker = L.marker(position, { 
+            icon: icon,
+            zIndexOffset: 100   // Lower z-index for other ships
+        }).addTo(aisShipsLayer);
         
         // Create tooltip content
         const tooltipContent = `
@@ -1826,9 +1844,12 @@
         // Clear existing route display
         clearRouteDisplay();
         
-        // Create route layer group
+        // Create route layer groups with proper z-index ordering
         routeLayer = L.layerGroup().addTo(map);
+        routeLayer.options.zIndexOffset = 200; // Route lines in middle layer
+
         routeMarkers = L.layerGroup().addTo(map);
+        routeMarkers.options.zIndexOffset = 200; // Waypoint markers in middle layer
         
         // Create route line
         const routeLatLngs = gpxRoute.map(wp => L.latLng(wp.lat, wp.lon));
@@ -1883,8 +1904,11 @@
                 iconAnchor: [10, 10]
             });
             
-            const marker = L.marker([waypoint.lat, waypoint.lon], { icon: waypointIcon })
-                .addTo(routeMarkers);
+            const marker = L.marker([waypoint.lat, waypoint.lon], { 
+                icon: waypointIcon,
+                zIndexOffset: 500   // Medium z-index for waypoints
+            })
+    .addTo(routeMarkers);
             
             marker.bindTooltip(
                 `${waypoint.name || `Waypoint ${index + 1}`}<br>
@@ -2360,7 +2384,10 @@
 
         // Main marker (current position)
         const icon = createRotatingBoatIcon(trueHeading, 0.846008, boatIconSize);
-        const marker = L.marker(Position, { icon }).addTo(markerLayer);
+        const marker = L.marker(Position, { 
+            icon: icon,
+            zIndexOffset: 1000  // High z-index for your boat
+        }).addTo(markerLayer);
         marker.bindTooltip(vesselName, { permanent: false, direction: 'top', className: 'boat-tooltip' });
 
         // Click on vessel: weather at current time
@@ -2404,7 +2431,10 @@
             // Display forecast icon at projected position with correct heading
             if (forecastIcon) forecastIcon.remove();
             const projectedIcon = createRotatingBoatIcon(projectedHeading, 0.846008, boatIconSize * 0.67); // Use route heading
-            forecastIcon = L.marker(projected, { icon: projectedIcon }).addTo(markerLayer);
+            forecastIcon = L.marker(projected, { 
+                icon: projectedIcon,
+                zIndexOffset: 1000  // High z-index for your boat's projection
+            }).addTo(markerLayer);
             
             const tooltipText = testModeEnabled ? 
                 `Weather forecast in ${projectionHours} hours (TEST MODE: SOG=${testSOG}kt, COG=${testCOG}°)` : 
@@ -2534,11 +2564,14 @@
         // Initialize route on component load
         updateRoute();
 
-        // Initialize marker layer when component mounts and map is available
-        markerLayer = L.layerGroup().addTo(map);
-        
-        // Initialize AIS ships layer
+        // Initialize layers with proper z-index ordering
+        // Bottom layer: Other AIS ships (zIndexOffset: 100)
         aisShipsLayer = L.layerGroup().addTo(map);
+        aisShipsLayer.options.zIndexOffset = 100;
+
+        // Top layer: Your ship (zIndexOffset: 300)
+        markerLayer = L.layerGroup().addTo(map);
+        markerLayer.options.zIndexOffset = 300;
         
         // Start cleanup timer for old AIS ships (every 5 minutes)
         setInterval(cleanupOldAISShips, 5 * 60 * 1000);
