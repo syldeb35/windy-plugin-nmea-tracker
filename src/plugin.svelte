@@ -207,19 +207,23 @@
                 style="width: 80px; font-weight: bold;"
             />
           </label>
-          <label class="right-aligned">
-            Test COG (degrees) : &nbsp; &nbsp;
-            <input 
-              type="number" 
-              id="testCOG"
-              name="testCOG"
-              value={testCOG}
-              on:input={handleCOGInput}
-              on:change={handleCOGInput}
-              step="1" 
-              style="width: 80px; font-weight: bold;" 
-            />
-          </label>
+
+          {#if !isRouteLoaded}
+            <label class="right-aligned">
+                Test COG (degrees) : &nbsp; &nbsp;
+                <input 
+                type="number" 
+                id="testCOG"
+                name="testCOG"
+                value={testCOG}
+                on:input={handleCOGInput}
+                on:change={handleCOGInput}
+                step="1" 
+                style="width: 80px; font-weight: bold;" 
+                />
+            </label>
+          {/if}
+          
           <p style="font-size: 12px; color: #666; margin-top: 5px;">
             📝 Test values override real data for projections and weather forecasts
           </p>
@@ -259,11 +263,14 @@
                 </p>
                 {#if estimatedTimeToCompletion > 0}
                     <p style="font-size: 12px; margin: 2px 0;">
-                        ⏱️ ETC: {Math.floor(estimatedTimeToCompletion)}h {Math.floor((estimatedTimeToCompletion % 1) * 60)}min
+                        ⏱️ ETC: {Math.floor(estimatedTimeToCompletion)}h {Math.floor((estimatedTimeToCompletion % 1) * 60).toString().padStart(2, '0')} min |
+                        {#if estimatedTimeOfArrival}
+                            🏁 ETA: {formatDateDDMMYYYY(estimatedTimeOfArrival)} {formatTime24Hour(estimatedTimeOfArrival)}
+                        {/if}
                     </p>
                 {/if}
                 <p style="font-size: 12px; margin: 2px 0;">
-                    🎯 Progress: {Math.round(routeProgress * 100)}% | Next: Waypoint {closestWaypointIndex + 1}
+                    🎯 Progress: {Math.round(routeProgress * 100)}% | Next: {gpxRoute[nextWaypointIndex].name}
                 </p>
             </div>
 
@@ -286,6 +293,25 @@
                 🧭 Vessel will be projected along the route based on current/test speed
             </p>
         {/if}
+    </div>
+    <!-- Data Persistence Controls -->
+    <hr />
+    <div class="persistence-section">
+        <p style="font-weight: bold; margin-bottom: 10px;">💾 Data Storage:</p>
+        <div class="plugin__buttons__centered" style="margin-bottom: 10px;">
+            <button on:click={saveTrackHistory} style="background: #4CAF50;">
+                💾 Save Track
+            </button>
+            <button on:click={() => { saveGpxRoute(); }} style="background: #2196F3;">
+                💾 Save Route
+            </button>
+            <button on:click={clearStoredData} style="background: #f44336;">
+                🗑️ Clear All
+            </button>
+        </div>
+        <p style="font-size: 11px; color: #666; margin: 5px 0;">
+            Track history and routes are automatically saved and restored when the plugin loads.
+        </p>
     </div>
     <div class="error" id="err">
         <p></p>
@@ -649,8 +675,10 @@
     let routeProjectionIcon: any = null; // Projected position along route
     let routeDistance: number = 0; // Total route distance in nautical miles
     let estimatedTimeToCompletion: number = 0; // ETC in hours
+    let estimatedTimeOfArrival: Date | null = null; // ETA as a Date object
     let showRouteWaypoints: boolean = true; // Show/hide waypoint markers
     let closestWaypointIndex: number = 0; // Index of closest waypoint to current position
+    let nextWaypointIndex: number = 0; // Index of next waypoint to current position
     let routeFileName: string = ''; // Name of loaded GPX file
 
     /**
@@ -687,6 +715,149 @@
         if (name) {
             vesselName = name;
             saveVesselName(name);
+        }
+    }
+
+    /**
+     * Save track history to localStorage
+     */
+    function saveTrackHistory(): void {
+        try {
+            if (pathLatLngs.length > 0) {
+                // Convert LatLng objects to simple {lat, lng} objects for JSON storage
+                const trackData = pathLatLngs.map(latLng => ({
+                    lat: latLng.lat,
+                    lng: latLng.lng
+                }));
+                localStorage.setItem('windy-nmea-track-history', JSON.stringify(trackData));
+                
+                //console.log(`Track history saved: ${trackData.length} points`);
+            }
+        } catch (error) {
+            console.warn('Failed to save track history to localStorage:', error);
+        }
+    }
+
+    /**
+     * Load track history from localStorage
+     */
+    function loadTrackHistory(): any[] {
+        try {
+            const saved = localStorage.getItem('windy-nmea-track-history');
+            if (saved) {
+                const trackData = JSON.parse(saved);
+                // Convert back to LatLng objects
+                const restoredTrack = trackData.map((point: {lat: number, lng: number}) => 
+                    L.latLng(point.lat, point.lng)
+                );
+                console.log(`Track history loaded: ${restoredTrack.length} points`);
+                return restoredTrack;
+            }
+        } catch (error) {
+            console.warn('Failed to load track history from localStorage:', error);
+        }
+        return [];
+    }
+
+    /**
+     * Save GPX route to localStorage
+     */
+    function saveGpxRoute(): void {
+        try {
+            if (isRouteLoaded && gpxRoute.length > 0) {
+                const routeData = {
+                    waypoints: gpxRoute.map(wp => ({
+                        lat: wp.lat,
+                        lon: wp.lon,
+                        name: wp.name,
+                        time: wp.time ? wp.time.toISOString() : null
+                    })),
+                    fileName: routeFileName,
+                    startTime: routeStartTime ? routeStartTime.toISOString() : null,
+                    distance: routeDistance,
+                    showWaypoints: showRouteWaypoints
+                };
+                localStorage.setItem('windy-nmea-gpx-route', JSON.stringify(routeData));
+                console.log(`GPX route saved: ${routeFileName} with ${gpxRoute.length} waypoints`);
+            }
+        } catch (error) {
+            console.warn('Failed to save GPX route to localStorage:', error);
+        }
+    }
+
+    /**
+     * Load GPX route from localStorage
+     */
+    function loadGpxRoute(): boolean {
+        try {
+            const saved = localStorage.getItem('windy-nmea-gpx-route');
+            if (saved) {
+                const routeData = JSON.parse(saved);
+                
+                // Restore waypoints with proper Date objects
+                gpxRoute = routeData.waypoints.map((wp: any) => ({
+                    lat: wp.lat,
+                    lon: wp.lon,
+                    name: wp.name,
+                    time: wp.time ? new Date(wp.time) : undefined
+                }));
+                
+                routeFileName = routeData.fileName || 'Restored Route';
+                routeStartTime = routeData.startTime ? new Date(routeData.startTime) : null;
+                routeDistance = routeData.distance || 0;
+                showRouteWaypoints = routeData.showWaypoints !== undefined ? routeData.showWaypoints : true;
+                
+                // Set route as loaded and active
+                isRouteLoaded = true;
+                routeProjectionActive = true;
+                
+                // Reset waypoint indices only if no current position available
+                if (!lastLatitude || !lastLongitude) {
+                    closestWaypointIndex = 0;
+                    nextWaypointIndex = 0;
+                } else {
+                    // Calculate proper waypoint indices based on current position
+                    updateRouteProgress();
+                }
+                
+                console.log(`GPX route loaded: ${routeFileName} with ${gpxRoute.length} waypoints`);
+                return true;
+            }
+        } catch (error) {
+            console.warn('Failed to load GPX route from localStorage:', error);
+        }
+        return false;
+    }
+
+    /**
+     * Clear all stored data
+     */
+    function clearStoredData(): void {
+        try {
+            localStorage.removeItem('windy-nmea-track-history');
+            localStorage.removeItem('windy-nmea-gpx-route');
+            console.log('All stored navigation data cleared');
+        } catch (error) {
+            console.warn('Failed to clear stored data:', error);
+        }
+    }
+
+    /**
+     * Maintain track history limits
+     */
+    function maintainTrackLimits(): void {
+        const MAX_TRACK_POINTS = 100000; // Adjust as needed
+        
+        if (pathLatLngs.length > MAX_TRACK_POINTS) {
+            // Remove oldest points, keep most recent
+            pathLatLngs = pathLatLngs.slice(-MAX_TRACK_POINTS);
+            
+            // Update the polyline on the map
+            if (boatPath) {
+                boatPath.setLatLngs(pathLatLngs);
+            }
+            
+            // console.log(`Track history trimmed to ${MAX_TRACK_POINTS} points`);
         }
     }
 
@@ -1360,7 +1531,9 @@
         const displayHeading = data.heading !== undefined && data.heading !== 511 ? data.heading : (data.cog || 0);
         
         // Create new marker with corrected heading
-        const icon = createAISShipIcon(displayHeading, data.shipType || 0);
+        // Get ship type from existing data if available (for ships that already sent static data)
+        const consolidatedShipType = data.shipType || aisShips[shipKey]?.shipType || 0;
+        const icon = createAISShipIcon(displayHeading, consolidatedShipType);
         const marker = L.marker(position, { 
             icon: icon,
             zIndexOffset: 100   // Lower z-index for other ships
@@ -1798,8 +1971,23 @@
             routeFileName = fileName;
             isRouteLoaded = true;
             routeProjectionActive = true; // Enable route-based projection
+
+            // Reset waypoint indices only if no current position available
+            if (!lastLatitude || !lastLongitude) {
+                closestWaypointIndex = 0;
+                nextWaypointIndex = 0;
+            }
+
             calculateRouteDistance();
             displayRoute();
+
+            // If we have current position, calculate proper waypoint indices
+            if (lastLatitude && lastLongitude) {
+                updateRouteProgress();
+            }
+
+            // Save route to localStorage
+            saveGpxRoute();
             
             console.log(`GPX route loaded: ${waypoints.length} waypoints from ${fileName}`);
             if (routeStartTime) {
@@ -1881,34 +2069,45 @@
         gpxRoute.forEach((waypoint, index) => {
             const isStart = index === 0;
             const isEnd = index === gpxRoute.length - 1;
-            const isCurrent = index === closestWaypointIndex;
             
+            const isNext = index === nextWaypointIndex; // Next waypoint to reach (navigation target)
+            const isPassed = index < nextWaypointIndex; // Waypoints we've already passed
+
             let color = '#ff6600'; // Default orange
-            let icon = '📍';
-            
-            if (isStart) {
+            let waypointIcon = '📍';
+
+            if (isStart && !isPassed) {
                 color = '#00ff00';
-                icon = '🟢';
+                waypointIcon = '🟢'; // Green start
+            } else if (isStart && isPassed) {
+                color = '#90EE90';
+                waypointIcon = '✅'; // Light green - passed start
+            } else if (isEnd && isNext) {
+                color = '#ffff00';
+                waypointIcon = '🏁'; // Yellow finish line when it's the target
             } else if (isEnd) {
                 color = '#ff0000'; 
-                icon = '🏁';
-            } else if (isCurrent) {
+                waypointIcon = '🏁'; // Red finish line
+            } else if (isNext) {
                 color = '#ffff00';
-                icon = '🎯';
+                waypointIcon = '🎯'; // Yellow target - next waypoint to reach
+            } else if (isPassed) {
+                color = '#90EE90';
+                waypointIcon = '✅'; // Light green - passed waypoint
+            } else {
+                color = '#ff6600';
+                waypointIcon = '📍'; // Orange - future waypoint
             }
             
-            const waypointIcon = L.divIcon({
-                html: `<div style="background: ${color}; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 12px;">${icon}</div>`,
-                className: 'waypoint-marker',
-                iconSize: [20, 20],
-                iconAnchor: [10, 10]
-            });
-            
             const marker = L.marker([waypoint.lat, waypoint.lon], { 
-                icon: waypointIcon,
-                zIndexOffset: 500   // Medium z-index for waypoints
-            })
-    .addTo(routeMarkers);
+                icon: L.divIcon({
+                    html: waypointIcon,
+                    className: 'waypoint-marker',
+                    iconSize: [20, 20],
+                    iconAnchor: [10, 10]
+                }),
+                zIndexOffset: 500
+            }).addTo(routeMarkers);
             
             marker.bindTooltip(
                 `${waypoint.name || `Waypoint ${index + 1}`}<br>
@@ -1942,8 +2141,10 @@
         routeFileName = '';
         routeProgress = 0;
         closestWaypointIndex = 0;
+        nextWaypointIndex = 0;
         routeDistance = 0;
         estimatedTimeToCompletion = 0;
+        estimatedTimeOfArrival = null;
         routeStartTime = null;
         routeProjectionActive = false; // Disable route-based projection
         
@@ -1984,60 +2185,166 @@
         }
     }
 
+    function findClosestPointOnSegment(
+        pointLat: number, pointLon: number,
+        segmentStartLat: number, segmentStartLon: number,
+        segmentEndLat: number, segmentEndLon: number
+    ): {distance: number, progress: number} {
+        // Convert to simple x,y coordinates for calculation
+        const px = pointLon;
+        const py = pointLat;
+        const ax = segmentStartLon;
+        const ay = segmentStartLat;
+        const bx = segmentEndLon;
+        const by = segmentEndLat;
+        
+        // Vector from A to B
+        const abx = bx - ax;
+        const aby = by - ay;
+        
+        // Vector from A to P
+        const apx = px - ax;
+        const apy = py - ay;
+        
+        // Project P onto AB
+        const ab2 = abx * abx + aby * aby;
+        let t = (apx * abx + apy * aby) / ab2;
+        
+        // Clamp t to [0, 1] to stay on segment
+        t = Math.max(0, Math.min(1, t));
+        
+        // Closest point on segment
+        const closestX = ax + t * abx;
+        const closestY = ay + t * aby;
+        
+        // Distance from point to closest point on segment
+        const distance = calculateDistance(pointLat, pointLon, closestY, closestX);
+        
+        return {
+            distance: distance,
+            progress: t
+        };
+    }
+
     /**
      * Finds the closest waypoint to current position and calculates progress
      */
     function updateRouteProgress(): void {
         if (!isRouteLoaded || !lastLatitude || !lastLongitude) return;
+            
+        // Find the closest point on the route (not just closest waypoint)
+        let bestSegmentIndex = 0;
+        let bestProgress = 0;
+        let minDistanceToRoute = Infinity;
         
-        let closestDistance = Infinity;
-        let closestIndex = 0;
-        let totalProgress = 0;
-        
-        // Find closest waypoint
-        gpxRoute.forEach((waypoint, index) => {
-            const distance = calculateDistance(lastLatitude!, lastLongitude!, waypoint.lat, waypoint.lon);
-            if (distance < closestDistance) {
-                closestDistance = distance;
-                closestIndex = index;
-            }
-        });
-        
-        closestWaypointIndex = closestIndex;
-        
-        // Calculate progress along route
-        let distanceCovered = 0;
-        for (let i = 0; i < closestIndex; i++) {
-            if (i < gpxRoute.length - 1) {
-                distanceCovered += calculateDistance(
-                    gpxRoute[i].lat, gpxRoute[i].lon,
-                    gpxRoute[i + 1].lat, gpxRoute[i + 1].lon
-                );
-            }
-        }
-        
-        // Add partial distance to current segment
-        if (closestIndex > 0 && closestIndex < gpxRoute.length) {
-            const segmentStart = gpxRoute[closestIndex - 1];
-            const segmentDistance = calculateDistance(
-                segmentStart.lat, segmentStart.lon,
-                gpxRoute[closestIndex].lat, gpxRoute[closestIndex].lon
-            );
-            const currentSegmentDistance = calculateDistance(
+        // Check each segment of the route
+        for (let i = 0; i < gpxRoute.length - 1; i++) {
+            const segmentStart = gpxRoute[i];
+            const segmentEnd = gpxRoute[i + 1];
+            
+            // Find closest point on this segment and progress along it
+            const result = findClosestPointOnSegment(
                 lastLatitude!, lastLongitude!,
-                segmentStart.lat, segmentStart.lon
+                segmentStart.lat, segmentStart.lon,
+                segmentEnd.lat, segmentEnd.lon
             );
             
-            distanceCovered += Math.min(currentSegmentDistance, segmentDistance);
+            if (result.distance < minDistanceToRoute) {
+                minDistanceToRoute = result.distance;
+                bestSegmentIndex = i;
+                bestProgress = result.progress; // 0-1 along this segment
+            }
         }
         
-        routeProgress = Math.min(distanceCovered / (routeDistance * 1.852), 1.0); // Convert NM to km
+        // Calculate total distance covered
+        let distanceCovered = 0;
         
+        // Add completed segments
+        for (let i = 0; i < bestSegmentIndex; i++) {
+            distanceCovered += calculateDistance(
+                gpxRoute[i].lat, gpxRoute[i].lon,
+                gpxRoute[i + 1].lat, gpxRoute[i + 1].lon
+            );
+        }
+        
+        // Add partial progress on current segment
+        if (bestSegmentIndex < gpxRoute.length - 1) {
+            const segmentDistance = calculateDistance(
+                gpxRoute[bestSegmentIndex].lat, gpxRoute[bestSegmentIndex].lon,
+                gpxRoute[bestSegmentIndex + 1].lat, gpxRoute[bestSegmentIndex + 1].lon
+            );
+            distanceCovered += segmentDistance * bestProgress;
+        }
+        
+        // Calculate overall progress (both in km)
+        const totalRouteDistanceKm = routeDistance * 1.852; // Convert NM to km
+        routeProgress = Math.min(distanceCovered / totalRouteDistanceKm, 1.0);
+        
+        // Update closest waypoint index for internal use only
+        const previousClosestWaypointIndex = closestWaypointIndex;
+        closestWaypointIndex = bestProgress > 0.5 ? bestSegmentIndex + 1 : bestSegmentIndex;
+        
+        // Calculate next waypoint using bearing-based logic
+        const previousNextWaypointIndex = nextWaypointIndex;
+        
+                // Calculate next waypoint using different logic based on distance to route
+        const distanceToClosestWaypoint = Math.min(...gpxRoute.map(wp => 
+            calculateDistance(lastLatitude!, lastLongitude!, wp.lat, wp.lon) / 1.852
+        ));
+        
+        if (distanceToClosestWaypoint > 2.0) {
+            // Far from route: find closest waypoint as next target
+            let minDistance = Infinity;
+            for (let i = 0; i < gpxRoute.length; i++) {
+                const waypoint = gpxRoute[i];
+                const distance = calculateDistance(lastLatitude!, lastLongitude!, waypoint.lat, waypoint.lon) / 1.852;
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    nextWaypointIndex = i;
+                }
+            }
+            // console.log(`Far from route (${distanceToClosestWaypoint.toFixed(2)} NM): targeting closest waypoint ${nextWaypointIndex + 1}`);
+        } else {
+            // Close to route: use bearing logic to detect passed waypoints
+            for (let i = nextWaypointIndex; i < gpxRoute.length; i++) {
+                const waypoint = gpxRoute[i];
+                const distanceToWaypoint = calculateDistance(lastLatitude!, lastLongitude!, waypoint.lat, waypoint.lon) / 1.852;
+                
+                if (distanceToWaypoint < 2.0) { // Within 2 NM
+                    const bearingToWaypoint = calculateBearing(lastLatitude!, lastLongitude!, waypoint.lat, waypoint.lon);
+                    const relativeBearing = Math.abs(bearingToWaypoint - (testModeEnabled ? testCOG : myCourseOverGround));
+                    
+                    // Normalize relative bearing to 0-180 range
+                    const normalizedBearing = relativeBearing > 180 ? 360 - relativeBearing : relativeBearing;
+                    console.log(`Checking waypoint ${i + 1}: distance=${distanceToWaypoint.toFixed(2)} NM, bearing=${bearingToWaypoint.toFixed(1)}°, relative=${normalizedBearing.toFixed(1)}°`);
+                    
+                    if (normalizedBearing > 90) { // Waypoint is behind us
+                        nextWaypointIndex = Math.min(i + 1, gpxRoute.length - 1);
+                    } else {
+                        break; // This waypoint is still ahead, stop checking
+                    }
+                } else {
+                    break; // Too far away, stop checking
+                }
+            }
+        }
+                        
         // Calculate ETC based on current/test speed
         const effectiveSpeed = testModeEnabled ? testSOG : mySpeedOverGround;
         if (effectiveSpeed > 0) {
             const remainingDistance = (routeDistance * (1 - routeProgress));
             estimatedTimeToCompletion = remainingDistance / effectiveSpeed;
+            
+            // Calculate ETA by adding ETC to current time
+            const etcMilliseconds = estimatedTimeToCompletion * 60 * 60 * 1000; // Convert hours to milliseconds
+            estimatedTimeOfArrival = new Date(Date.now() + etcMilliseconds);
+        } else {
+            estimatedTimeToCompletion = 0;
+            estimatedTimeOfArrival = null;
+        }
+
+            if (previousNextWaypointIndex !== nextWaypointIndex && showRouteWaypoints && routeMarkers) {
+            displayRouteWaypoints();
         }
     }
 
@@ -2331,6 +2638,12 @@
         markerLayer.clearLayers();
         pathLatLngs.push(Position);
 
+        // Auto-save track history every 10 points to avoid excessive localStorage writes
+        if (pathLatLngs.length % 10 === 0) {
+            maintainTrackLimits();
+            saveTrackHistory();
+        }
+
         // Use test values if test mode is enabled
         let effectiveSOG = mySpeedOverGround;
         let effectiveCOG = cog;
@@ -2402,60 +2715,72 @@
             showMyPopup(lat, lon, false);
         });
 
-        // Future projection icon (if speed > 0.5 knots)
+        // Future projection icon (if speed > 0.5 knots AND timeline is in future)
         if (effectiveSOG > 0.5) {
             // Calculate projection hours
             if (projectionHours === null || projectionHours === undefined) {
-                const now = getRoundedHourTimestamp(Date.now());
-                const ts = getRoundedHourTimestamp((store as any).get('timestamp'));
-                projectionHours = Math.max(0, (ts - now) / (3600 * 1000)); // en heures, minimum 0
+                const now = Date.now();
+                const ts = (store as any).get('timestamp');
+                projectionHours = (ts - now) / (3600 * 1000); // in hours (can be negative)
             }
             
-            // Get projected position and heading
-            let projectedHeading = trueHeading; // Default to current heading
-            let projected: any;
+            // Only show projection if timeline is in the future
+            if (projectionHours > 0) {
             
-            if (isRouteLoaded && routeProjectionActive && gpxRoute.length > 0) {
-                // Use route-based projection with correct heading
-                const routeProjection = computeRouteProjection(effectiveSOG, projectionHours * 3600);
-                if (routeProjection) {
-                    projected = L.latLng(routeProjection.lat, routeProjection.lon);
-                    projectedHeading = routeProjection.heading; // Use route heading
+                // Get projected position and heading
+                let projectedHeading = trueHeading; // Default to current heading
+                let projected: any;
+                
+                if (isRouteLoaded && routeProjectionActive && gpxRoute.length > 0) {
+                    // Use route-based projection with correct heading
+                    const routeProjection = computeRouteProjection(effectiveSOG, projectionHours * 3600);
+                    if (routeProjection) {
+                        projected = L.latLng(routeProjection.lat, routeProjection.lon);
+                        projectedHeading = routeProjection.heading; // Use route heading
+                    } else {
+                        projected = computeProjection(lat, lon, effectiveCOG, effectiveSOG, projectionHours);
+                    }
                 } else {
                     projected = computeProjection(lat, lon, effectiveCOG, effectiveSOG, projectionHours);
                 }
-            } else {
-                projected = computeProjection(lat, lon, effectiveCOG, effectiveSOG, projectionHours);
-            }
-            
-            // Display forecast icon at projected position with correct heading
-            if (forecastIcon) forecastIcon.remove();
-            const projectedIcon = createRotatingBoatIcon(projectedHeading, 0.846008, boatIconSize * 0.67); // Use route heading
-            forecastIcon = L.marker(projected, { 
-                icon: projectedIcon,
-                zIndexOffset: 1000  // High z-index for your boat's projection
-            }).addTo(markerLayer);
-            
-            const tooltipText = testModeEnabled ? 
-                `Weather forecast in ${projectionHours} hours (TEST MODE: SOG=${testSOG}kt, COG=${testCOG}°)` : 
-                `Weather forecast in ${projectionHours} hours`;
-            forecastIcon.bindTooltip(tooltipText, { permanent: false, direction: 'top', className: 'forecast-tooltip' });
+                
+                // Display forecast icon at projected position with correct heading
+                if (forecastIcon) forecastIcon.remove();
+                const projectedIcon = createRotatingBoatIcon(projectedHeading, 0.846008, boatIconSize * 0.67); // Use route heading
+                forecastIcon = L.marker(projected, { 
+                    icon: projectedIcon,
+                    zIndexOffset: 1000  // High z-index for your boat's projection
+                }).addTo(markerLayer);
+                
+                const tooltipText = testModeEnabled ? 
+                    `Weather forecast in ${projectionHours} hours (TEST MODE: SOG=${testSOG}kt, COG=${testCOG}°)` : 
+                    `Weather forecast in ${projectionHours} hours`;
+                forecastIcon.bindTooltip(tooltipText, { permanent: false, direction: 'top', className: 'forecast-tooltip' });
 
-            // Click on projection: weather at projection time
-            forecastIcon.on('click', () => {
-                if (openedPopup) {
-                    openedPopup.remove();
-                    openedPopup = null;
-                    return;
+                // Click on projection: weather at projection time
+                forecastIcon.on('click', () => {
+                    if (openedPopup) {
+                        openedPopup.remove();
+                        openedPopup = null;
+                        return;
+                    }
+                    showMyPopup(projected.lat, projected.lng, true);
+                });
+
+                // Dynamic rotation of the projected icon
+                const projectedIconDiv = forecastIcon.getElement()?.querySelector('.rotatable') as HTMLElement;
+                if (projectedIconDiv) {
+                    projectedIconDiv.style.transformOrigin = '12px 12px';
+                    projectedIconDiv.style.transform = `rotateZ(${projectedHeading}deg)`;
                 }
-                showMyPopup(projected.lat, projected.lng, true);
-            });
 
-            // Dynamic rotation of the projected icon
-            const projectedIconDiv = forecastIcon.getElement()?.querySelector('.rotatable') as HTMLElement;
-            if (projectedIconDiv) {
-                projectedIconDiv.style.transformOrigin = '12px 12px';
-                projectedIconDiv.style.transform = `rotateZ(${projectedHeading}deg)`;
+            } else {
+
+                // Remove forecast icon when timeline is in past or no projection needed
+                if (forecastIcon) {
+                    forecastIcon.remove();
+                    forecastIcon = null;
+                }
             }
         }
 
@@ -2504,6 +2829,31 @@
         }
     }
 
+    /**
+     * Formats a date as dd/mm/yyyy
+     */
+    function formatDateDDMMYYYY(date: Date): string {
+        const day = date.getDate().toString().padStart(2, '0');
+        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+        const year = date.getFullYear();
+        return `${day}/${month}/${year}`;
+    }
+
+    /**
+     * Formats time as HH:MM (24-hour format)
+     */
+    function formatTime24Hour(date: Date): string {
+        const hours = date.getHours().toString().padStart(2, '0');
+        const minutes = date.getMinutes().toString().padStart(2, '0');
+        return `${hours}:${minutes}`;
+    }
+
+    /**
+     * Formats date and time together
+     */
+    function formatDateTime(date: Date): string {
+        return `${formatDateDDMMYYYY(date)} ${formatTime24Hour(date)}`;
+    }
     // Utility functions for geographical calculations
     function toRadians(deg: number): number {
         return deg * Math.PI / 180;
@@ -2532,8 +2882,9 @@
         const hourMs = 3600 * 1000;
         return Math.floor(t / hourMs) * hourMs;
     }
-
-    // Manual centering on vessel
+    /**
+     * Manual centering on vessel
+     */
     function centerShip() {
         if (lastLatitude !== null && lastLongitude !== null) {
             map.setView([lastLatitude, lastLongitude]);
@@ -2563,6 +2914,23 @@
     onMount(() => {
         // Initialize route on component load
         updateRoute();
+
+        // Restore saved data
+        // Load track history
+        const savedTrack = loadTrackHistory();
+        if (savedTrack.length > 0) {
+            pathLatLngs = savedTrack;
+            // Redraw the track on map
+            if (pathLatLngs.length > 1) {
+                boatPath = L.polyline(pathLatLngs, { color: 'blue', weight: 3 }).addTo(map);
+            }
+        }
+
+        // Load GPX route
+        if (loadGpxRoute()) {
+            calculateRouteDistance();
+            displayRoute();
+        }
 
         // Initialize layers with proper z-index ordering
         // Bottom layer: Other AIS ships (zIndexOffset: 100)
@@ -2616,6 +2984,13 @@
 
     // Cleanup when plugin closes
     onDestroy(() => {
+
+        // Save data before closing
+        saveTrackHistory();
+        if (isRouteLoaded) {
+            saveGpxRoute();
+        }
+
         if (socket) {
             socket.disconnect();
             socket = null;
