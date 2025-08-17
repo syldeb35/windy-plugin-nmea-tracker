@@ -683,10 +683,19 @@
     let estimatedTimeToCompletion: number = 0; // ETC in hours
     let estimatedTimeOfArrival: Date | null = null; // ETA as a Date object
     let showRouteWaypoints: boolean = true; // Show/hide waypoint markers
-    let closestWaypointIndex: number = 0; // Index of closest waypoint to current position
     let nextWaypointIndex: number = 0; // Index of next waypoint to current position
     let routeFileName: string = ''; // Name of loaded GPX file
     let lastRouteProgressUpdate = 0;
+
+    let helpVisible = false;
+
+    function toggleHelp() {
+        helpVisible = !helpVisible;
+        const helpDiv = document.getElementById('help');
+        if (helpDiv) {
+            helpDiv.style.display = helpVisible ? 'block' : 'none';
+        }
+    }
 
     /**
      * Load vessel name from localStorage
@@ -1169,13 +1178,14 @@
 
     /**
      * Calculate distance between two positions using Haversine formula
-     * @param {number} lat1 - Latitude 1 in decimal degrees
-     * @param {number} lon1 - Longitude 1 in decimal degrees  
-     * @param {number} lat2 - Latitude 2 in decimal degrees
-     * @param {number} lon2 - Longitude 2 in decimal degrees
-     * @returns {number} Distance in kilometers
+     * @param {number} lat1 - Latitude start in decimal degrees
+     * @param {number} lon1 - Longitude start in decimal degrees  
+     * @param {number} lat2 - Latitude end in decimal degrees
+     * @param {number} lon2 - Longitude end in decimal degrees
+     * @returns {number} Distance in Nautical Miles
      */
     function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
+        const R = 3440.065; // Earth radius in nautical miles
         // Convert degrees to radians
         const toRad = (deg: number) => deg * Math.PI / 180;
         const φ1 = toRad(lat1);
@@ -1188,7 +1198,6 @@
                 Math.cos(φ1) * Math.cos(φ2) *
                 Math.sin(Δλ / 2) ** 2;
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        const R = 3440.065; // Earth radius in nautical miles
         const haversineDist = R * c;
 
         // For long legs, use great circle (orthodromic) distance formula
@@ -1327,58 +1336,8 @@
             }
             trueHeading = parseFloat(parts[1]);
             frameType = 'HDT';
-        } else if (data.includes('HCHDM')) {
-            if (parts.length < 2) {
-                addError("[Err] Invalid HCHDM frame - insufficient parts");
-                return null;
-            }
-            magneticVariation = parseFloat(parts[1]);
-            frameType = 'HCHDM';
         }
-        else if (data.includes('HCHDG')) {
-            if (parts.length < 4) {
-                addError("[Err] Invalid HCHDG frame - insufficient parts");
-                return null;
-            }
-            courseOverGroundM = parseFloat(parts[1]);
-            magneticVariation = parseFloat(parts[3]);
-            frameType = 'HCHDG';
-        } else if (data.includes('HCHDT')) {
-            if (parts.length < 2) {
-                addError("[Err] Invalid HCHDT frame - insufficient parts");
-                return null;
-            }
-            trueHeading = parseFloat(parts[1]);
-            frameType = 'HCHDT';
-        } else if (data.includes('HCHDM')) {
-            if (parts.length < 2) {
-                addError("[Err] Invalid HCHDM frame - insufficient parts");
-                return null;
-            }
-            magneticVariation = parseFloat(parts[1]);
-            frameType = 'HCHDM';
-        } else if (data.includes('GNS')) {
-            // GNS frames can contain position data, but are not as common
-            if (parts.length < 7) {
-                addError("[Err] Invalid GNS frame - insufficient parts");
-                return null;
-            }
-            const parsedLat = parseFloat(parts[2]);
-            const parsedLon = parseFloat(parts[4]);
-            if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLon)) {
-                // addError("[Err] Invalid GNS frame - invalid coordinates");
-                return null;
-            }
-            latitudesal = parsedLat;
-            latDirection = parts[3];
-            longitudesal = parsedLon;
-            lonDirection = parts[5];
-            speedOverGround = parseFloat(parts[6]);
-            courseOverGroundT = parseFloat(parts[7]);
-            frameType = 'GNS';
-        } else {
-            return null;
-        }
+        
         // Position variables update (for GPS frames that have position data)
         if (frameType && ['GLL', 'GGA', 'RMC'].includes(frameType)) {
             latitude = (latitudesal !== null && latDirection !== null)
@@ -1524,8 +1483,9 @@
 
     /**
      * Adds an error to the error list, avoiding duplicates
+     * @param {string} error - The error message to add
      */
-    function addError(error: string) {
+    function addError(error: string): void {
         // Avoid adding duplicate errors
         if (!errorList.includes(error)) {
             errorList.push(error);
@@ -1580,6 +1540,9 @@
 
     /**
      * Creates an AIS ship icon
+     * @param {number} heading - The heading of the ship
+     * @param {number} shipType - The type of the ship
+     * @returns {any} The created ship icon
      */
     function createAISShipIcon(heading: number, shipType: number = 0): any {
         let color = '#ff6600'; // Default orange
@@ -1623,6 +1586,9 @@
 
     /**
      * Updates or adds an AIS ship on the map
+     * @param {string} mmsi - The MMSI of the ship
+     * @param {any} data - The AIS data for the ship
+     * @returns {void}
      */
     function updateAISShip(mmsi: string, data: any) {
         if (!aisShipsLayer) return;
@@ -1646,6 +1612,8 @@
             icon: icon,
             zIndexOffset: 100   // Lower z-index for other ships
         }).addTo(aisShipsLayer);
+        
+        // console.log(`Adding/updating AIS ship: ${mmsi} at ${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}`);
         
         // Create tooltip content
         const tooltipContent = `
@@ -1693,6 +1661,8 @@
 
     /**
      * Get ship type name from AIS ship type code
+     * @param {number} shipType - The AIS ship type code
+     * @returns {string} The name of the ship type
      */
     function getShipTypeName(shipType: number): string {
         if (shipType >= 70 && shipType <= 79) return 'Cargo';
@@ -1734,6 +1704,7 @@
      * Decodes AIS message payload and updates vessel data
      * @param aisPayload - The AIS payload string
      * @param isOwnVesselData - Flag indicating if this is our own vessel data
+     * @returns {void}
      */
     function decodeAISMessage(aisPayload: string, isOwnVesselData: boolean = false) {
         if (!aisPayload) return;
@@ -1882,6 +1853,8 @@
     
     /**
      * Décode le payload 6 bits AIS en binaire
+     * @param {string} payload - Le payload AIS 6 bits
+     * @returns {string} Le bitstring décodé
      */
     function ais6bitDecode(payload: string): string {
         let bitstring = '';
@@ -1895,6 +1868,8 @@
 
     /**
      * Convertit un code AIS 6 bits en caractère ASCII
+     * @param {number} val - Le code AIS 6 bits
+     * @returns {string} Le caractère ASCII correspondant
      */
     function aisAscii(val: number): string {
         // Official ITU-R M.1371-5 table
@@ -1904,6 +1879,9 @@
 
     /**
      * Convert NMEA latitude/longitude to decimal
+     * @param {number} value - The NMEA value (degrees and minutes)
+     * @param {string} dir - The direction ('N', 'S', 'E', 'W')
+     * @returns {number} The decimal representation of the latitude/longitude
      */
     function convertLatitude(value: number, dir: string): number {
         // Validate input to prevent NaN
@@ -1917,7 +1895,12 @@
         let lat = degrees + (minutes / 60);
         return dir === 'S' ? -lat : lat;
     }
-
+    /*
+    * Convert NMEA longitude/latitude to decimal
+    * @param {number} value - The NMEA value (degrees and minutes)
+    * @param {string} dir - The direction ('N', 'S', 'E', 'W')
+    * @returns {number} The decimal representation of the latitude/longitude
+    */
     function convertLongitude(value: number, dir: string): number {
         // Validate input to prevent NaN
         if (!Number.isFinite(value) || !dir) {
@@ -1933,6 +1916,9 @@
 
     /**
      * Formatted display of latitude/longitude
+     * @param {number} val - The latitude/longitude value
+     * @param {string} dir - The direction ('N', 'S', 'E', 'W')
+     * @returns {string} The formatted display string
      */
     function displayLatitude(val: number, dir?: string): string {
         const hemisphere = dir ?? (val >= 0 ? 'N' : 'S');
@@ -1950,6 +1936,12 @@
         return ('00' + deg).slice(-2) + '° ' + ('0' + ((Math.floor(min * 1000) / 1000).toFixed(4))).slice(-7) + "' " + hemisphere;
     }
 
+    /**
+     * Formatted display of longitude
+     * @param {number} val - The longitude value
+     * @param {string} dir - The direction ('N', 'S', 'E', 'W')
+     * @returns {string} The formatted display string
+     */
     function displayLongitude(val: number, dir?: string): string {
         const hemisphere = dir ?? (val >= 0 ? 'E' : 'W');
         let deg: number | null = null;
@@ -1967,6 +1959,8 @@
     }
     /**
      * Handles GPX file upload and parsing
+     * @param {Event} event - The file input change event
+     * @returns {void}
      */
     function handleGpxFileUpload(event: Event): void {
         const target = event.target as HTMLInputElement;
@@ -1992,6 +1986,9 @@
 
     /**
      * Parses GPX XML content and extracts waypoints with departure time extraction
+     * @param {string} gpxXml - The GPX XML content
+     * @param {string} fileName - The name of the GPX file
+     * @returns {void}
      */
     function parseGpxContent(gpxXml: string, fileName: string): void {
         try {
@@ -2113,23 +2110,22 @@
     }
 
     /**
-     * Calculates total route distance and updates route metrics
+     * Calculates total route distance in nautical miles and updates route metrics
      */
     function calculateRouteDistance(): void {
         if (gpxRoute.length < 2) return;
         
-        let totalDistanceKm = 0;
+        let totalDistanceNM = 0;
         
         for (let i = 0; i < gpxRoute.length - 1; i++) {
             const dist = calculateDistance(
                 gpxRoute[i].lat, gpxRoute[i].lon,
                 gpxRoute[i + 1].lat, gpxRoute[i + 1].lon
             );
-            totalDistanceKm += dist;
+            totalDistanceNM += dist;
         }
         
-        // Convert to nautical miles
-        routeDistance = totalDistanceKm;
+        routeDistance = totalDistanceNM; 
     }
 
     /**
@@ -2294,6 +2290,15 @@
         }
     }
 
+    /**
+     * Finds the closest point on a line segment to a given point
+     * @param pointLat
+     * @param pointLon
+     * @param segmentStartLat
+     * @param segmentStartLon
+     * @param segmentEndLat
+     * @param segmentEndLon
+    */
     function findClosestPointOnSegment(
         pointLat: number, pointLon: number,
         segmentStartLat: number, segmentStartLon: number,
@@ -2400,6 +2405,7 @@
         closestWaypointIndex = bestProgress > 0 ? bestSegmentIndex + 1 : bestSegmentIndex;
 
         // Log for debug
+        // console.log(`${formatDateTime(new Date(Date.now()))}: Route progress updated`);
         // console.log(`Navigation: closest Waypoint ${closestWaypointIndex}`);
         // console.log(`Navigation: Current segment ${bestSegmentIndex}->${bestSegmentIndex + 1} (${(bestProgress * 100).toFixed(1)}%), Next waypoint: ${nextWaypointIndex + 1}/${gpxRoute.length}`);
 
@@ -2423,40 +2429,22 @@
 
     /**
      * Projects vessel position along the loaded route with timing consideration and heading calculation
+     * @param currentSOG Speed over ground of the vessel
+     * @param duration Duration for the projection (in seconds)
+     * @param lat Latitude of the vessel
+     * @param lon Longitude of the vessel
+     * @param cog Course over ground of the vessel
+     * @returns Projected position as a Leaflet LatLng object
      */
     function computeRouteProjection(currentSOG: number, duration: number): {lat: number, lon: number, heading: number} | null {
         if (!isRouteLoaded || gpxRoute.length < 2 || currentSOG <= 0) return null;
         
-        let timeElapsedHours: number;
-        let currentIndex: number;
-        let currentLat: number;
-        let currentLon: number;
-
-        if (routeStartTime) { // && routeStartTime.getTime() > Date.now()
-            // When we have a departure time, calculate from route start to target projection time
-            const targetTime = (store as any).get('timestamp'); // Windy target timestamp
+        // If routeStartTime is set and projection time is before departure, project from route start
+        if (routeStartTime) {
+            const targetTime = (store as any).get('timestamp');
             const routeStartTimeMs = routeStartTime.getTime();
+            const timeElapsedHours = (targetTime - routeStartTimeMs) / (1000 * 3600);
             
-            // Calculate elapsed time from route start to target projection time
-            timeElapsedHours = (targetTime - routeStartTimeMs) / (1000 * 3600);
-            
-            // Start from the beginning of the route
-            currentIndex = 0;
-            currentLat = gpxRoute[0].lat;
-            currentLon = gpxRoute[0].lon;
-            
-            // console.log(`Route projection: ${timeElapsedHours.toFixed(2)} hours from departure time`);
-        } else {
-            // No departure time - use traditional approach from current position
-            timeElapsedHours = duration / 3600; // Convert seconds to hours
-            currentIndex = closestWaypointIndex;
-            currentLat = lastLatitude || gpxRoute[currentIndex].lat;
-            currentLon = lastLongitude || gpxRoute[currentIndex].lon;
-            
-            console.log(`Route projection: ${timeElapsedHours.toFixed(2)} hours from current position`);
-        }
-        
-        // If projection time is in the past relative to route start, return route start position
         if (timeElapsedHours < 0) {
             console.log('Projection time is before route start time');
             return {
@@ -2465,29 +2453,57 @@
                 heading: gpxRoute.length > 1 ? calculateBearing(gpxRoute[0].lat, gpxRoute[0].lon, gpxRoute[1].lat, gpxRoute[1].lon) : 0
             };
         }
-        
-        const distanceToTravel = (currentSOG * timeElapsedHours); // Distance in NM
+        }
+
+        // Snap current position to the closest point on the route
+        let startLat = lastLatitude ?? gpxRoute[0].lat;
+        let startLon = lastLongitude ?? gpxRoute[0].lon;
+        let bestSegmentIndex = 0;
+        let minDistance = Infinity;
+        let snappedLat = startLat;
+        let snappedLon = startLon;
+
+        for (let i = 0; i < gpxRoute.length - 1; i++) {
+            const segStart = gpxRoute[i];
+            const segEnd = gpxRoute[i + 1];
+            const proj = findClosestPointOnSegment(
+                startLat, startLon,
+                segStart.lat, segStart.lon,
+                segEnd.lat, segEnd.lon
+            );
+            if (proj.distance < minDistance) {
+                minDistance = proj.distance;
+                bestSegmentIndex = i;
+                // Interpolate snapped point
+                const t = Math.max(0, Math.min(1, proj.progress));
+                snappedLat = segStart.lat + (segEnd.lat - segStart.lat) * t;
+                snappedLon = segStart.lon + (segEnd.lon - segStart.lon) * t;
+            }
+        }
+
+        let currentLat = snappedLat;
+        let currentLon = snappedLon;
+        let currentIndex = bestSegmentIndex;
+
+        // duration is in seconds, convert to hours
+        const timeElapsedHours = duration / 3600;
+        const distanceToTravel = currentSOG * timeElapsedHours; // in NM
         let remainingDistance = distanceToTravel;
         
-        // Travel along the route
+        // Walk the route from the snapped point
         while (remainingDistance > 0 && currentIndex < gpxRoute.length - 1) {
             const nextWaypoint = gpxRoute[currentIndex + 1];
             const segmentDistance = calculateDistance(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon);
             
             if (segmentDistance <= remainingDistance) {
-                // Move to next waypoint
                 remainingDistance -= segmentDistance;
                 currentLat = nextWaypoint.lat;
                 currentLon = nextWaypoint.lon;
                 currentIndex++;
             } else {
-                // Interpolate position along current segment
-                const ratio = remainingDistance / segmentDistance;
-                const deltaLat = nextWaypoint.lat - currentLat;
-                const deltaLon = nextWaypoint.lon - currentLon;
-                
-                currentLat += deltaLat * ratio;
-                currentLon += deltaLon * ratio;
+                const ratio = segmentDistance === 0 ? 0 : remainingDistance / segmentDistance;
+                currentLat += (nextWaypoint.lat - currentLat) * ratio;
+                currentLon += (nextWaypoint.lon - currentLon) * ratio;
                 remainingDistance = 0;
             }
         }
@@ -2495,13 +2511,9 @@
         // Calculate heading for the projected position
         let heading = 0;
         if (currentIndex < gpxRoute.length - 1) {
-            // Use bearing to next waypoint
-            const nextWaypoint = gpxRoute[currentIndex + 1];
-            heading = calculateBearing(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon);
+            heading = calculateBearing(currentLat, currentLon, gpxRoute[currentIndex + 1].lat, gpxRoute[currentIndex + 1].lon);
         } else if (currentIndex > 0) {
-            // Use bearing from previous waypoint if at end of route
-            const prevWaypoint = gpxRoute[currentIndex - 1];
-            heading = calculateBearing(prevWaypoint.lat, prevWaypoint.lon, currentLat, currentLon);
+            heading = calculateBearing(gpxRoute[currentIndex - 1].lat, gpxRoute[currentIndex - 1].lon, currentLat, currentLon);
         }
         
         return { lat: currentLat, lon: currentLon, heading };
@@ -2509,6 +2521,12 @@
 
     /**
      * Calculate the projected position of the vessel based on route or heading/speed and Windy timestamp
+     * @param lat Latitude of the vessel
+     * @param lon Longitude of the vessel
+     * @param cog Course over ground of the vessel
+     * @param sog Speed over ground of the vessel
+     * @param duration Duration for the projection (in seconds)
+     * @returns Projected position as a Leaflet LatLng object
      */
     function computeProjection(lat: number, lon: number, cog: number, sog: number, duration?: number): any {
         const ts = (store as any).get('timestamp')
@@ -2543,15 +2561,6 @@
         return L.latLng(toDegrees(φ2), toDegrees(λ2));
     }
 
-    let helpVisible = false;
-
-    function toggleHelp() {
-        helpVisible = !helpVisible;
-        const helpDiv = document.getElementById('help');
-        if (helpDiv) {
-            helpDiv.style.display = helpVisible ? 'block' : 'none';
-        }
-    }
    /**
      * Shows a Windy weather popup at the given position.
      * @param useProjectionTime If true, uses Windy timestamp (forecast), otherwise current time.
@@ -2904,6 +2913,8 @@
 
     /**
      * Formats a date as dd/mm/yyyy
+     * @param date Date object to format
+     * @returns Formatted date string in dd/mm/yyyy format
      */
     function formatDateDDMMYYYY(date: Date): string {
         const day = date.getDate().toString().padStart(2, '0');
@@ -2914,6 +2925,8 @@
 
     /**
      * Formats time as HH:MM (24-hour format)
+     * @param date Date object to format
+     * @returns Formatted time string in HH:MM format
      */
     function formatTime24Hour(date: Date): string {
         const hours = date.getHours().toString().padStart(2, '0');
@@ -2923,9 +2936,14 @@
 
     /**
      * Formats date and time together
+     * @param date Date object to format
+     * @returns Formatted date and time string in dd/mm/yyyy HH:MM format
      */
     function formatDateTime(date: Date): string {
-        return `${formatDateDDMMYYYY(date)} ${formatTime24Hour(date)}`;
+        const hours = date.getHours().toString().padStart(2, '0');
+        const minutes = date.getMinutes().toString().padStart(2, '0');
+        const secondes = date.getSeconds().toString().padStart(2, '0');
+        return `${formatDateDDMMYYYY(date)} ${hours}:${minutes}:${secondes}`;
     }
     // Utility functions for geographical calculations
     function toRadians(deg: number): number {
@@ -2985,6 +3003,34 @@
     }
     // WebSocket initialization to receive NMEA/AIS frames
     onMount(() => {
+        // Initialize route on component load
+        updateRoute();
+
+        // Restore saved data
+        // Load track history
+        const savedTrack = loadTrackHistory();
+        if (savedTrack.length > 0) {
+            pathLatLngs = savedTrack;
+            // Redraw the track on map
+            if (pathLatLngs.length > 1) {
+                boatPath = L.polyline(pathLatLngs, { color: 'blue', weight: 3 }).addTo(map);
+            }
+        }
+
+        // Load GPX route
+        if (loadGpxRoute()) {
+            calculateRouteDistance();
+            displayRoute();
+        }
+
+        // Initialize layers with proper z-index ordering
+        // Bottom layer: Other AIS ships (zIndexOffset: 100)
+        aisShipsLayer = L.layerGroup().addTo(map);
+        aisShipsLayer.options.zIndexOffset = 100;
+
+        // Top layer: Your ship (zIndexOffset: 300)
+        markerLayer = L.layerGroup().addTo(map);
+        markerLayer.options.zIndexOffset = 300;
         
         // Start cleanup timer for old AIS ships (every 5 minutes)
         setInterval(cleanupOldAISShips, 5 * 60 * 1000);
@@ -3025,34 +3071,6 @@
             unsubscribeOverlay = null;
         }
 
-        // Restore saved data
-        // Load track history
-        const savedTrack = loadTrackHistory();
-        if (savedTrack.length > 0) {
-            pathLatLngs = savedTrack;
-            // Redraw the track on map
-            if (pathLatLngs.length > 1) {
-                boatPath = L.polyline(pathLatLngs, { color: 'blue', weight: 3 }).addTo(map);
-            }
-        }
-
-        // Initialize layers with proper z-index ordering
-        // Bottom layer: Other AIS ships (zIndexOffset: 100)
-        aisShipsLayer = L.layerGroup().addTo(map);
-        aisShipsLayer.options.zIndexOffset = 100;
-
-        // Top layer: Your ship (zIndexOffset: 300)
-        markerLayer = L.layerGroup().addTo(map);
-        markerLayer.options.zIndexOffset = 300;
-
-        // Load GPX route
-        if (loadGpxRoute()) {
-            calculateRouteDistance();
-            displayRoute();
-        }
-
-        // Initialize route on component load
-        updateRoute();
     });
 
 
