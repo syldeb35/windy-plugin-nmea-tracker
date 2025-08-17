@@ -138,14 +138,19 @@
     {#if nmeaHistory.length > 0}
         <!-- <p><strong>Last received NMEA frames:</strong></p>
         <p class="nmea-types">{nmeaHistory.join(', ')}</p> -->
-        <p><strong>Latitude:</strong> {myLatitude}</p>
-        <p><strong>Longitude:</strong> {myLongitude}</p>
-        <p><strong>Course over ground:</strong> 
-            {testModeEnabled ? `${testCOG.toFixed(1)}° (TEST)` : `${myCourseOverGroundT.toFixed(1)}°`}
-        </p>
-        <p><strong>Speed over ground:</strong> 
-            {testModeEnabled ? `${testSOG.toFixed(1)} knots (TEST)` : `${mySpeedOverGround.toFixed(1)} knots`}
-        </p>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; width: 100%; margin-bottom: 8px;">
+            <div><strong>&phi;:</strong> {myLatitude}</div>
+            <div><strong>&lambda;:</strong> {myLongitude}</div>
+            <div>
+                <strong>COG:</strong>
+                {testModeEnabled ? `${testCOG.toFixed(1)}° (TEST)` : `${myCourseOverGroundT.toFixed(1)}°`}
+            </div>
+            <div>
+                <strong>SOG:</strong>
+                {testModeEnabled ? `${testSOG.toFixed(1)} knots (TEST)` : `${mySpeedOverGround.toFixed(1)} knots`}
+            </div>
+        </div>
+        
         <div class="plugin__buttons__centered">
             <button on:click={centerShip}>📍 Center on vessel</button>
             <button on:click={toggleFollowShip}>
@@ -182,16 +187,17 @@
     <!-- Test Mode Controls -->
     <hr />
     <div class="test-mode-section">
-      <p style="font-weight: bold; margin-bottom: 10px;">🧪 Test Mode :</p>
-      <label class="centered">
+      <p style="font-weight: bold; margin-bottom: 10px;">🧪 Test Mode :
+            <label style="font-weight: bold; margin-bottom: 10px;">
                 <input
                     type="checkbox"
                     id="testModeEnabled"
                     name="testModeEnabled"
                     bind:checked={testModeEnabled}
                 />
-        Enable test mode
-      </label>
+                Enable
+            </label>
+        </p>
       {#if testModeEnabled}
         <div style="margin-top: 10px;">
           <label class="right-aligned">
@@ -223,7 +229,7 @@
                 />
             </label>
           {/if}
-          
+
           <p style="font-size: 12px; color: #666; margin-top: 5px;">
             📝 Test values override real data for projections and weather forecasts
           </p>
@@ -259,18 +265,18 @@
         {#if isRouteLoaded && gpxRoute.length > 0}
             <div style="background: rgba(0,100,0,0.1); padding: 8px; border-radius: 4px; margin-bottom: 10px;">
                 <p style="font-size: 12px; margin: 2px 0;">
-                    📍 Waypoints: {gpxRoute.length} | Distance: {routeDistance.toFixed(1)} NM
+                    📍 Waypoints: {gpxRoute.length} | Distance: {routeDistance.toFixed(1)} NM | DTG: {((1 - routeProgress) * routeDistance).toFixed(2)} NM
                 </p>
                 {#if estimatedTimeToCompletion > 0}
                     <p style="font-size: 12px; margin: 2px 0;">
                         ⏱️ ETC: {Math.floor(estimatedTimeToCompletion)}h {Math.floor((estimatedTimeToCompletion % 1) * 60).toString().padStart(2, '0')} min |
                         {#if estimatedTimeOfArrival}
-                            🏁 ETA: {formatDateDDMMYYYY(estimatedTimeOfArrival)} {formatTime24Hour(estimatedTimeOfArrival)}
+                            🏁 ETA: {formatDateDDMMYYYY(estimatedTimeOfArrival)} {formatTime24Hour(estimatedTimeOfArrival)} UTC
                         {/if}
                     </p>
                 {/if}
                 <p style="font-size: 12px; margin: 2px 0;">
-                    🎯 Progress: {Math.round(routeProgress * 100)}% | Next: {gpxRoute[nextWaypointIndex].name}
+                    🎯 Progress: {Math.round(routeProgress * 100)}% | Next: n°{nextWaypointIndex + 1} / {gpxRoute[nextWaypointIndex].name}
                 </p>
             </div>
 
@@ -608,7 +614,7 @@
     let myCourseOverGroundT: number = 0; // True
     let trueHeading: number = 0; // True heading
     let courseOverGroundM: number = 0; // Magnetic
-    let varM: number = 0; // Magnetic variation
+    let magneticVariation: number = 0; // Magnetic variation
     let speedOverGround: number = 0; // In knots
     let mySpeedOverGround: number = 0; // In knots
     //let heurePrev: number | null = null; // for projection
@@ -630,7 +636,7 @@
     // Boat icon size control
     let boatIconSize: number = 1.0; // Default size multiplier (0.5 to 2.0)
 
-    let myMMSI = ''; // Our own MMSI for comparison
+    let myMMSI = loadVesselMMSI(); // Our own MMSI for comparison
 
     let unsubscribeTimeline: (() => void) | null = null;
     let unsubscribeOverlay: (() => void) | null = null;
@@ -680,6 +686,7 @@
     let closestWaypointIndex: number = 0; // Index of closest waypoint to current position
     let nextWaypointIndex: number = 0; // Index of next waypoint to current position
     let routeFileName: string = ''; // Name of loaded GPX file
+    let lastRouteProgressUpdate = 0;
 
     /**
      * Load vessel name from localStorage
@@ -693,6 +700,19 @@
             return 'YOUR BOAT';
         }
     }
+    
+    /**
+     * Load vessel MMSI from localStorage
+     */
+    function loadVesselMMSI(): string {
+        try {
+            const saved = localStorage.getItem('windy-nmea-vessel-mmsi');
+            return saved || 'YOUR MMSI';
+        } catch (error) {
+            console.warn('Failed to load vessel MMSI from localStorage:', error);
+            return 'YOUR MMSI';
+        }
+    }
 
     /**
      * Save vessel name to localStorage
@@ -701,6 +721,18 @@
         try {
             localStorage.setItem('windy-nmea-vessel-name', name);
             console.log('Vessel name saved:', name);
+        } catch (error) {
+            console.warn('Failed to save vessel name to localStorage:', error);
+        }
+    }
+
+    /**
+     * Save vessel MMSI to localStorage
+     */
+    function saveVesselMMSI(mmsi: string): void {
+        try {
+            localStorage.setItem('windy-nmea-vessel-mmsi', mmsi);
+            console.log('Vessel MMSI saved:', mmsi);
         } catch (error) {
             console.warn('Failed to save vessel name to localStorage:', error);
         }
@@ -858,6 +890,14 @@
             }
             
             // console.log(`Track history trimmed to ${MAX_TRACK_POINTS} points`);
+        }
+    }
+    
+    function throttledUpdateRouteProgress() {
+        const now = Date.now();
+        if (now - lastRouteProgressUpdate > 5000) { // 5000 ms = 5 seconds
+            updateRouteProgress();
+            lastRouteProgressUpdate = now;
         }
     }
 
@@ -1097,30 +1137,30 @@
         const distance = calculateDistance(lastLatitude, lastLongitude, newLat, newLon);
         
         // Dynamic validation based on speed and time
-        let maxJumpKM = 1.852; // Default: 1 nautical mile
+        let maxJump = 1; // Default: 1 nautical mile
         
         // If we have speed information, calculate reasonable distance
         if (sog && sog > 0) {
             // Calculate time since last position update (assuming max 60 seconds between updates)
             const maxTimeBetweenUpdates = 60; // seconds
-            const maxDistanceAtSpeed = (sog * 1.852 * maxTimeBetweenUpdates) / 3600; // km
+            const maxDistanceAtSpeed = (sog * maxTimeBetweenUpdates) / 3600; // km
             
             // Allow up to 3x the expected distance to account for course changes
-            maxJumpKM = Math.max(maxDistanceAtSpeed * 3, 1.852); // At least 1 NM
+            maxJump = Math.max(maxDistanceAtSpeed * 3, 1); // At least 1 NM
             
             // But never allow more than 20 NM jump (37 km) - clearly erroneous
-            maxJumpKM = Math.min(maxJumpKM, 37);
+            maxJump = Math.min(maxJump, 20);
         } else {
             // Without speed info, use fixed limits based on distance
-            if (distance > 37) { // > 20 NM is clearly wrong
-                maxJumpKM = 1.852; // Strict limit
-            } else if (distance > 9.26) { // > 5 NM might be wrong
-                maxJumpKM = 5.556; // 3 NM limit
+            if (distance > 20) { // > 20 NM is clearly wrong
+                maxJump = 1; // Strict limit
+            } else if (distance > 5) { // > 5 NM might be wrong
+                maxJump = 3; // 3 NM limit
             }
         }
         
-        if (distance > maxJumpKM) {
-            console.warn(`Position jump detected: ${distance.toFixed(3)}km > ${maxJumpKM.toFixed(3)}km limit. SOG: ${sog || 'unknown'} knots. Rejecting position.`);
+        if (distance > maxJump) {
+            console.warn(`Position jump detected: ${distance.toFixed(3)}km > ${maxJump.toFixed(3)}km limit. SOG: ${sog || 'unknown'} knots. Rejecting position.`);
             return false;
         }
         
@@ -1135,16 +1175,33 @@
      * @param {number} lon2 - Longitude 2 in decimal degrees
      * @returns {number} Distance in kilometers
      */
-    function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-        const R = 6371; // Earth's radius in km
-        const dLat = toRadians(lat2 - lat1);
-        const dLon = toRadians(lon2 - lon1);
-        const a = 
-            Math.sin(dLat/2) * Math.sin(dLat/2) +
-            Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * 
-            Math.sin(dLon/2) * Math.sin(dLon/2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-        return R * c;
+    function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
+        // Convert degrees to radians
+        const toRad = (deg: number) => deg * Math.PI / 180;
+        const φ1 = toRad(lat1);
+        const φ2 = toRad(lat2);
+        const Δφ = φ2 - φ1;
+        const Δλ = toRad(lon2 - lon1);
+
+        // Haversine formula (short distances)
+        const a = Math.sin(Δφ / 2) ** 2 +
+                Math.cos(φ1) * Math.cos(φ2) *
+                Math.sin(Δλ / 2) ** 2;
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const R = 3440.065; // Earth radius in nautical miles
+        const haversineDist = R * c;
+
+        // For long legs, use great circle (orthodromic) distance formula
+        if (haversineDist > 300) {
+            // Spherical law of cosines
+            const gcDist = Math.acos(
+                Math.sin(φ1) * Math.sin(φ2) +
+                Math.cos(φ1) * Math.cos(φ2) * Math.cos(Δλ)
+            ) * R;
+            return gcDist;
+        } else {
+            return haversineDist;
+        }
     }
     
     /**
@@ -1251,7 +1308,8 @@
                 // Convert km/h to knots
                 speedOverGround = parseFloat(parts[5]) / 1.852;
             } else if (parts[4] === 'M') {
-                // To be processed: $HCHDM
+                // Convert m/s to knots
+                speedOverGround = parseFloat(parts[5]) / 1852 * 3600;
             }
             frameType = 'VTG';
         } else if (data.includes('HDG')) {
@@ -1260,7 +1318,7 @@
                 return null;
             }
             courseOverGroundM = parseFloat(parts[1]);
-            varM = parseFloat(parts[4]);
+            magneticVariation = parseFloat(parts[4]);
             frameType = 'HDG';
         } else if (data.includes('HDT')) {
             if (parts.length < 2) {
@@ -1269,8 +1327,58 @@
             }
             trueHeading = parseFloat(parts[1]);
             frameType = 'HDT';
+        } else if (data.includes('HCHDM')) {
+            if (parts.length < 2) {
+                addError("[Err] Invalid HCHDM frame - insufficient parts");
+                return null;
+            }
+            magneticVariation = parseFloat(parts[1]);
+            frameType = 'HCHDM';
         }
-        
+        else if (data.includes('HCHDG')) {
+            if (parts.length < 4) {
+                addError("[Err] Invalid HCHDG frame - insufficient parts");
+                return null;
+            }
+            courseOverGroundM = parseFloat(parts[1]);
+            magneticVariation = parseFloat(parts[3]);
+            frameType = 'HCHDG';
+        } else if (data.includes('HCHDT')) {
+            if (parts.length < 2) {
+                addError("[Err] Invalid HCHDT frame - insufficient parts");
+                return null;
+            }
+            trueHeading = parseFloat(parts[1]);
+            frameType = 'HCHDT';
+        } else if (data.includes('HCHDM')) {
+            if (parts.length < 2) {
+                addError("[Err] Invalid HCHDM frame - insufficient parts");
+                return null;
+            }
+            magneticVariation = parseFloat(parts[1]);
+            frameType = 'HCHDM';
+        } else if (data.includes('GNS')) {
+            // GNS frames can contain position data, but are not as common
+            if (parts.length < 7) {
+                addError("[Err] Invalid GNS frame - insufficient parts");
+                return null;
+            }
+            const parsedLat = parseFloat(parts[2]);
+            const parsedLon = parseFloat(parts[4]);
+            if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLon)) {
+                // addError("[Err] Invalid GNS frame - invalid coordinates");
+                return null;
+            }
+            latitudesal = parsedLat;
+            latDirection = parts[3];
+            longitudesal = parsedLon;
+            lonDirection = parts[5];
+            speedOverGround = parseFloat(parts[6]);
+            courseOverGroundT = parseFloat(parts[7]);
+            frameType = 'GNS';
+        } else {
+            return null;
+        }
         // Position variables update (for GPS frames that have position data)
         if (frameType && ['GLL', 'GGA', 'RMC'].includes(frameType)) {
             latitude = (latitudesal !== null && latDirection !== null)
@@ -1688,6 +1796,7 @@
                     // Store our own MMSI if not set
                     if (!myMMSI || !isValidMMSI(myMMSI)) {
                         myMMSI = mmsi;
+                        saveVesselMMSI(mmsi);
                     }
                     
                     data = `AIS MMSI: ${mmsi} (Own vessel)\nLat: ${lat.toFixed(5)}\nLon: ${lon.toFixed(5)}\nCOG: ${cog.toFixed(1)}°\nSOG: ${sog.toFixed(1)} nds`;
@@ -1983,7 +2092,7 @@
 
             // If we have current position, calculate proper waypoint indices
             if (lastLatitude && lastLongitude) {
-                updateRouteProgress();
+                throttledUpdateRouteProgress();
             }
 
             // Save route to localStorage
@@ -2020,7 +2129,7 @@
         }
         
         // Convert to nautical miles
-        routeDistance = totalDistanceKm / 1.852;
+        routeDistance = totalDistanceKm;
     }
 
     /**
@@ -2189,85 +2298,91 @@
         pointLat: number, pointLon: number,
         segmentStartLat: number, segmentStartLon: number,
         segmentEndLat: number, segmentEndLon: number
-    ): {distance: number, progress: number} {
-        // Convert to simple x,y coordinates for calculation
+        ) {
+        // Convert to Cartesian (x, y) for small distances
         const px = pointLon;
         const py = pointLat;
         const ax = segmentStartLon;
         const ay = segmentStartLat;
         const bx = segmentEndLon;
         const by = segmentEndLat;
-        
-        // Vector from A to B
+
+        // Vector AB
         const abx = bx - ax;
         const aby = by - ay;
-        
-        // Vector from A to P
+        // Vector AP
         const apx = px - ax;
         const apy = py - ay;
-        
-        // Project P onto AB
+
+        // Project AP onto AB, get t (progress along segment)
         const ab2 = abx * abx + aby * aby;
-        let t = (apx * abx + apy * aby) / ab2;
-        
-        // Clamp t to [0, 1] to stay on segment
-        t = Math.max(0, Math.min(1, t));
-        
-        // Closest point on segment
-        const closestX = ax + t * abx;
-        const closestY = ay + t * aby;
-        
-        // Distance from point to closest point on segment
-        const distance = calculateDistance(pointLat, pointLon, closestY, closestX);
-        
+        let t = ab2 === 0 ? 0 : (apx * abx + apy * aby) / ab2;
+
+        // Clamp t to [0, 1] for closest point on segment
+        const tClamped = Math.max(0, Math.min(1, t));
+        const closestX = ax + tClamped * abx;
+        const closestY = ay + tClamped * aby;
+
+        // Distance from P to closest point
+        const distance = calculateDistance(py, px, closestY, closestX);
+
         return {
             distance: distance,
-            progress: t
+            progress: t // Note: return unclamped t for navigation logic!
         };
     }
 
     /**
-     * Finds the closest waypoint to current position and calculates progress
+     * Finds the next waypoint to current position and calculates progress
      */
     function updateRouteProgress(): void {
         if (!isRouteLoaded || !lastLatitude || !lastLongitude) return;
-            
-        // Find the closest point on the route (not just closest waypoint)
+
+        // Step 1: Find the first segment where the projection parameter t >= 1 (i.e., vessel is past the end of the segment)
+        // Navigation/progress logic (use only this for nextWaypointIndex)
         let bestSegmentIndex = 0;
         let bestProgress = 0;
-        let minDistanceToRoute = Infinity;
-        
-        // Check each segment of the route
+        let minDistance = Infinity;
         for (let i = 0; i < gpxRoute.length - 1; i++) {
             const segmentStart = gpxRoute[i];
             const segmentEnd = gpxRoute[i + 1];
-            
-            // Find closest point on this segment and progress along it
             const result = findClosestPointOnSegment(
                 lastLatitude!, lastLongitude!,
                 segmentStart.lat, segmentStart.lon,
                 segmentEnd.lat, segmentEnd.lon
             );
-            
-            if (result.distance < minDistanceToRoute) {
-                minDistanceToRoute = result.distance;
+            if (result.progress >= 0 && result.progress <= 1 && result.distance < minDistance) {
+                minDistance = result.distance;
                 bestSegmentIndex = i;
-                bestProgress = result.progress; // 0-1 along this segment
+                bestProgress = result.progress;
             }
         }
-        
-        // Calculate total distance covered
+        if (minDistance === Infinity) {
+            bestSegmentIndex = gpxRoute.length - 2;
+            bestProgress = 1;
+        }
+        nextWaypointIndex = bestSegmentIndex + 1;
+
+        // (Optional) Closest waypoint for display only
+        /*let closestWaypointIndex = 0;
+        let minWaypointDist = Infinity;
+        for (let i = 0; i < gpxRoute.length; i++) {
+            const d = calculateDistance(lastLatitude!, lastLongitude!, gpxRoute[i].lat, gpxRoute[i].lon);
+            if (d < minWaypointDist) {
+                minWaypointDist = d;
+                closestWaypointIndex = i;
+            }
+        }*/
+
+
+        // Step 2: Calculate route progress (for ETC/ETA)
         let distanceCovered = 0;
-        
-        // Add completed segments
         for (let i = 0; i < bestSegmentIndex; i++) {
             distanceCovered += calculateDistance(
                 gpxRoute[i].lat, gpxRoute[i].lon,
                 gpxRoute[i + 1].lat, gpxRoute[i + 1].lon
             );
         }
-        
-        // Add partial progress on current segment
         if (bestSegmentIndex < gpxRoute.length - 1) {
             const segmentDistance = calculateDistance(
                 gpxRoute[bestSegmentIndex].lat, gpxRoute[bestSegmentIndex].lon,
@@ -2275,75 +2390,33 @@
             );
             distanceCovered += segmentDistance * bestProgress;
         }
-        
-        // Calculate overall progress (both in km)
-        const totalRouteDistanceKm = routeDistance * 1.852; // Convert NM to km
+        const totalRouteDistanceKm = routeDistance;
         routeProgress = Math.min(distanceCovered / totalRouteDistanceKm, 1.0);
-        
-        // Update closest waypoint index for internal use only
-        const previousClosestWaypointIndex = closestWaypointIndex;
-        closestWaypointIndex = bestProgress > 0.5 ? bestSegmentIndex + 1 : bestSegmentIndex;
-        
-        // Calculate next waypoint using bearing-based logic
-        const previousNextWaypointIndex = nextWaypointIndex;
-        
-                // Calculate next waypoint using different logic based on distance to route
-        const distanceToClosestWaypoint = Math.min(...gpxRoute.map(wp => 
-            calculateDistance(lastLatitude!, lastLongitude!, wp.lat, wp.lon) / 1.852
-        ));
-        
-        if (distanceToClosestWaypoint > 2.0) {
-            // Far from route: find closest waypoint as next target
-            let minDistance = Infinity;
-            for (let i = 0; i < gpxRoute.length; i++) {
-                const waypoint = gpxRoute[i];
-                const distance = calculateDistance(lastLatitude!, lastLongitude!, waypoint.lat, waypoint.lon) / 1.852;
-                if (distance < minDistance) {
-                    minDistance = distance;
-                    nextWaypointIndex = i;
-                }
-            }
-            // console.log(`Far from route (${distanceToClosestWaypoint.toFixed(2)} NM): targeting closest waypoint ${nextWaypointIndex + 1}`);
-        } else {
-            // Close to route: use bearing logic to detect passed waypoints
-            for (let i = nextWaypointIndex; i < gpxRoute.length; i++) {
-                const waypoint = gpxRoute[i];
-                const distanceToWaypoint = calculateDistance(lastLatitude!, lastLongitude!, waypoint.lat, waypoint.lon) / 1.852;
-                
-                if (distanceToWaypoint < 2.0) { // Within 2 NM
-                    const bearingToWaypoint = calculateBearing(lastLatitude!, lastLongitude!, waypoint.lat, waypoint.lon);
-                    const relativeBearing = Math.abs(bearingToWaypoint - (testModeEnabled ? testCOG : myCourseOverGround));
-                    
-                    // Normalize relative bearing to 0-180 range
-                    const normalizedBearing = relativeBearing > 180 ? 360 - relativeBearing : relativeBearing;
-                    console.log(`Checking waypoint ${i + 1}: distance=${distanceToWaypoint.toFixed(2)} NM, bearing=${bearingToWaypoint.toFixed(1)}°, relative=${normalizedBearing.toFixed(1)}°`);
-                    
-                    if (normalizedBearing > 90) { // Waypoint is behind us
-                        nextWaypointIndex = Math.min(i + 1, gpxRoute.length - 1);
-                    } else {
-                        break; // This waypoint is still ahead, stop checking
-                    }
-                } else {
-                    break; // Too far away, stop checking
-                }
-            }
-        }
-                        
-        // Calculate ETC based on current/test speed
+
+        // Step 3: The next waypoint is ALWAYS the end of the current segment
+        nextWaypointIndex = Math.min(bestSegmentIndex + 1, gpxRoute.length - 1);
+
+        // Step 4: Update closestWaypointIndex for internal use
+        closestWaypointIndex = bestProgress > 0 ? bestSegmentIndex + 1 : bestSegmentIndex;
+
+        // Log for debug
+        // console.log(`Navigation: closest Waypoint ${closestWaypointIndex}`);
+        // console.log(`Navigation: Current segment ${bestSegmentIndex}->${bestSegmentIndex + 1} (${(bestProgress * 100).toFixed(1)}%), Next waypoint: ${nextWaypointIndex + 1}/${gpxRoute.length}`);
+
+        // Step 5: Calculate ETC/ETA
         const effectiveSpeed = testModeEnabled ? testSOG : mySpeedOverGround;
         if (effectiveSpeed > 0) {
             const remainingDistance = (routeDistance * (1 - routeProgress));
             estimatedTimeToCompletion = remainingDistance / effectiveSpeed;
-            
-            // Calculate ETA by adding ETC to current time
-            const etcMilliseconds = estimatedTimeToCompletion * 60 * 60 * 1000; // Convert hours to milliseconds
+            const etcMilliseconds = estimatedTimeToCompletion * 60 * 60 * 1000;
             estimatedTimeOfArrival = new Date(Date.now() + etcMilliseconds);
         } else {
             estimatedTimeToCompletion = 0;
             estimatedTimeOfArrival = null;
         }
 
-            if (previousNextWaypointIndex !== nextWaypointIndex && showRouteWaypoints && routeMarkers) {
+        // Refresh waypoint display if next waypoint changed
+        if (showRouteWaypoints && routeMarkers) {
             displayRouteWaypoints();
         }
     }
@@ -2358,8 +2431,8 @@
         let currentIndex: number;
         let currentLat: number;
         let currentLon: number;
-        
-        if (routeStartTime) {
+
+        if (routeStartTime) { // && routeStartTime.getTime() > Date.now()
             // When we have a departure time, calculate from route start to target projection time
             const targetTime = (store as any).get('timestamp'); // Windy target timestamp
             const routeStartTimeMs = routeStartTime.getTime();
@@ -2372,7 +2445,7 @@
             currentLat = gpxRoute[0].lat;
             currentLon = gpxRoute[0].lon;
             
-            console.log(`Route projection: ${timeElapsedHours.toFixed(2)} hours from departure time`);
+            // console.log(`Route projection: ${timeElapsedHours.toFixed(2)} hours from departure time`);
         } else {
             // No departure time - use traditional approach from current position
             timeElapsedHours = duration / 3600; // Convert seconds to hours
@@ -2393,7 +2466,7 @@
             };
         }
         
-        const distanceToTravel = (currentSOG * 1.852 * timeElapsedHours); // Distance in km
+        const distanceToTravel = (currentSOG * timeElapsedHours); // Distance in NM
         let remainingDistance = distanceToTravel;
         
         // Travel along the route
@@ -2457,9 +2530,9 @@
         }
         
         // Fallback to traditional COG/SOG projection
-        const distanceMeters = sog * 1.852 * 1000 * duration; // in meters
-        const R = 6371000; // Earth radius in m
-        const δ = distanceMeters / R; // in radians
+        const distance = sog * duration; // in nautical miles
+        const R = 3440.065; // Earth radius in nautical miles
+        const δ = distance / R; // in radians
         const θ = toRadians(cog);
         const φ1 = toRadians(lat);
         const λ1 = toRadians(lon);
@@ -2628,7 +2701,7 @@
 
         // Update route progress if route is loaded
         if (isRouteLoaded) {
-            updateRouteProgress();
+            throttledUpdateRouteProgress();
         }
 
         // Ensure COG is a valid number, default to 0 if not
@@ -2912,34 +2985,6 @@
     }
     // WebSocket initialization to receive NMEA/AIS frames
     onMount(() => {
-        // Initialize route on component load
-        updateRoute();
-
-        // Restore saved data
-        // Load track history
-        const savedTrack = loadTrackHistory();
-        if (savedTrack.length > 0) {
-            pathLatLngs = savedTrack;
-            // Redraw the track on map
-            if (pathLatLngs.length > 1) {
-                boatPath = L.polyline(pathLatLngs, { color: 'blue', weight: 3 }).addTo(map);
-            }
-        }
-
-        // Load GPX route
-        if (loadGpxRoute()) {
-            calculateRouteDistance();
-            displayRoute();
-        }
-
-        // Initialize layers with proper z-index ordering
-        // Bottom layer: Other AIS ships (zIndexOffset: 100)
-        aisShipsLayer = L.layerGroup().addTo(map);
-        aisShipsLayer.options.zIndexOffset = 100;
-
-        // Top layer: Your ship (zIndexOffset: 300)
-        markerLayer = L.layerGroup().addTo(map);
-        markerLayer.options.zIndexOffset = 300;
         
         // Start cleanup timer for old AIS ships (every 5 minutes)
         setInterval(cleanupOldAISShips, 5 * 60 * 1000);
@@ -2979,6 +3024,35 @@
         } else {
             unsubscribeOverlay = null;
         }
+
+        // Restore saved data
+        // Load track history
+        const savedTrack = loadTrackHistory();
+        if (savedTrack.length > 0) {
+            pathLatLngs = savedTrack;
+            // Redraw the track on map
+            if (pathLatLngs.length > 1) {
+                boatPath = L.polyline(pathLatLngs, { color: 'blue', weight: 3 }).addTo(map);
+            }
+        }
+
+        // Initialize layers with proper z-index ordering
+        // Bottom layer: Other AIS ships (zIndexOffset: 100)
+        aisShipsLayer = L.layerGroup().addTo(map);
+        aisShipsLayer.options.zIndexOffset = 100;
+
+        // Top layer: Your ship (zIndexOffset: 300)
+        markerLayer = L.layerGroup().addTo(map);
+        markerLayer.options.zIndexOffset = 300;
+
+        // Load GPX route
+        if (loadGpxRoute()) {
+            calculateRouteDistance();
+            displayRoute();
+        }
+
+        // Initialize route on component load
+        updateRoute();
     });
 
 
