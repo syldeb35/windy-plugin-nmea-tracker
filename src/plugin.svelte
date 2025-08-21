@@ -2,7 +2,8 @@
     {title}
 </div>
 
-<div id="help" class="plugin-summary" style="border-radius:8px; padding:12px; margin-bottom:16px; display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); z-index:9999; background:#3c3c3c; color:white; box-shadow: 0 4px 20px rgba(0,0,0,0.5); max-width:600px; max-height:80vh; overflow-y:auto; border: 1px solid #555;">
+{#if helpVisible}
+<div id="help" class="plugin-summary" style="border-radius:8px; padding:12px; margin-bottom:16px; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); z-index:9999; background:#3c3c3c; color:white; box-shadow: 0 4px 20px rgba(0,0,0,0.5); max-width:600px; max-height:80vh; overflow-y:auto; border: 1px solid #555;">
     <div style="text-align: center; margin-bottom: 15px;">
         <strong style="color:white; font-size: 18px;">🛳️ NMEA Tracker Help 🛳️</strong>
     </div>
@@ -65,6 +66,7 @@
         <button on:click={toggleHelp} style="background: #ff4444; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;">✕ Close Help</button>
     </div>
 </div>
+{/if}
 
 <section class="plugin__content">
     <button
@@ -158,7 +160,7 @@
             </button>
         </div>
         <div class="plugin__buttons__centered">
-            <button id="button" on:click={showWeatherPopup}>{buttonText}</button>
+            <button id="button" on:click={showWeatherPopup}>{@html buttonText}</button>
         </div>
     {/if}
     <!-- Boat Icon Size Control -->
@@ -200,32 +202,39 @@
         </p>
       {#if testModeEnabled}
         <div style="margin-top: 10px;">
-          <label class="right-aligned">
-            Test SOG (knots) : &nbsp; &nbsp;
-            <input
-                type="number"
-                id="testSOG"
-                name="testSOG"
-                bind:value={testSOG}
-                min="0"
-                max="30"
-                step="0.1"
-                style="width: 80px; font-weight: bold;"
-            />
-          </label>
+            <label class="right-aligned">
+                Test SOG (knots) : &nbsp; &nbsp;
+                <input
+                    type="number"
+                    id="testSOG"
+                    name="testSOG"
+                    bind:value={testSOG}
+                    on:keydown={(e) => { if (e.key === 'Enter') handleSOGInput(e); }}
+                    on:mouseleave={handleSOGInput}
+                    on:wheel={(e) => {
+                        e.preventDefault();
+                        if (e.deltaY < 0) testSOG = +(testSOG + 0.1).toFixed(1);
+                        else if (e.deltaY > 0) testSOG = +(testSOG - 0.1).toFixed(1);
+                    }}
+                    min="0"
+                    max="30"
+                    step="0.1"
+                    style="width: 80px; font-weight: bold;"
+                />
+            </label>
 
           {#if !isRouteLoaded}
             <label class="right-aligned">
                 Test COG (degrees) : &nbsp; &nbsp;
                 <input 
-                type="number" 
-                id="testCOG"
-                name="testCOG"
-                value={testCOG}
-                on:input={handleCOGInput}
-                on:change={handleCOGInput}
-                step="1" 
-                style="width: 80px; font-weight: bold;" 
+                    type="number" 
+                    id="testCOG"
+                    name="testCOG"
+                    value={testCOG}
+                    on:input={handleCOGInput}
+                    on:change={handleCOGInput}
+                    step="1" 
+                    style="width: 80px; font-weight: bold;" 
                 />
             </label>
           {/if}
@@ -356,6 +365,9 @@
         on: (event: string, callback: Function) => void;
     };
 
+    /**
+     * Metrics for various environmental factors
+     */
     const metrics = (metricsImport as unknown) as {
         wind: { convertValue: (value: number) => string };
         waves: { convertValue: (value: number) => string };
@@ -370,13 +382,137 @@
     const L = (window as any).L;
     
     const title = 'NMEA tracker plugin';
+
+    /**
+     * Variables declarations
+     */
+
     let route = 'https://localhost:5000'; // Replace with your NMEA server URL
     
      // Server configuration variables
     let serverHost = 'localhost'; // Default server host
     let serverPort = 5000; // Fixed port
     
-    // Function to update the route when server host changes
+
+    let latitudesal: number | null = null, latDirection: string | null = null;
+    let longitudesal: number | null = null, lonDirection: string | null = null;
+    let latitude: number | null = null;
+    let longitude: number | null = null;
+    let myLatitude: string | null = null;
+    let myLongitude: string | null = null;
+    let data = 'No data received yet...';
+    let nmeaHistory: string[] = []; // Store last 10 NMEA frame types
+    let lastLatitude: number | null = null;
+    let lastLongitude: number | null = null;
+    let courseOverGroundT: number = 0; // True
+    let myCourseOverGroundT: number = 0; // True
+    let trueHeading: number = 0; // True heading
+    let courseOverGroundM: number = 0; // Magnetic
+    let magneticVariation: number = 0; // Magnetic variation
+    let speedOverGround: number = 0; // In knots
+    let mySpeedOverGround: number = 0; // In knots
+    //let heurePrev: number | null = null; // for projection
+    let followShip = false; // do not follow ship by default
+    let vesselName = loadVesselName(); // Load from localStorage or default
+    let CurrentOverlay = 'Windy'; // Default overlay, can be changed later
+    let lastDataUpdateTime: number = 0;
+    let socket: any = null;
+    let markerLayer: any = null;
+    let aisShipsLayer: any = null; // Layer for AIS ships
+    let boatPath: any = null;
+    let projectionArrow: any = null;
+    let headingArrow: any = null;
+    let forecastIcon: any = null;
+    let pathLatLngs: any[] = [];
+    let openedPopup: any = null;
+    // Store AIS ships data globally so all functions can access it
+    let aisShips: { [mmsi: string]: any } = {};
+    // Boat icon size control
+    let boatIconSize: number = 1.0; // Default size multiplier (0.5 to 2.0)
+
+    let myMMSI = loadVesselMMSI(); // Our own MMSI for comparison
+
+    let unsubscribeTimeline: (() => void) | null = null;
+    let unsubscribeOverlay: (() => void) | null = null;
+    let projectionHours: number | null = null; // for projection
+    let lastRouteProjection: {lat: number, lon: number, heading: number} | null = null;
+    let lastFallbackProjection: {lat: number, lon: number, heading: number} | null = null;
+    let isConnected: boolean = false; // WebSocket connection status
+    let connectionLostTimer: any | null = null; // Timer for connection lost alert
+    let lastError: string = ''; // Store the last error to persist until valid frame
+    let errorList: string[] = []; // Store multiple errors
+    let lastFrameReceived: number = Date.now(); // Timestamp of last received frame
+    let noFrameTimer: any | null = null; // Timer for no frame detection
+
+    // Test mode variables for when vessel is stopped
+    let testModeEnabled: boolean = false; // Enable/disable test mode
+    let testSOG: number = 6; // Test Speed Over Ground in knots
+    let testCOG: number = 45; // Test Course Over Ground in degrees
+
+    // Button text variables for reactive updates
+    let buttonText: string = "🌬️ Show Windy prediction";
+
+    // Variables pour la gestion des fragments AIS
+    let aisFragments: { [key: string]: { 
+        total: number, 
+        received: number, 
+        payloads: string[], 
+        timestamp: number,
+        mmsi?: string 
+    } } = {};
+
+    // Timer pour nettoyer les fragments expirés
+    let fragmentCleanupTimer: any | null = null;
+
+    // Add new variables for route timing
+    let routeStartTime: Date | null = null; // Departure time from GPX
+    let routeProjectionActive: boolean = false; // Flag to indicate route-based projection
+    
+    // GPX Route variables
+    let gpxRoute: Array<{lat: number, lon: number, name?: string, time?: Date}> = []; // Route waypoints  
+    let routeLayer: any = null; // Layer for displaying the route
+    let atonLayer: any = null; // Layer for displaying AtoN markers
+    let routeMarkers: any = null; // Layer for route waypoints
+    let isRouteLoaded: boolean = false; // Flag to track if route is loaded
+    let routeProgress: number = 0; // Current progress along route (0-1)
+    let routeProjectionIcon: any = null; // Projected position along route
+    let routeDistance: number = 0; // Total route distance in nautical miles
+    let estimatedTimeToCompletion: number = 0; // ETC in hours
+    let estimatedTimeOfArrival: Date | null = null; // ETA as a Date object
+    let showRouteWaypoints: boolean = true; // Show/hide waypoint markers
+    let nextWaypointIndex: number = 0; // Index of next waypoint to current position
+    let closestWaypointIndex: number = 0; // Index of closest waypoint to current position
+    let routeFileName: string = ''; // Name of loaded GPX file
+    let lastRouteProgressUpdate = 0;
+
+    // Z order of the overlay
+    let zIndexOwnShip: number = 1000; // Own ship marker
+    let zIndexWaypoint: number = 800; // Waypoint markers
+    let zIndexRoute: number = 600; // Route markers
+    let zIndexAisShips: number = 400; // AIS ships markers
+    let zIndexTrack: number = 200; // Track markers
+    let zIndexAtoN: number = 100; // AtoN markers
+
+    let helpVisible = false;
+    let lastWakeTime = Date.now();
+
+    /**
+     * 
+     */
+    function handleVisibilityChange() {
+        if (!document.hidden) {
+            // Tab is visible again (could be after sleep)
+            if (Date.now() - lastWakeTime > 10000) { // 10s threshold for sleep
+                console.log('Detected wake from sleep or long inactivity, reconnecting socket...');
+                createSocketConnection();
+            }
+            lastWakeTime = Date.now();
+        }
+    }
+
+    /**
+     * Function to update the route when server host changes
+     */
     function updateRoute() {
         route = `https://${serverHost}:${serverPort}`;
         
@@ -404,7 +540,7 @@
             transports: ['websocket'],
             secure: true,
             rejectUnauthorized: false, // for self-signed certificates
-            // Add these timeout configurations:
+            // timeout configurations:
             timeout: 120000,           // Connection timeout: 2 minutes
             pingTimeout: 120000,       // How long to wait for ping response: 2 minutes  
             pingInterval: 30000,       // How often to send pings: 30 seconds
@@ -600,106 +736,14 @@
 
     const userOS = detectOSAdvanced();
     console.log('User OS detected:', userOS);
-    let latitudesal: number | null = null, latDirection: string | null = null;
-    let longitudesal: number | null = null, lonDirection: string | null = null;
-    let latitude: number | null = null;
-    let longitude: number | null = null;
-    let myLatitude: string | null = null;
-    let myLongitude: string | null = null;
-    let data = 'No data received yet...';
-    let nmeaHistory: string[] = []; // Store last 10 NMEA frame types
-    let lastLatitude: number | null = null;
-    let lastLongitude: number | null = null;
-    let courseOverGroundT: number = 0; // True
-    let myCourseOverGroundT: number = 0; // True
-    let trueHeading: number = 0; // True heading
-    let courseOverGroundM: number = 0; // Magnetic
-    let magneticVariation: number = 0; // Magnetic variation
-    let speedOverGround: number = 0; // In knots
-    let mySpeedOverGround: number = 0; // In knots
-    //let heurePrev: number | null = null; // for projection
-    let followShip = false; // do not follow ship by default
-    let vesselName = loadVesselName(); // Load from localStorage or default
-    let CurrentOverlay = 'Windy'; // Default overlay, can be changed later
-    let lastDataUpdateTime: number = 0;
-    let socket: any = null;
-    let markerLayer: any = null;
-    let aisShipsLayer: any = null; // Layer for AIS ships
-    let boatPath: any = null;
-    let projectionArrow: any = null;
-    let headingArrow: any = null;
-    let forecastIcon: any = null;
-    let pathLatLngs: any[] = [];
-    let openedPopup: any = null;
-    // Store AIS ships data globally so all functions can access it
-    let aisShips: { [mmsi: string]: any } = {};
-    // Boat icon size control
-    let boatIconSize: number = 1.0; // Default size multiplier (0.5 to 2.0)
-
-    let myMMSI = loadVesselMMSI(); // Our own MMSI for comparison
-
-    let unsubscribeTimeline: (() => void) | null = null;
-    let unsubscribeOverlay: (() => void) | null = null;
-    let projectionHours: number | null = null; // for projection
-    let isConnected: boolean = false; // WebSocket connection status
-    let connectionLostTimer: any | null = null; // Timer for connection lost alert
-    let lastError: string = ''; // Store the last error to persist until valid frame
-    let errorList: string[] = []; // Store multiple errors
-    let lastFrameReceived: number = Date.now(); // Timestamp of last received frame
-    let noFrameTimer: any | null = null; // Timer for no frame detection
-
-    // Test mode variables for when vessel is stopped
-    let testModeEnabled: boolean = false; // Enable/disable test mode
-    let testSOG: number = 6; // Test Speed Over Ground in knots
-    let testCOG: number = 45; // Test Course Over Ground in degrees
-
-    // Button text variables for reactive updates
-    let buttonText: string = "🌬️ Show Windy prediction";
-
-    // Variables pour la gestion des fragments AIS (à ajouter dans les déclarations)
-    let aisFragments: { [key: string]: { 
-        total: number, 
-        received: number, 
-        payloads: string[], 
-        timestamp: number,
-        mmsi?: string 
-    } } = {};
-
-    // Timer pour nettoyer les fragments expirés
-    let fragmentCleanupTimer: any | null = null;
-
-    // Add new variables for route timing
-    let routeStartTime: Date | null = null; // Departure time from GPX
-    let routeProjectionActive: boolean = false; // Flag to indicate route-based projection
-    
-    // GPX Route variables
-    let gpxRoute: Array<{lat: number, lon: number, name?: string, time?: Date}> = []; // Route waypoints  
-    let routeLayer: any = null; // Layer for displaying the route
-    let routeMarkers: any = null; // Layer for route waypoints
-    let isRouteLoaded: boolean = false; // Flag to track if route is loaded
-    let routeProgress: number = 0; // Current progress along route (0-1)
-    let routeProjectionIcon: any = null; // Projected position along route
-    let routeDistance: number = 0; // Total route distance in nautical miles
-    let estimatedTimeToCompletion: number = 0; // ETC in hours
-    let estimatedTimeOfArrival: Date | null = null; // ETA as a Date object
-    let showRouteWaypoints: boolean = true; // Show/hide waypoint markers
-    let nextWaypointIndex: number = 0; // Index of next waypoint to current position
-    let routeFileName: string = ''; // Name of loaded GPX file
-    let lastRouteProgressUpdate = 0;
-
-    let helpVisible = false;
 
     function toggleHelp() {
         helpVisible = !helpVisible;
-        const helpDiv = document.getElementById('help');
-        if (helpDiv) {
-            helpDiv.style.display = helpVisible ? 'block' : 'none';
-        }
     }
 
     /**
      * Load vessel name from localStorage
-     */
+    */
     function loadVesselName(): string {
         try {
             const saved = localStorage.getItem('windy-nmea-vessel-name');
@@ -712,7 +756,7 @@
     
     /**
      * Load vessel MMSI from localStorage
-     */
+    */
     function loadVesselMMSI(): string {
         try {
             const saved = localStorage.getItem('windy-nmea-vessel-mmsi');
@@ -725,7 +769,7 @@
 
     /**
      * Save vessel name to localStorage
-     */
+    */
     function saveVesselName(name: string): void {
         try {
             localStorage.setItem('windy-nmea-vessel-name', name);
@@ -737,7 +781,7 @@
 
     /**
      * Save vessel MMSI to localStorage
-     */
+    */
     function saveVesselMMSI(mmsi: string): void {
         try {
             localStorage.setItem('windy-nmea-vessel-mmsi', mmsi);
@@ -749,7 +793,7 @@
 
     /**
      * Handle vessel name input changes
-     */
+    */
     function handleVesselNameChange(event: Event): void {
         const target = event.target as HTMLInputElement;
         const name = target.value.trim();
@@ -761,7 +805,7 @@
 
     /**
      * Save track history to localStorage
-     */
+    */
     function saveTrackHistory(): void {
         try {
             if (pathLatLngs.length > 0) {
@@ -781,7 +825,7 @@
 
     /**
      * Load track history from localStorage
-     */
+    */
     function loadTrackHistory(): any[] {
         try {
             const saved = localStorage.getItem('windy-nmea-track-history');
@@ -802,7 +846,7 @@
 
     /**
      * Save GPX route to localStorage
-     */
+    */
     function saveGpxRoute(): void {
         try {
             if (isRouteLoaded && gpxRoute.length > 0) {
@@ -828,7 +872,7 @@
 
     /**
      * Load GPX route from localStorage
-     */
+    */
     function loadGpxRoute(): boolean {
         try {
             const saved = localStorage.getItem('windy-nmea-gpx-route');
@@ -872,7 +916,7 @@
 
     /**
      * Clear all stored data
-     */
+    */
     function clearStoredData(): void {
         try {
             localStorage.removeItem('windy-nmea-track-history');
@@ -885,7 +929,7 @@
 
     /**
      * Maintain track history limits
-     */
+    */
     function maintainTrackLimits(): void {
         const MAX_TRACK_POINTS = 100000; // Adjust as needed
         
@@ -901,7 +945,10 @@
             // console.log(`Track history trimmed to ${MAX_TRACK_POINTS} points`);
         }
     }
-    
+
+    /**
+     * Throttles the route progress updates to avoid excessive calls
+    */
     function throttledUpdateRouteProgress() {
         const now = Date.now();
         if (now - lastRouteProgressUpdate > 5000) { // 5000 ms = 5 seconds
@@ -912,18 +959,73 @@
 
     /**
      * Updates the button text based on current overlay and projection hours
-     */
+    */
     function updateButtonText() {
+        let myOverlay = CurrentOverlay;
+
+        switch (myOverlay) {
+            case 'Windy':
+                myOverlay = 'wind';
+                break;
+            case 'gust':
+                myOverlay = 'wind gusts';
+                break;
+            case 'temp':
+                myOverlay = 'temperature';
+                break;
+            case 'sst':
+                myOverlay = 'sea surface temperature';
+                break;
+            case 'swell1':
+                myOverlay = 'primary swell';
+                break;
+            case 'swell2':
+                myOverlay = 'secondary swell';
+                break;
+            case 'swell3':
+                myOverlay = 'tertiary swell';
+                break;
+            case 'currentsTide':
+                myOverlay = 'tide currents';
+                break;
+            case 'wwaves':
+                myOverlay = 'wind waves';
+                break;
+            default:
+                myOverlay = CurrentOverlay;
+        }
         if (projectionHours !== null && projectionHours > 1) {
-            buttonText = `🌬️ Show ${CurrentOverlay} prediction (in ${projectionHours}h)`;
+            if (!routeProjectionActive) {
+                buttonText = `🌬️ Show ${myOverlay} prediction (in ${getRoundedHourTimestamp(projectionHours)}h)`;
+            } else {
+                const ts = getRoundedHourTimestamp(windyStore.get('timestamp'));
+                let hours = '0';
+                const now = Date.now();
+                if (routeStartTime) {
+                    if (routeStartTime.getMilliseconds() > now) {
+                        hours = ((ts - routeStartTime.getTime()) / (1000 * 3600)).toFixed(0);
+                        if (parseInt(hours) < 0) {
+                            hours = (-parseInt(hours)).toFixed(0);
+                            buttonText = `🌬️ Show ${myOverlay} prediction<br>(${hours}h before route start)`
+                        } else {
+                            buttonText = `🌬️ Show ${myOverlay} prediction<br>(${hours}h after route start)`;
+                        }
+                    } else {
+                        hours = ((ts - now) / (1000 * 3600)).toFixed(0);
+                        buttonText = `🌬️ Show ${myOverlay} prediction<br>(${hours}h after current time)`;
+                    }
+                }
+            }
         } else {
-            buttonText = `🌬️ Show ${CurrentOverlay} prediction`;
+            buttonText = `🌬️ Show ${myOverlay} prediction`;
         }
     }
 
     /**
      * Normalizes COG value to be between 0 and 359 degrees (cyclical)
-     */
+     * @param value - The COG value to normalize
+     * @returns The normalized COG value
+    */
     function normalizeCOG(value: number): number {
         // Handle proper cyclical behavior for any value
         if (value < 0) {
@@ -936,7 +1038,8 @@
 
     /**
      * Handles COG input changes with cyclical normalization
-     */
+     * @param event  - The input change event
+    */
     function handleCOGInput(event: Event) {
         const target = event.target as HTMLInputElement;
         const rawValue = parseInt(target.value) || 0;
@@ -944,11 +1047,22 @@
         // Update the input field to reflect the normalized value
         target.value = testCOG.toString();
     }
-
+    
+    /**
+     * Handles SOG input changes
+     * @param event - The input change event
+    */
+    function handleSOGInput(event: Event) {
+        const target = event.target as HTMLInputElement;
+        testSOG = parseFloat(target.value) || 0;
+        // Update the projection for the current testSOG & timeline
+        updateProjectionForTimeline(windyStore.get('timestamp'));
+        localStorage.setItem('testSOG', target.value);
+    }
 
     /**
      * Adds NMEA frame type to history (keep last 10)
-     */
+    */
     function addToNmeaHistory(frame: string) {
         // Only add frames that start with $ (standard NMEA) or ! (AIS)
         if (frame.startsWith('$') || frame.startsWith('!')) {
@@ -966,14 +1080,14 @@
 
     /**
      * Validates MMSI format (9 digits)
-     */
+    */
     function isValidMMSI(mmsi: string): boolean {
         return /^\d{9}$/.test(mmsi);
     }
 
     /**
      * Nettoie les fragments AIS expirés (plus de 30 secondes)
-     */
+    */
     function cleanupExpiredAISFragments() {
         const now = Date.now();
         const maxAge = 60 * 1000; // 60 secondes
@@ -988,18 +1102,18 @@
 
     /**
      * Démarre le timer de nettoyage des fragments
-     */
+    */
     function startFragmentCleanup() {
         if (fragmentCleanupTimer) {
             clearInterval(fragmentCleanupTimer);
         }
-        // Nettoie toutes les 10 secondes
-        fragmentCleanupTimer = setInterval(cleanupExpiredAISFragments, 10000);
+        // Nettoie toutes les 10 minutes
+        fragmentCleanupTimer = setInterval(cleanupExpiredAISFragments, 10 * 60 * 1000);
     }
 
     /**
      * Traite un fragment AIS et gère l'assemblage
-     */
+    */
     function processAISFragment(
         total: number, 
         num: number, 
@@ -1067,11 +1181,12 @@
         
         return false; // Fragment en attente
     }
+    
     /**
      * Validates NMEA sentence checksum
      * @param {string} nmeaSentence - Complete NMEA sentence including checksum
      * @returns {boolean} True if checksum is valid
-     */
+    */
     function validateNMEAChecksum(nmeaSentence: string): boolean {
         // Remove any whitespace/newlines
         const sentence = nmeaSentence.trim();
@@ -1102,7 +1217,7 @@
      * @param {number} lat - Latitude in decimal degrees
      * @param {number} lon - Longitude in decimal degrees
      * @returns {boolean} True if coordinates are valid
-     */
+    */
     function validateCoordinates(lat: number, lon: number): boolean {
         // First check if values are finite numbers (not NaN, Infinity, etc.)
         if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
@@ -1135,7 +1250,7 @@
      * @param {number} newLon - New longitude in decimal degrees
      * @param {number} sog - Speed over ground in knots (optional, for dynamic validation)
      * @returns {boolean} True if position change is acceptable
-     */
+    */
     function validatePositionJump(newLat: number, newLon: number, sog?: number): boolean {
         // If no previous position, accept any position
         if (lastLatitude === null || lastLongitude === null) {
@@ -1183,8 +1298,8 @@
      * @param {number} lat2 - Latitude end in decimal degrees
      * @param {number} lon2 - Longitude end in decimal degrees
      * @returns {number} Distance in Nautical Miles
-     */
-    function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
+    */
+    function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
         const R = 3440.065; // Earth radius in nautical miles
         // Convert degrees to radians
         const toRad = (deg: number) => deg * Math.PI / 180;
@@ -1217,7 +1332,7 @@
      * Processes each received NMEA/AIS frame.
      * Updates position, speed, heading, vessel name, etc.
      * @returns {string|null} Frame type if successfully processed, null if error
-     */
+    */
     function processNMEA(data: string): string | null {
         // Reset the no frame timer since we received a frame
         resetNoFrameTimer();
@@ -1442,7 +1557,7 @@
 
     /**
      * Clears the error display
-     */
+    */
     function clearErrorDisplay() {
         // Clear the no frame error specifically when valid data is received
         if (lastError.includes("No NMEA frames received")) {
@@ -1460,7 +1575,7 @@
     /**
      * Removes errors from the error list based on frame type
      * @param {string|string[]} frameTypes - Frame type(s) to remove errors for
-     */
+    */
     function removeErrorsByType(frameTypes: string | string[]) {
         const typesToRemove = Array.isArray(frameTypes) ? frameTypes : [frameTypes];
         
@@ -1484,7 +1599,7 @@
     /**
      * Adds an error to the error list, avoiding duplicates
      * @param {string} error - The error message to add
-     */
+    */
     function addError(error: string): void {
         // Avoid adding duplicate errors
         if (!errorList.includes(error)) {
@@ -1501,7 +1616,7 @@
 
     /**
      * Updates the error display with all accumulated errors
-     */
+    */
     function updateErrorDisplay() {
         const errorElement = document.getElementById("err");
         if (errorElement) {
@@ -1517,19 +1632,20 @@
 
     /**
      * Starts the timer to detect no frame reception
-     */
+    */
     function startNoFrameTimer() {
         if (noFrameTimer) {
             clearTimeout(noFrameTimer);
         }
         noFrameTimer = setTimeout(() => {
             addError("[Err] No NMEA frames received for more than 1 minute");
+            createSocketConnection(); // Force reconnect
         }, 60000); // 60 seconds
     }
 
     /**
      * Resets the no frame timer (called when a frame is received)
-     */
+    */
     function resetNoFrameTimer() {
         lastFrameReceived = Date.now();
         if (noFrameTimer) {
@@ -1543,17 +1659,18 @@
      * @param {number} heading - The heading of the ship
      * @param {number} shipType - The type of the ship
      * @returns {any} The created ship icon
-     */
+    */
     function createAISShipIcon(heading: number, shipType: number = 0): any {
         let color = '#ff6600'; // Default orange
         let size = 16;
         
         // Color based on ship type (AIS ship and cargo type)
+        if (shipType >= 30 && shipType <= 39) color = '#FF00ff'; // Fishing vessels - purple
+        if (shipType >= 40 && shipType <= 49) color = '#ffff00'; // High speed craft - yellow
+        if (shipType >= 50 && shipType <= 59) color = '#C0C0C0'; // Special Craft - Gray
+        if (shipType >= 60 && shipType <= 69) color = '#0000ff'; // Passenger ships - blue
         if (shipType >= 70 && shipType <= 79) color = '#ff0000'; // Cargo ships - red
-        else if (shipType >= 60 && shipType <= 69) color = '#0066ff'; // Passenger ships - blue
-        else if (shipType >= 80 && shipType <= 89) color = '#00cc00'; // Tanker ships - green
-        else if (shipType >= 30 && shipType <= 39) color = '#8800ff'; // Fishing vessels - purple
-        else if (shipType >= 40 && shipType <= 49) color = '#ffcc00'; // High speed craft - yellow
+        if (shipType >= 80 && shipType <= 89) color = '#00ff00'; // Tanker ships - green
         
         // Ensure heading is valid (0-359 degrees)
         const validHeading = isNaN(heading) || heading === 511 ? 0 : ((heading % 360) + 360) % 360;
@@ -1585,12 +1702,31 @@
     }
 
     /**
+     * Get the tooltip content for an AIS ship
+     * @param data
+     * @param mmsi
+     */
+    function getAISTooltipContent(data: any, mmsi: string): string {
+        return `
+            <strong>MMSI: ${mmsi}</strong><br>
+            Name: ${data.name || 'Unknown'}<br>
+            Course: ${data.cog?.toFixed(1) || 'N/A'}°<br>
+            Speed: ${data.sog?.toFixed(1) || 'N/A'} knots<br>
+            Heading: ${data.heading !== undefined && data.heading !== 511 ? data.heading + '°' : 'N/A'}<br>
+            Type: ${getShipTypeName(data.shipType || 0)}<br>
+            Status: ${getAisStatusText(data.status)}<br>
+            Destination: ${data.destination || 'Unknown'}<br>
+            ETA: ${data.eta || 'Unknown'}
+        `;
+    }
+
+    /**
      * Updates or adds an AIS ship on the map
      * @param {string} mmsi - The MMSI of the ship
      * @param {any} data - The AIS data for the ship
      * @returns {void}
-     */
-    function updateAISShip(mmsi: string, data: any) {
+    */
+    function updateAISShip(mmsi: string, data: any): void {
         if (!aisShipsLayer) return;
         
         const shipKey = mmsi.toString();
@@ -1610,20 +1746,13 @@
         const icon = createAISShipIcon(displayHeading, consolidatedShipType);
         const marker = L.marker(position, { 
             icon: icon,
-            zIndexOffset: 100   // Lower z-index for other ships
+            zIndexOffset: zIndexAisShips   // Lower z-index for other ships
         }).addTo(aisShipsLayer);
         
         // console.log(`Adding/updating AIS ship: ${mmsi} at ${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}`);
         
         // Create tooltip content
-        const tooltipContent = `
-            <strong>MMSI: ${mmsi}</strong><br>
-            Name: ${data.name || 'Unknown'}<br>
-            Course: ${data.cog?.toFixed(1) || 'N/A'}°<br>
-            Speed: ${data.sog?.toFixed(1) || 'N/A'} knots<br>
-            Heading: ${data.heading !== undefined && data.heading !== 511 ? data.heading + '°' : 'N/A'}<br>
-            Type: ${getShipTypeName(data.shipType || 0)}
-        `;
+        const tooltipContent = getAISTooltipContent(data, mmsi);
         
         marker.bindTooltip(tooltipContent, { 
             permanent: false, 
@@ -1631,7 +1760,7 @@
             className: 'ais-ship-tooltip' 
         });
         
-                // Store ship data with consolidated structure
+        // Store ship data with consolidated structure
         const existingData = aisShips[shipKey]?.data || {};
         const name = data.name || aisShips[shipKey]?.name || 'Unknown';
         const shipType = data.shipType || aisShips[shipKey]?.shipType || 0;
@@ -1647,14 +1776,7 @@
         
         // Update tooltip with latest name if it changed
         if (aisShips[shipKey].name !== 'Unknown') {
-            const updatedTooltipContent = `
-                <strong>MMSI: ${mmsi}</strong><br>
-                Name: ${aisShips[shipKey].name}<br>
-                Course: ${data.cog?.toFixed(1) || 'N/A'}°<br>
-                Speed: ${data.sog?.toFixed(1) || 'N/A'} knots<br>
-                Heading: ${data.heading !== undefined && data.heading !== 511 ? data.heading + '°' : 'N/A'}<br>
-                Type: ${getShipTypeName(aisShips[shipKey].shipType)}
-            `;
+            const updatedTooltipContent = getAISTooltipContent(aisShips[shipKey].data, mmsi);
             marker.setTooltipContent(updatedTooltipContent);
         }
     }
@@ -1663,22 +1785,91 @@
      * Get ship type name from AIS ship type code
      * @param {number} shipType - The AIS ship type code
      * @returns {string} The name of the ship type
-     */
+    */
     function getShipTypeName(shipType: number): string {
-        if (shipType >= 70 && shipType <= 79) return 'Cargo';
-        if (shipType >= 60 && shipType <= 69) return 'Passenger';
-        if (shipType >= 80 && shipType <= 89) return 'Tanker';
-        if (shipType >= 30 && shipType <= 39) return 'Fishing';
-        if (shipType >= 40 && shipType <= 49) return 'High Speed';
         if (shipType >= 20 && shipType <= 29) return 'Wing in Ground';
+        if (shipType >= 30 && shipType <= 39) return 'Fishing';
+        if (shipType === 31) return 'Towing';
+        if (shipType === 32) return 'Towing > 200m';
+        if (shipType === 33) return 'Dredging';
+        if (shipType === 34) return 'Offshore Support';
+        if (shipType === 35) return 'Military';
+        if (shipType === 36) return 'Sailing';
+        if (shipType === 37) return 'Pleasure Craft';
+        if (shipType >= 40 && shipType <= 49) return 'High Speed';
         if (shipType >= 50 && shipType <= 59) return 'Special Craft';
+        if (shipType >= 60 && shipType <= 69) return 'Passenger';
+        if (shipType >= 70 && shipType <= 79) return 'Cargo';
+        if (shipType >= 80 && shipType <= 89) return 'Tanker';
         if (shipType >= 90 && shipType <= 99) return 'Other';
         return 'Unknown';
     }
 
+    function getAisStatusText(status: number): string {
+        // See ITU-R M.1371 Table 44
+        const statuses = [
+            "Under way using engine",
+            "At anchor",
+            "Not under command",
+            "Restricted manoeuverability",
+            "Constrained by her draught",
+            "Moored",
+            "Aground",
+            "Engaged in fishing",
+            "Under way sailing",
+            "Reserved for future amendment",
+            "Reserved for future amendment",
+            "Reserved for future amendment",
+            "Reserved for future amendment",
+            "Reserved for future amendment",
+            "AIS-SART (active)",
+            "Not defined"
+        ];
+        return statuses[status] || "Unknown";
+    }
+
+    function getAtoNTypeText(AtoNType: number): string {
+        const types = [
+            "Default, Type of AtoN not specified",
+            "Reference point",
+            "RACON",
+            "Fixed structures off-shore, such as oil platforms, wind farms.",
+            "Emergency Wreck Marking Buoy",
+            "Fix. Light, without sectors",
+            "Fix. Light, with sectors",
+            "Fix. Leading Light Front",
+            "Fix. Leading Light Rear",
+            "Fix. Beacon, Cardinal N",
+            "Fix. Beacon, Cardinal E",
+            "Fix. Beacon, Cardinal S",
+            "Fix. Beacon, Cardinal W",
+            "Fix. Beacon, Port hand",
+            "Fix. Beacon, Starboard hand",
+            "Fix. Beacon, Preferred Channel port hand",
+            "Fix. Beacon, Preferred Channel starboard hand",
+            "Fix. Beacon, Isolated danger",
+            "Fix. Beacon, Safe water",
+            "Fix. Beacon, Special mark",
+            "Float. Cardinal Mark N",
+            "Float. Cardinal Mark E",
+            "Float. Cardinal Mark S",
+            "Float. Cardinal Mark W",
+            "Float. Port hand Mark",
+            "Float. Starboard hand Mark",
+            "Float. Preferred Channel Port hand",
+            "Float. Preferred Channel Starboard hand",
+            "Float. Isolated danger",
+            "Float. Safe Water",
+            "Float. Special Mark",
+            "Float. Light Vessel/LANBY/Rigs"
+
+        ];
+        return types[AtoNType] || "Unknown";
+    }
+
     /**
      * Clean up old AIS ships (older than 10 minutes)
-     */
+    */
     function cleanupOldAISShips() {
         const now = Date.now();
         const positionMaxAge = 10 * 60 * 1000; // 10 minutes for position data
@@ -1705,8 +1896,8 @@
      * @param aisPayload - The AIS payload string
      * @param isOwnVesselData - Flag indicating if this is our own vessel data
      * @returns {void}
-     */
-    function decodeAISMessage(aisPayload: string, isOwnVesselData: boolean = false) {
+    */
+    function decodeAISMessage(aisPayload: string, isOwnVesselData: boolean = false): void {
         if (!aisPayload) return;
         const bitstring = ais6bitDecode(aisPayload);
         const msgType = parseInt(bitstring.slice(0, 6), 2);
@@ -1724,46 +1915,58 @@
         }
         
         if (msgType === 1 || msgType === 2 || msgType === 3) {
-            // Position Report (Class A) - CORRECTION du décodage des coordonnées
-            // Dans l'AIS : longitude vient en premier (bits 61-88), puis latitude (bits 89-115)
-            const lonRaw = parseInt(bitstring.slice(61, 89), 2);  // 28 bits pour longitude
-            const latRaw = parseInt(bitstring.slice(89, 116), 2); // 27 bits pour latitude
+            // Position Report (Class A) - CORRECTION of coordinate decoding
+            // In AIS: longitude comes first (bits 61-88), then latitude (bits 89-115)
+            const lonRaw = parseInt(bitstring.slice(61, 89), 2);  // 28 bits for longitude
+            const latRaw = parseInt(bitstring.slice(89, 116), 2); // 27 bits for latitude
             
-            // Correction du complément à deux pour 28 bits (longitude)
+            // Two's complement correction for 28 bits (longitude)
             let lon = (lonRaw & 0x8000000) ? (lonRaw - 0x10000000) : lonRaw;
-            // Correction du complément à deux pour 27 bits (latitude)  
+            // Two's complement correction for 27 bits (latitude)  
             let lat = (latRaw & 0x4000000) ? (latRaw - 0x8000000) : latRaw;
-            
-            // Conversion en degrés décimaux
+
+            // decimal degrees conversion
             lat = lat / 600000.0;
             lon = lon / 600000.0;
             
             const cog = parseInt(bitstring.slice(116, 128), 2) / 10.0;
             const sog = parseInt(bitstring.slice(50, 60), 2) / 10.0;
             const heading = parseInt(bitstring.slice(128, 137), 2);
+            const navStatus = parseInt(bitstring.slice(38, 42), 2);
+
             
-            if (lat !== 91 && lon !== 181) { // Valid coordinates
-            // Validate position jump for own vessel before accepting new AIS coordinates
-            if (isOwnVessel) {
-                // Log for debugging if needed
-                if (mmsi !== myMMSI) {
-                    console.log(`Warning: VDO message with different MMSI ${mmsi} vs known ${myMMSI}`);
-                }
-                
-                // First check if coordinates are valid
-                if (!validateCoordinates(lat, lon)) {
-                    console.warn(`AIS invalid coordinates for own vessel MMSI ${mmsi} - position rejected`);
-                    return; // Reject this AIS position update
-                }
-                
-                // Then check position jump with speed
-                if (!validatePositionJump(lat, lon, sog)) {
-                    console.warn(`AIS position jump detected for own vessel MMSI ${mmsi} - position rejected`);
-                    return; // Reject this AIS position update
-                }
+            if (!aisShips[mmsi]) {
+                // position message (type 1/2/3) is received before a static message (type 5) for a new ship.
+                // Let's create a new ship
+                aisShips[mmsi] = {
+                    marker: null,
+                    data: {},
+                    name: 'Unknown',
+                    shipType: 0,
+                    lastUpdate: Date.now()
+                };
             }
-    
+            aisShips[mmsi].data.status = navStatus;
+            if (lat !== 91 && lon !== 181) { // Valid coordinates
+                // Validate position jump for own vessel before accepting new AIS coordinates
                 if (isOwnVessel) {
+                    // Log for debugging if needed
+                    if (mmsi !== myMMSI) {
+                        console.log(`Warning: VDO message with different MMSI ${mmsi} vs known ${myMMSI}`);
+                    }
+                    
+                    // First check if coordinates are valid
+                    if (!validateCoordinates(lat, lon)) {
+                        console.warn(`AIS invalid coordinates for own vessel MMSI ${mmsi} - position rejected`);
+                        return; // Reject this AIS position update
+                    }
+                    
+                    // Then check position jump with speed
+                    if (!validatePositionJump(lat, lon, sog)) {
+                        console.warn(`AIS position jump detected for own vessel MMSI ${mmsi} - position rejected`);
+                        return; // Reject this AIS position update
+                    }
+                    
                     // Store our own MMSI if not set
                     if (!myMMSI || !isValidMMSI(myMMSI)) {
                         myMMSI = mmsi;
@@ -1798,7 +2001,9 @@
                     updateAISShip(mmsi, { lat, lon, cog, sog, heading: displayHeading });
                 }
             }
-        } else if (msgType === 5) {
+        } 
+        
+        if (msgType === 5) {
             // Static and Voyage Related Data
             const shipType = parseInt(bitstring.slice(232, 240), 2);
             let nameBits = bitstring.slice(112, 232);
@@ -1809,7 +2014,36 @@
                 name += aisAscii(charCode);
             }
             name = name.replace(/@+$/, '').trim();
-            
+            // ETA (bits 274-294, 20 bits)
+            // Correct bit ranges for AIS ETA (type 5)
+            let etaMonthBits = bitstring.slice(274, 278); // 4 bits: 274-277
+            let etaDayBits   = bitstring.slice(278, 283); // 5 bits: 278-282
+            let etaHourBits  = bitstring.slice(283, 288); // 5 bits: 283-287
+            let etaMinBits   = bitstring.slice(288, 294); // 6 bits: 288-293
+
+            let etaMonth = parseInt(etaMonthBits, 2);
+            let etaDay   = parseInt(etaDayBits, 2);
+            let etaHour  = parseInt(etaHourBits, 2);
+            let etaMin   = parseInt(etaMinBits, 2);
+
+            // Format with leading zeros and handle "not available" (0 or 31/63)
+            let etaStr = `${etaDay > 0 && etaDay <= 31 ? String(etaDay).padStart(2, '0') : '--'}/` +
+                        `${etaMonth > 0 && etaMonth <= 12 ? String(etaMonth).padStart(2, '0') : '--'}@` +
+                        `${etaHour < 24 ? String(etaHour).padStart(2, '0') : '--'}:` +
+                        `${etaMin < 60 ? String(etaMin).padStart(2, '0') : '--'}`;
+
+            console.log(`ETA: ${etaStr}`);
+
+            // Destination (bits 302-421, 20x6 bits)
+            let destBits = bitstring.slice(302, 422);
+            let destination = '';
+            for (let i = 0; i < destBits.length; i += 6) {
+                const charCode = parseInt(destBits.slice(i, i + 6), 2);
+                if (charCode === 0) break;
+                destination += aisAscii(charCode);
+            }
+            destination = destination.replace(/@+$/, '').trim();
+
             if (isOwnVessel) {
                 if (name && name !== '') {
                     vesselName = name;
@@ -1830,23 +2064,66 @@
                 // Update name and ship type
                 if (name && name !== '') {
                     aisShips[mmsi].name = name;
+                    aisShips[mmsi].data.name = name;
                 }
                 aisShips[mmsi].shipType = shipType;
+                aisShips[mmsi].data.shipType = shipType;
+                aisShips[mmsi].data.destination = destination;
+                aisShips[mmsi].data.eta = etaStr;
                 aisShips[mmsi].lastUpdate = Date.now();
                 
                 // Update existing marker tooltip if ship is already displayed
                 if (aisShips[mmsi].marker && aisShips[mmsi].data.lat) {
                     const data = aisShips[mmsi].data;
-                    const updatedTooltipContent = `
-                        <strong>MMSI: ${mmsi}</strong><br>
-                        Name: ${aisShips[mmsi].name}<br>
-                        Course: ${data.cog?.toFixed(1) || 'N/A'}°<br>
-                        Speed: ${data.sog?.toFixed(1) || 'N/A'} knots<br>
-                        Heading: ${data.heading !== undefined && data.heading !== 511 ? data.heading + '°' : 'N/A'}<br>
-                        Type: ${getShipTypeName(aisShips[mmsi].shipType)}
-                    `;
+                    const updatedTooltipContent = getAISTooltipContent(data, mmsi);
                     aisShips[mmsi].marker.setTooltipContent(updatedTooltipContent);
                 }
+            }
+        }
+
+        if (msgType === 21) {
+            // Extract AtoN position and info
+            const lonRaw = parseInt(bitstring.slice(164, 192), 2);
+            const latRaw = parseInt(bitstring.slice(193, 219), 2);
+            let lon = (lonRaw & 0x8000000) ? (lonRaw - 0x10000000) : lonRaw;
+            let lat = (latRaw & 0x4000000) ? (latRaw - 0x8000000) : latRaw;
+            lat = lat / 600000.0;
+            lon = lon / 600000.0;
+
+            // Name (20x6 bits)
+            //let nameBits = bitstring.slice(112, 232);
+            let nameBits = bitstring.slice(43, 163);
+            let name = '';
+            for (let i = 0; i < nameBits.length; i += 6) {
+                const charCode = parseInt(nameBits.slice(i, i + 6), 2);
+                if (charCode === 0) break;
+                name += aisAscii(charCode);
+            }
+            name = name.replace(/@+$/, '').trim();
+
+            console.log(`Virtual AtoN detected: ${name} in position (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
+
+            // AtoN type (bits 38-42)
+            const atonType = parseInt(bitstring.slice(38, 43), 2);
+            const atonTypeName = getAtoNTypeText(atonType);
+
+            // Add marker to atonLayer
+            if (atonLayer) {
+                const atonIcon = L.divIcon({
+                    html: '⛯',
+                    className: 'aton-marker',
+                    iconSize: [20, 20],
+                    iconAnchor: [10, 10]
+                });
+                const marker = L.marker([lat, lon], { icon: atonIcon, zIndexOffset: zIndexWaypoint }).addTo(atonLayer);
+                marker.bindTooltip(
+                    `<strong>AtoN</strong><br>
+                    Name: ${name}<br>
+                    Type: ${atonTypeName}<br>
+                    Lat: ${lat.toFixed(5)}<br>
+                    Lon: ${lon.toFixed(5)}`,
+                    { permanent: false, direction: 'top' }
+                );
             }
         }
     }
@@ -1855,7 +2132,7 @@
      * Décode le payload 6 bits AIS en binaire
      * @param {string} payload - Le payload AIS 6 bits
      * @returns {string} Le bitstring décodé
-     */
+    */
     function ais6bitDecode(payload: string): string {
         let bitstring = '';
         for (let i = 0; i < payload.length; i++) {
@@ -1870,7 +2147,7 @@
      * Convertit un code AIS 6 bits en caractère ASCII
      * @param {number} val - Le code AIS 6 bits
      * @returns {string} Le caractère ASCII correspondant
-     */
+    */
     function aisAscii(val: number): string {
         // Official ITU-R M.1371-5 table
         const table = "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^- !\"#$%&'()*+,-./0123456789:;<=>?";
@@ -1882,7 +2159,7 @@
      * @param {number} value - The NMEA value (degrees and minutes)
      * @param {string} dir - The direction ('N', 'S', 'E', 'W')
      * @returns {number} The decimal representation of the latitude/longitude
-     */
+    */
     function convertLatitude(value: number, dir: string): number {
         // Validate input to prevent NaN
         if (!Number.isFinite(value) || !dir) {
@@ -1895,11 +2172,12 @@
         let lat = degrees + (minutes / 60);
         return dir === 'S' ? -lat : lat;
     }
+    
     /*
-    * Convert NMEA longitude/latitude to decimal
-    * @param {number} value - The NMEA value (degrees and minutes)
-    * @param {string} dir - The direction ('N', 'S', 'E', 'W')
-    * @returns {number} The decimal representation of the latitude/longitude
+     * Convert NMEA longitude/latitude to decimal
+     * @param {number} value - The NMEA value (degrees and minutes)
+     * @param {string} dir - The direction ('N', 'S', 'E', 'W')
+     * @returns {number} The decimal representation of the latitude/longitude
     */
     function convertLongitude(value: number, dir: string): number {
         // Validate input to prevent NaN
@@ -1919,7 +2197,7 @@
      * @param {number} val - The latitude/longitude value
      * @param {string} dir - The direction ('N', 'S', 'E', 'W')
      * @returns {string} The formatted display string
-     */
+    */
     function displayLatitude(val: number, dir?: string): string {
         const hemisphere = dir ?? (val >= 0 ? 'N' : 'S');
         let deg: number | null = null;
@@ -1941,7 +2219,7 @@
      * @param {number} val - The longitude value
      * @param {string} dir - The direction ('N', 'S', 'E', 'W')
      * @returns {string} The formatted display string
-     */
+    */
     function displayLongitude(val: number, dir?: string): string {
         const hemisphere = dir ?? (val >= 0 ? 'E' : 'W');
         let deg: number | null = null;
@@ -1957,11 +2235,12 @@
         }
         return ('000' + deg).slice(-3) + '° ' + ('0' + ((Math.floor(min * 1000) / 1000).toFixed(4))).slice(-7) + "' " + hemisphere;
     }
+    
     /**
      * Handles GPX file upload and parsing
      * @param {Event} event - The file input change event
      * @returns {void}
-     */
+    */
     function handleGpxFileUpload(event: Event): void {
         const target = event.target as HTMLInputElement;
         const file = target.files?.[0];
@@ -1989,7 +2268,7 @@
      * @param {string} gpxXml - The GPX XML content
      * @param {string} fileName - The name of the GPX file
      * @returns {void}
-     */
+    */
     function parseGpxContent(gpxXml: string, fileName: string): void {
         try {
             const parser = new DOMParser();
@@ -2111,7 +2390,7 @@
 
     /**
      * Calculates total route distance in nautical miles and updates route metrics
-     */
+    */
     function calculateRouteDistance(): void {
         if (gpxRoute.length < 2) return;
         
@@ -2129,8 +2408,19 @@
     }
 
     /**
-     * Displays the route on the map
+     * Creates a Leaflet layer group with a specific z-index offset.
+     * @param map
+     * @param zIndexOffset
      */
+    function createLayerGroup(map: any, zIndexOffset: number) {
+        const layer = L.layerGroup().addTo(map);
+        layer.options.zIndexOffset = zIndexOffset;
+        return layer;
+    }
+
+    /**
+     * Displays the route on the map
+    */
     function displayRoute(): void {
         if (!map || !isRouteLoaded || gpxRoute.length < 2) return;
         
@@ -2138,12 +2428,9 @@
         clearRouteDisplay();
         
         // Create route layer groups with proper z-index ordering
-        routeLayer = L.layerGroup().addTo(map);
-        routeLayer.options.zIndexOffset = 200; // Route lines in middle layer
+        routeLayer = createLayerGroup(map, zIndexRoute); // Route lines in middle layer
+        routeMarkers = createLayerGroup(map, zIndexWaypoint); // Waypoint markers in middle layer
 
-        routeMarkers = L.layerGroup().addTo(map);
-        routeMarkers.options.zIndexOffset = 200; // Waypoint markers in middle layer
-        
         // Create route line
         const routeLatLngs = gpxRoute.map(wp => L.latLng(wp.lat, wp.lon));
         const routeLine = L.polyline(routeLatLngs, {
@@ -2165,7 +2452,7 @@
 
     /**
      * Displays waypoint markers on the route
-     */
+    */
     function displayRouteWaypoints(): void {
         if (!routeMarkers || !isRouteLoaded) return;
         
@@ -2211,11 +2498,11 @@
                     iconSize: [20, 20],
                     iconAnchor: [10, 10]
                 }),
-                zIndexOffset: 500
+                zIndexOffset: zIndexWaypoint
             }).addTo(routeMarkers);
             
             marker.bindTooltip(
-                `${waypoint.name || `Waypoint ${index + 1}`}<br>
+                `Waypoint ${index + 1} : ${waypoint.name}}<br>
                 ${displayLatitude(waypoint.lat)}<br>
                 ${displayLongitude(waypoint.lon)}`,
                 { permanent: false, direction: 'top' }
@@ -2225,7 +2512,7 @@
 
     /**
      * Toggles waypoint markers visibility
-     */
+    */
     function toggleRouteWaypoints(): void {
         if (!routeMarkers) return;
         
@@ -2239,7 +2526,7 @@
     /**
      * Clears the loaded route and removes it from the map
      * Enhanced route clearing with projection reset
-     */
+    */
     function clearRoute(): void {
         gpxRoute = [];
         isRouteLoaded = false;
@@ -2272,7 +2559,7 @@
 
     /**
      * Clears route display elements from the map
-     */
+    */
     function clearRouteDisplay(): void {
         if (routeLayer) {
             routeLayer.clearLayers();
@@ -2339,7 +2626,7 @@
 
     /**
      * Finds the next waypoint to current position and calculates progress
-     */
+    */
     function updateRouteProgress(): void {
         if (!isRouteLoaded || !lastLatitude || !lastLongitude) return;
 
@@ -2415,7 +2702,11 @@
             const remainingDistance = (routeDistance * (1 - routeProgress));
             estimatedTimeToCompletion = remainingDistance / effectiveSpeed;
             const etcMilliseconds = estimatedTimeToCompletion * 60 * 60 * 1000;
-            estimatedTimeOfArrival = new Date(Date.now() + etcMilliseconds);
+            if (routeStartTime && (routeStartTime.getTime() - Date.now()) > 0) {
+                estimatedTimeOfArrival = new Date(routeStartTime.getTime() + etcMilliseconds);
+            } else {
+                estimatedTimeOfArrival = new Date(Date.now() + etcMilliseconds);
+            }
         } else {
             estimatedTimeToCompletion = 0;
             estimatedTimeOfArrival = null;
@@ -2435,27 +2726,87 @@
      * @param lon Longitude of the vessel
      * @param cog Course over ground of the vessel
      * @returns Projected position as a Leaflet LatLng object
-     */
+    */
     function computeRouteProjection(currentSOG: number, duration: number): {lat: number, lon: number, heading: number} | null {
+        console.log(`Computing route projection: SOG=${currentSOG}, duration=${duration.toFixed(1)}`);
         if (!isRouteLoaded || gpxRoute.length < 2 || currentSOG <= 0) return null;
-        
-        // If routeStartTime is set and projection time is before departure, project from route start
         if (routeStartTime) {
-            const targetTime = (store as any).get('timestamp');
-            const routeStartTimeMs = routeStartTime.getTime();
-            const timeElapsedHours = (targetTime - routeStartTimeMs) / (1000 * 3600);
-            
-        if (timeElapsedHours < 0) {
-            console.log('Projection time is before route start time');
-            return {
-                lat: gpxRoute[0].lat,
-                lon: gpxRoute[0].lon,
-                heading: gpxRoute.length > 1 ? calculateBearing(gpxRoute[0].lat, gpxRoute[0].lon, gpxRoute[1].lat, gpxRoute[1].lon) : 0
-            };
-        }
+            const targetTime = windyStore.get('timestamp');
+            const now = Date.now();
+
+            // Before departure: stay at route start
+            if (targetTime < routeStartTime.getTime()) {
+                return {
+                    lat: gpxRoute[0].lat,
+                    lon: gpxRoute[0].lon,
+                    heading: gpxRoute.length > 1 ? calculateBearing(gpxRoute[0].lat, gpxRoute[0].lon, gpxRoute[1].lat, gpxRoute[1].lon) : 0
+                };
+            }
+
+            // After departure: project from vessel's real position, using duration from now to timeline
+            let startLat = lastLatitude ?? gpxRoute[0].lat;
+            let startLon = lastLongitude ?? gpxRoute[0].lon;
+            let bestSegmentIndex = 0;
+            let minDistance = Infinity;
+            let snappedLat = startLat;
+            let snappedLon = startLon;
+
+            // Snap to closest point on route
+            for (let i = 0; i < gpxRoute.length - 1; i++) {
+                const segStart = gpxRoute[i];
+                const segEnd = gpxRoute[i + 1];
+                const proj = findClosestPointOnSegment(
+                    startLat, startLon,
+                    segStart.lat, segStart.lon,
+                    segEnd.lat, segEnd.lon
+                );
+                if (proj.distance < minDistance) {
+                    minDistance = proj.distance;
+                    bestSegmentIndex = i;
+                    const t = Math.max(0, Math.min(1, proj.progress));
+                    snappedLat = segStart.lat + (segEnd.lat - segStart.lat) * t;
+                    snappedLon = segStart.lon + (segEnd.lon - segStart.lon) * t;
+                }
+            }
+
+            let currentLat = snappedLat;
+            let currentLon = snappedLon;
+            let currentIndex = bestSegmentIndex;
+
+            // --- THIS IS THE KEY LINE: duration from now to timeline ---
+            const projectionDurationSeconds = (targetTime - now) / 1000; // seconds
+            let remainingDistance = currentSOG * (projectionDurationSeconds / 3600); // in NM
+
+            // Walk the route from the snapped point
+            while (remainingDistance > 0 && currentIndex < gpxRoute.length - 1) {
+                const nextWaypoint = gpxRoute[currentIndex + 1];
+                const segmentDistance = calculateDistance(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon);
+
+                if (segmentDistance <= remainingDistance) {
+                    remainingDistance -= segmentDistance;
+                    currentLat = nextWaypoint.lat;
+                    currentLon = nextWaypoint.lon;
+                    currentIndex++;
+                } else {
+                    const ratio = segmentDistance === 0 ? 0 : remainingDistance / segmentDistance;
+                    currentLat += (nextWaypoint.lat - currentLat) * ratio;
+                    currentLon += (nextWaypoint.lon - currentLon) * ratio;
+                    remainingDistance = 0;
+                }
+            }
+
+            // Calculate heading for the projected position
+            let heading = 0;
+            if (currentIndex < gpxRoute.length - 1) {
+                heading = calculateBearing(currentLat, currentLon, gpxRoute[currentIndex + 1].lat, gpxRoute[currentIndex + 1].lon);
+            } else if (currentIndex > 0) {
+                heading = calculateBearing(gpxRoute[currentIndex - 1].lat, gpxRoute[currentIndex - 1].lon, currentLat, currentLon);
+            }
+
+            return { lat: currentLat, lon: currentLon, heading };
         }
 
-        // Snap current position to the closest point on the route
+        // Fallback: project from current position for duration (in seconds)
         let startLat = lastLatitude ?? gpxRoute[0].lat;
         let startLon = lastLongitude ?? gpxRoute[0].lon;
         let bestSegmentIndex = 0;
@@ -2463,6 +2814,7 @@
         let snappedLat = startLat;
         let snappedLon = startLon;
 
+        // Snap to closest point on route
         for (let i = 0; i < gpxRoute.length - 1; i++) {
             const segStart = gpxRoute[i];
             const segEnd = gpxRoute[i + 1];
@@ -2474,7 +2826,6 @@
             if (proj.distance < minDistance) {
                 minDistance = proj.distance;
                 bestSegmentIndex = i;
-                // Interpolate snapped point
                 const t = Math.max(0, Math.min(1, proj.progress));
                 snappedLat = segStart.lat + (segEnd.lat - segStart.lat) * t;
                 snappedLon = segStart.lon + (segEnd.lon - segStart.lon) * t;
@@ -2487,14 +2838,13 @@
 
         // duration is in seconds, convert to hours
         const timeElapsedHours = duration / 3600;
-        const distanceToTravel = currentSOG * timeElapsedHours; // in NM
-        let remainingDistance = distanceToTravel;
-        
+        let remainingDistance = currentSOG * timeElapsedHours; // in NM
+
         // Walk the route from the snapped point
         while (remainingDistance > 0 && currentIndex < gpxRoute.length - 1) {
             const nextWaypoint = gpxRoute[currentIndex + 1];
             const segmentDistance = calculateDistance(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon);
-            
+
             if (segmentDistance <= remainingDistance) {
                 remainingDistance -= segmentDistance;
                 currentLat = nextWaypoint.lat;
@@ -2507,7 +2857,7 @@
                 remainingDistance = 0;
             }
         }
-        
+
         // Calculate heading for the projected position
         let heading = 0;
         if (currentIndex < gpxRoute.length - 1) {
@@ -2515,7 +2865,7 @@
         } else if (currentIndex > 0) {
             heading = calculateBearing(gpxRoute[currentIndex - 1].lat, gpxRoute[currentIndex - 1].lon, currentLat, currentLon);
         }
-        
+
         return { lat: currentLat, lon: currentLon, heading };
     }
 
@@ -2527,27 +2877,26 @@
      * @param sog Speed over ground of the vessel
      * @param duration Duration for the projection (in seconds)
      * @returns Projected position as a Leaflet LatLng object
-     */
+    */
     function computeProjection(lat: number, lon: number, cog: number, sog: number, duration?: number): any {
-        const ts = (store as any).get('timestamp')
-        duration = duration ?? (Math.floor((ts - Date.now()) / 3600000) || 0); // in hours, if no timestamp we don't project
+        // Use cached route projection if available
+        if (lastRouteProjection) {
+            return L.latLng(lastRouteProjection.lat, lastRouteProjection.lon);
+        }
+        if (lastFallbackProjection) {
+            return L.latLng(lastFallbackProjection.lat, lastFallbackProjection.lon);
+        }
+
+        // Fallback: traditional COG/SOG projection if no cached value
+        const ts = getRoundedHourTimestamp(windyStore.get('timestamp'));
+        duration = duration ?? (Math.floor((ts - Date.now()) / 3600000) || 0); // in hours
         if (duration > 360) duration = 0;
-        if (duration < 1) duration = 0; // if timestamp in the past, we don't project
-        
-        // If duration is 0, return the position exactly
+        if (duration < 1) duration = 0;
+
         if (duration === 0) {
             return L.latLng(lat, lon);
         }
-        
-        // Use route projection if route is loaded and active
-        if (isRouteLoaded && routeProjectionActive && gpxRoute.length > 0) {
-            const routeProjection = computeRouteProjection(sog, duration * 3600); // Convert hours to seconds
-            if (routeProjection) {
-                return L.latLng(routeProjection.lat, routeProjection.lon);
-            }
-        }
-        
-        // Fallback to traditional COG/SOG projection
+
         const distance = sog * duration; // in nautical miles
         const R = 3440.065; // Earth radius in nautical miles
         const δ = distance / R; // in radians
@@ -2563,8 +2912,11 @@
 
    /**
      * Shows a Windy weather popup at the given position.
+     * @param lat Latitude of the position
+     * @param lon Longitude of the position
      * @param useProjectionTime If true, uses Windy timestamp (forecast), otherwise current time.
-     */
+     * @returns 
+    */
     function showMyPopup(lat: number, lon: number, useProjectionTime = false) {
         openedPopup?.remove();
 
@@ -2575,7 +2927,7 @@
 
         openedPopup = popup;
 
-        // *** CORRECTION : Gestionnaire d'événement pour détecter la fermeture du popup ***
+        // *** Gestionnaire d'événement pour détecter la fermeture du popup ***
         popup.on('remove', () => {
             openedPopup = null;
         });
@@ -2589,13 +2941,13 @@
             // Choose timestamp according to context
             let ts: number;
             if (useProjectionTime) {
-                ts = getRoundedHourTimestamp((store as any).get('timestamp')); // projection time (forecast)
+                ts = getRoundedHourTimestamp(windyStore.get('timestamp')); // projection time (forecast)
             } else {
                 ts = getRoundedHourTimestamp(Date.now()); // current time
             }
             const forecastDate = ts ? new Date(ts) : new Date();
 
-            const overlay = (store as any).get('overlay');
+            const overlay = windyStore.get('overlay');
             const values = interpolator({ lat, lon });
             let content = `<div style="text-align: center;"><strong>${vesselName}</strong><br>φ = ${displayLatitude(lat)}, λ= ${displayLongitude(lon)}</div>`;
             if (projectionHours === 0) {
@@ -2654,12 +3006,14 @@
             } else if (overlay === 'currents') {
                 const u = values[0];
                 const v = values[1];
-                content += `🌊 Current: ${(Math.sqrt(u * u + v * v) * 3600/1852).toFixed(2)} Knots <br> Carrying to: ${Math.round(Math.atan2(u, v) * 180 / Math.PI)}°`;
-            
+                const dir = (Math.round(Math.atan2(u, v) * 180 / Math.PI) + 360) % 360; // Normalize -180 / +180 to 0-360°
+                content += `🌊 Current: ${(Math.sqrt(u * u + v * v) * 3600/1852).toFixed(2)} Knots <br> Carrying to: ${Math.round(dir)}°`;
+
             } else if (overlay === 'currentsTide') {
                 const u = values[0];
                 const v = values[1];
-                content += `🌊 Current: ${(Math.sqrt(u * u + v * v) * 3600/1852).toFixed(2)} Knots <br> Carrying to: ${Math.round(Math.atan2(u, v) * 180 / Math.PI)}°`;
+                const dir = (Math.round(Math.atan2(u, v) * 180 / Math.PI) + 360) % 360; // Normalize -180 / +180 to 0-360°
+                content += `🌊 Current: ${(Math.sqrt(u * u + v * v) * 3600/1852).toFixed(2)} Knots <br> Carrying to: ${Math.round(dir)}°`;
             
             } else if (overlay === 'sst') {
                 const seaTemp = metrics.temp.convertValue(values[0]);
@@ -2685,7 +3039,7 @@
             // Add Windy API version and forecast date
             content += `<hr><div style="text-align: right;"><small><strong>Forecast date : </strong>${forecastDate.toUTCString()}</small></div>`;
             
-            // *** CORRECTION : Mettre à jour le contenu du popup ! ***
+            // *** Mettre à jour le contenu du popup ! ***
             popup.setContent(content);
             
         }).catch((error: unknown) => {
@@ -2720,8 +3074,8 @@
         markerLayer.clearLayers();
         pathLatLngs.push(Position);
 
-        // Auto-save track history every 10 points to avoid excessive localStorage writes
-        if (pathLatLngs.length % 10 === 0) {
+        // Auto-save track history every 100 points to avoid excessive localStorage writes
+        if (pathLatLngs.length % 100 === 0) {
             maintainTrackLimits();
             saveTrackHistory();
         }
@@ -2749,7 +3103,7 @@
         // Only show arrows when NOT following a route
         if (!routeProjectionActive) {
             // Heading direction arrow
-            const headingEnd = computeProjection(lat, lon, trueHeading, 6, 24);
+            const headingEnd = computeProjection(lat, lon, effectiveCOG, effectiveSOG, 24);
             if (headingArrow) headingArrow.remove();
             headingArrow = L.polyline([Position, headingEnd], {
                 color: 'blue',
@@ -2781,7 +3135,7 @@
         const icon = createRotatingBoatIcon(trueHeading, 0.846008, boatIconSize);
         const marker = L.marker(Position, { 
             icon: icon,
-            zIndexOffset: 1000  // High z-index for your boat
+            zIndexOffset: zIndexOwnShip  // High z-index for your boat
         }).addTo(markerLayer);
         marker.bindTooltip(vesselName, { permanent: false, direction: 'top', className: 'boat-tooltip' });
 
@@ -2793,76 +3147,64 @@
                 return;
             }
             // Round to the nearest full hour (in ms)
-            (store as any).set('timestamp', getRoundedHourTimestamp());
+            windyStore.set('timestamp', getRoundedHourTimestamp());
             showMyPopup(lat, lon, false);
         });
 
         // Future projection icon (if speed > 0.5 knots AND timeline is in future)
-        if (effectiveSOG > 0.5) {
-            // Calculate projection hours
-            if (projectionHours === null || projectionHours === undefined) {
-                const now = Date.now();
-                const ts = (store as any).get('timestamp');
-                projectionHours = (ts - now) / (3600 * 1000); // in hours (can be negative)
-            }
-            
-            // Only show projection if timeline is in the future
-            if (projectionHours > 0) {
-            
-                // Get projected position and heading
-                let projectedHeading = trueHeading; // Default to current heading
-                let projected: any;
-                
-                if (isRouteLoaded && routeProjectionActive && gpxRoute.length > 0) {
-                    // Use route-based projection with correct heading
-                    const routeProjection = computeRouteProjection(effectiveSOG, projectionHours * 3600);
-                    if (routeProjection) {
-                        projected = L.latLng(routeProjection.lat, routeProjection.lon);
-                        projectedHeading = routeProjection.heading; // Use route heading
-                    } else {
-                        projected = computeProjection(lat, lon, effectiveCOG, effectiveSOG, projectionHours);
-                    }
-                } else {
-                    projected = computeProjection(lat, lon, effectiveCOG, effectiveSOG, projectionHours);
-                }
-                
-                // Display forecast icon at projected position with correct heading
-                if (forecastIcon) forecastIcon.remove();
-                const projectedIcon = createRotatingBoatIcon(projectedHeading, 0.846008, boatIconSize * 0.67); // Use route heading
-                forecastIcon = L.marker(projected, { 
-                    icon: projectedIcon,
-                    zIndexOffset: 1000  // High z-index for your boat's projection
-                }).addTo(markerLayer);
-                
-                const tooltipText = testModeEnabled ? 
-                    `Weather forecast in ${projectionHours} hours (TEST MODE: SOG=${testSOG}kt, COG=${testCOG}°)` : 
-                    `Weather forecast in ${projectionHours} hours`;
-                forecastIcon.bindTooltip(tooltipText, { permanent: false, direction: 'top', className: 'forecast-tooltip' });
+        // --- Projected icon (future position) ---
+        if (effectiveSOG > 0.5 && projectionHours !== null && projectionHours > 0) {
+            let projectedLat: number, projectedLon: number, projectedHeading: number;
 
-                // Click on projection: weather at projection time
-                forecastIcon.on('click', () => {
-                    if (openedPopup) {
-                        openedPopup.remove();
-                        openedPopup = null;
-                        return;
-                    }
-                    showMyPopup(projected.lat, projected.lng, true);
-                });
-
-                // Dynamic rotation of the projected icon
-                const projectedIconDiv = forecastIcon.getElement()?.querySelector('.rotatable') as HTMLElement;
-                if (projectedIconDiv) {
-                    projectedIconDiv.style.transformOrigin = '12px 12px';
-                    projectedIconDiv.style.transform = `rotateZ(${projectedHeading}deg)`;
-                }
-
+            if (lastRouteProjection) {
+                projectedLat = lastRouteProjection.lat;
+                projectedLon = lastRouteProjection.lon;
+                projectedHeading = lastRouteProjection.heading;
+            } else if (lastFallbackProjection) {
+                projectedLat = lastFallbackProjection.lat;
+                projectedLon = lastFallbackProjection.lon;
+                projectedHeading = lastFallbackProjection.heading;
             } else {
+                // No projection available
+                projectedLat = lat;
+                projectedLon = lon;
+                projectedHeading = trueHeading;
+            }
 
-                // Remove forecast icon when timeline is in past or no projection needed
-                if (forecastIcon) {
-                    forecastIcon.remove();
-                    forecastIcon = null;
+            // Display forecast icon at projected position with correct heading
+            if (forecastIcon) forecastIcon.remove();
+            const projectedIcon = createRotatingBoatIcon(projectedHeading, 0.846008, boatIconSize * 0.67);
+            forecastIcon = L.marker([projectedLat, projectedLon], {
+                icon: projectedIcon,
+                zIndexOffset: zIndexOwnShip
+            }).addTo(markerLayer);
+
+            const tooltipText = testModeEnabled ?
+                `Weather forecast in ${projectionHours} hours (TEST MODE: SOG=${testSOG}kt, COG=${testCOG}°)` :
+                `Weather forecast in ${projectionHours} hours`;
+            forecastIcon.bindTooltip(tooltipText, { permanent: false, direction: 'top', className: 'forecast-tooltip' });
+
+            // Click on projection: weather at projection time
+            forecastIcon.on('click', () => {
+                if (openedPopup) {
+                    openedPopup.remove();
+                    openedPopup = null;
+                    return;
                 }
+                showMyPopup(projectedLat, projectedLon, true);
+            });
+
+            // Dynamic rotation of the projected icon
+            const projectedIconDiv = forecastIcon.getElement()?.querySelector('.rotatable') as HTMLElement;
+            if (projectedIconDiv) {
+                projectedIconDiv.style.transformOrigin = '12px 12px';
+                projectedIconDiv.style.transform = `rotateZ(${projectedHeading}deg)`;
+            }
+        } else {
+            // Remove forecast icon when timeline is in past or no projection needed
+            if (forecastIcon) {
+                forecastIcon.remove();
+                forecastIcon = null;
             }
         }
 
@@ -2880,10 +3222,51 @@
     } // End addBoatMarker
 
     /**
+     * Updates the projection for the timeline based on the given timestamp.
+     * @param ts
+     */
+    function updateProjectionForTimeline(ts: number) {
+        projectionHours = (getRoundedHourTimestamp(ts) - getRoundedHourTimestamp()) / (3600 * 1000); // in hours
+        updateButtonText();
+
+        let effectiveSOG = testModeEnabled ? testSOG : mySpeedOverGround;
+        let effectiveCOG = testModeEnabled ? testCOG : myCourseOverGroundT;
+
+        if (isRouteLoaded && routeProjectionActive && gpxRoute.length > 0 && routeStartTime) {
+            // Use elapsed time from route start, not from now!
+            const durationSeconds = (ts - routeStartTime.getTime()) / 1000;
+            lastRouteProjection = computeRouteProjection(effectiveSOG, durationSeconds);
+            lastFallbackProjection = null;
+        } else {
+            // Fallback: COG/SOG projection from current position
+            if (lastLatitude !== null && lastLongitude !== null && effectiveSOG > 0.5 && projectionHours > 0) {
+                const fallback = computeProjection(lastLatitude, lastLongitude, effectiveCOG, effectiveSOG, projectionHours);
+                lastFallbackProjection = {
+                    lat: fallback.lat,
+                    lon: fallback.lng,
+                    heading: effectiveCOG
+                };
+            } else {
+                lastFallbackProjection = null;
+            }
+            lastRouteProjection = null;
+        }
+        // Move the weather popup if it's open and timeline changes
+        if (openedPopup && lastRouteProjection) {
+            // Use the projected position for the popup
+            openedPopup.setLatLng([lastRouteProjection.lat, lastRouteProjection.lon]);
+            showMyPopup(lastRouteProjection.lat, lastRouteProjection.lon, true);
+        } else if (openedPopup && lastFallbackProjection) {
+            openedPopup.setLatLng([lastFallbackProjection.lat, lastFallbackProjection.lon]);
+            showMyPopup(lastFallbackProjection.lat, lastFallbackProjection.lon, true);
+        }
+    }
+    
+    /**
      * Shows weather according to Windy timeline:
      * - If timeline at current time: popup on vessel
      * - If timeline in the future: popup on projection
-     */
+    */
     function showWeatherPopup() {
         if (openedPopup) {
             openedPopup?.remove();
@@ -2896,7 +3279,7 @@
             let effectiveCOG = testModeEnabled ? testCOG : myCourseOverGroundT;
             
             const now = getRoundedHourTimestamp(Date.now());
-            const ts = getRoundedHourTimestamp((store as any).get('timestamp'));
+            const ts = getRoundedHourTimestamp(windyStore.get('timestamp'));
             // If timeline is at current time (±1h)
             if (projectionHours !== null && projectionHours < 1) {
                 showMyPopup(lastLatitude, lastLongitude, false);
@@ -2915,7 +3298,7 @@
      * Formats a date as dd/mm/yyyy
      * @param date Date object to format
      * @returns Formatted date string in dd/mm/yyyy format
-     */
+    */
     function formatDateDDMMYYYY(date: Date): string {
         const day = date.getDate().toString().padStart(2, '0');
         const month = (date.getMonth() + 1).toString().padStart(2, '0');
@@ -2927,7 +3310,7 @@
      * Formats time as HH:MM (24-hour format)
      * @param date Date object to format
      * @returns Formatted time string in HH:MM format
-     */
+    */
     function formatTime24Hour(date: Date): string {
         const hours = date.getHours().toString().padStart(2, '0');
         const minutes = date.getMinutes().toString().padStart(2, '0');
@@ -2938,22 +3321,39 @@
      * Formats date and time together
      * @param date Date object to format
      * @returns Formatted date and time string in dd/mm/yyyy HH:MM format
-     */
+    */
     function formatDateTime(date: Date): string {
         const hours = date.getHours().toString().padStart(2, '0');
         const minutes = date.getMinutes().toString().padStart(2, '0');
         const secondes = date.getSeconds().toString().padStart(2, '0');
         return `${formatDateDDMMYYYY(date)} ${hours}:${minutes}:${secondes}`;
     }
-    // Utility functions for geographical calculations
+
+    /**
+     * Converts degrees to radians
+     * @param deg
+     * @returns Radians
+    */
     function toRadians(deg: number): number {
         return deg * Math.PI / 180;
     }
 
+    /**
+     * Converts radians to degrees
+     * @param rad
+     * @returns Degrees
+    */
     function toDegrees(rad: number): number {
         return rad * 180 / Math.PI;
     }
-
+    /**
+     * Calculate the bearing between two points
+     * @param lat1
+     * @param lon1
+     * @param lat2
+     * @param lon2
+     * @returns Bearing in degrees
+    */
     function calculateBearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
         const φ1 = toRadians(lat1);
         const φ2 = toRadians(lat2);
@@ -2967,6 +3367,8 @@
 
     /**
      * Rounds a timestamp (or Date.now() if not provided) to the nearest full hour (in ms)
+     * @param ts
+     * @returns Rounded timestamp in ms
      */
     function getRoundedHourTimestamp(ts?: number): number {
         const t = ts ?? Date.now();
@@ -2975,25 +3377,32 @@
     }
     /**
      * Manual centering on vessel
-     */
+    */
     function centerShip() {
         if (lastLatitude !== null && lastLongitude !== null) {
             map.setView([lastLatitude, lastLongitude]);
         }
     }
 
-    // Enable/disable automatic vessel tracking
+    /**
+     * Toggles the follow ship mode
+    */
     function toggleFollowShip() {
         followShip = !followShip;
     }
 
-    // Initialization when plugin opens
+    /**
+     * Initialization when plugin opens
+     * 
+    */
     export const onopen = () => {
         console.log('Plugin opened');
         projectionHours = 0; // Reset projection hours
     };
 
-    // Fonction pour mettre à jour l'icône quand la taille change
+    /**
+     * Function to update the icon when the size changes
+    */
     $: {
         if (boatIconSize && lastLatitude !== null && lastLongitude !== null) {
             // Redessiner le marqueur avec la nouvelle taille - validate COG first
@@ -3001,11 +3410,14 @@
             addBoatMarker(lastLatitude, lastLongitude, validCOG);
         }
     }
-    // WebSocket initialization to receive NMEA/AIS frames
+    
+    /**
+     * 
+    */
     onMount(() => {
-        // Initialize route on component load
-        updateRoute();
 
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        window.addEventListener('focus', handleVisibilityChange);
         // Restore saved data
         // Load track history
         const savedTrack = loadTrackHistory();
@@ -3021,17 +3433,18 @@
         if (loadGpxRoute()) {
             calculateRouteDistance();
             displayRoute();
+            // Initialize route on component load
+            updateRoute();
         }
 
         // Initialize layers with proper z-index ordering
-        // Bottom layer: Other AIS ships (zIndexOffset: 100)
-        aisShipsLayer = L.layerGroup().addTo(map);
-        aisShipsLayer.options.zIndexOffset = 100;
+        // Bottom layer: Other AIS ships
+        aisShipsLayer = createLayerGroup(map, zIndexAisShips);
+        atonLayer = createLayerGroup(map, zIndexAtoN); // or a new zIndexAtoN
 
-        // Top layer: Your ship (zIndexOffset: 300)
-        markerLayer = L.layerGroup().addTo(map);
-        markerLayer.options.zIndexOffset = 300;
-        
+        // Top layer: Your ship
+        markerLayer = createLayerGroup(map, zIndexOwnShip);
+
         // Start cleanup timer for old AIS ships (every 5 minutes)
         setInterval(cleanupOldAISShips, 5 * 60 * 1000);
         
@@ -3047,12 +3460,11 @@
         // Subscribe to Windy timeline changes
         const unsub = store.on('timestamp', (ts: number) => {
             // This code will be executed on every timeline change
-            // For example:
             console.log('Windy timeline changed, new timestamp:', ts);
             // You can trigger an action here, update a variable, etc.
-            projectionHours = (getRoundedHourTimestamp((store as any).get('timestamp')) - getRoundedHourTimestamp()) / (3600 * 1000); // in hours
-            updateButtonText();
+            updateProjectionForTimeline(ts);
         });
+
         if (typeof unsub === 'function') {
             unsubscribeTimeline = unsub;
         } else {
@@ -3062,6 +3474,7 @@
         // Subscribe to Windy overlay changes
         const unsubOverlay = store.on('overlay', (overlay: string) => {
             console.log('Windy overlay changed, new overlay:', overlay);
+           
             CurrentOverlay = overlay;
             updateButtonText();
         });
@@ -3070,11 +3483,16 @@
         } else {
             unsubscribeOverlay = null;
         }
-
+        // Restore test SOG value
+        const savedTestSOG = localStorage.getItem('testSOG');
+            if (savedTestSOG !== null) {
+                testSOG = parseFloat(savedTestSOG);
+        }
     });
 
-
-    // Cleanup when plugin closes
+    /**
+     * Cleanup when plugin closes
+    */
     onDestroy(() => {
 
         // Save data before closing
@@ -3122,10 +3540,12 @@
         // Clear route display
         clearRouteDisplay();
 
-        // Nettoyer les fragments en attente
+        // Clean up pending fragments
         aisFragments = {};
-});
-
+    // Clean up pending fragments
+    aisFragments = {};
+    }
+);
 </script>
 
 <style lang="less">
