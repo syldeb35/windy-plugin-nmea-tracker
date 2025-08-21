@@ -2,7 +2,7 @@ import type { ExternalPluginConfig } from '@windy/interfaces';
 
 const config: ExternalPluginConfig = {
     name: 'windy-plugin-nmea-tracker',
-    version: '1.0.7',
+    version: '1.1.0',
     title: 'NMEA tracker plugin',
     icon: '🛰️',
     description: 'NMEA tracker plugin.',
