@@ -994,7 +994,7 @@
             default:
                 myOverlay = CurrentOverlay;
         }
-        if (projectionHours !== null && projectionHours > 1) {
+        if (projectionHours !== null && projectionHours > 0) {
             if (!routeProjectionActive) {
                 buttonText = `🌬️ Show ${myOverlay} prediction (in ${getRoundedHourTimestamp(projectionHours)}h)`;
             } else {
@@ -1003,15 +1003,15 @@
                 const now = Date.now();
                 if (routeStartTime) {
                     if (routeStartTime.getMilliseconds() > now) {
-                        hours = ((ts - routeStartTime.getTime()) / (1000 * 3600)).toFixed(0);
+                        hours = ((ts - routeStartTime.getTime()) / (3600 * 1000)).toFixed(1);
                         if (parseInt(hours) < 0) {
-                            hours = (-parseInt(hours)).toFixed(0);
+                            hours = (-parseInt(hours)).toFixed(1);
                             buttonText = `🌬️ Show ${myOverlay} prediction<br>(${hours}h before route start)`
                         } else {
                             buttonText = `🌬️ Show ${myOverlay} prediction<br>(${hours}h after route start)`;
                         }
                     } else {
-                        hours = ((ts - now) / (1000 * 3600)).toFixed(0);
+                        hours = ((ts - now) / (3600 * 1000)).toFixed(1);
                         buttonText = `🌬️ Show ${myOverlay} prediction<br>(${hours}h after current time)`;
                     }
                 }
@@ -1913,7 +1913,9 @@
             // Only trust VDO flag if we don't have a confirmed MMSI yet
             isOwnVessel = true;
         }
-        
+        /*
+            *
+        */
         if (msgType === 1 || msgType === 2 || msgType === 3) {
             // Position Report (Class A) - CORRECTION of coordinate decoding
             // In AIS: longitude comes first (bits 61-88), then latitude (bits 89-115)
@@ -2002,7 +2004,10 @@
                 }
             }
         } 
-        
+
+        /* AIS Class A Ship Static and Voyage Related Data
+            * https://www.navcen.uscg.gov/ais-class-a-static-voyage-message-5
+        */
         if (msgType === 5) {
             // Static and Voyage Related Data
             const shipType = parseInt(bitstring.slice(232, 240), 2);
@@ -2941,9 +2946,9 @@
             // Choose timestamp according to context
             let ts: number;
             if (useProjectionTime) {
-                ts = getRoundedHourTimestamp(windyStore.get('timestamp')); // projection time (forecast)
+                ts = getRoundedHourTimestamp(windyStore.get('timestamp')); // projection time (forecast) rounded to the nearest hour
             } else {
-                ts = getRoundedHourTimestamp(Date.now()); // current time
+                ts = getRoundedHourTimestamp(Date.now()); // current time rounded to the nearest hour
             }
             const forecastDate = ts ? new Date(ts) : new Date();
 
@@ -3200,6 +3205,7 @@
                 projectedIconDiv.style.transformOrigin = '12px 12px';
                 projectedIconDiv.style.transform = `rotateZ(${projectedHeading}deg)`;
             }
+            updateButtonText();
         } else {
             // Remove forecast icon when timeline is in past or no projection needed
             if (forecastIcon) {
@@ -3227,6 +3233,7 @@
      */
     function updateProjectionForTimeline(ts: number) {
         projectionHours = (getRoundedHourTimestamp(ts) - getRoundedHourTimestamp()) / (3600 * 1000); // in hours
+        //projectionHours = (ts - Date.now()) / (3600 * 1000); // in hours
         updateButtonText();
 
         let effectiveSOG = testModeEnabled ? testSOG : mySpeedOverGround;
@@ -3292,6 +3299,17 @@
                 showMyPopup(lastLatitude, lastLongitude, false);
             }
         }
+    }
+    
+    /**
+     * Rounds a timestamp (or Date.now() if not provided) to the nearest full hour (in ms)
+     * @param ts
+     * @returns Rounded timestamp in ms
+     */
+    function getRoundedHourTimestamp(ts?: number): number {
+        const t = ts ?? Date.now();
+        const hourMs = 360 * 1000; // 0.1 hour in milliseconds
+        return Math.round(t / hourMs) * hourMs;
     }
 
     /**
@@ -3365,16 +3383,6 @@
         return (θ + 360) % 360;
     }
 
-    /**
-     * Rounds a timestamp (or Date.now() if not provided) to the nearest full hour (in ms)
-     * @param ts
-     * @returns Rounded timestamp in ms
-     */
-    function getRoundedHourTimestamp(ts?: number): number {
-        const t = ts ?? Date.now();
-        const hourMs = 3600 * 1000;
-        return Math.floor(t / hourMs) * hourMs;
-    }
     /**
      * Manual centering on vessel
     */
@@ -3462,6 +3470,7 @@
             // This code will be executed on every timeline change
             console.log('Windy timeline changed, new timestamp:', ts);
             // You can trigger an action here, update a variable, etc.
+            windyStore.set('timestamp', getRoundedHourTimestamp(ts));
             updateProjectionForTimeline(ts);
         });
 
