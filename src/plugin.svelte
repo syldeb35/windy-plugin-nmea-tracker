@@ -481,6 +481,8 @@
     let estimatedTimeOfArrival: Date | null = null; // ETA as a Date object
     let showRouteWaypoints: boolean = true; // Show/hide waypoint markers
     let nextWaypointIndex: number = 0; // Index of next waypoint to current position
+    let nextWptETA: Date | null = null; // Estimated time of arrival at next waypoint
+    let waypointETAs: Array<{ index: number, name: string, eta: Date, distance: number }> = []; // Array to hold ETAs for waypoints
     let closestWaypointIndex: number = 0; // Index of closest waypoint to current position
     let routeFileName: string = ''; // Name of loaded GPX file
     let lastRouteProgressUpdate = 0;
@@ -1669,8 +1671,8 @@
         if (shipType >= 40 && shipType <= 49) color = '#ffff00'; // High speed craft - yellow
         if (shipType >= 50 && shipType <= 59) color = '#C0C0C0'; // Special Craft - Gray
         if (shipType >= 60 && shipType <= 69) color = '#0000ff'; // Passenger ships - blue
-        if (shipType >= 70 && shipType <= 79) color = '#ff0000'; // Cargo ships - red
-        if (shipType >= 80 && shipType <= 89) color = '#00ff00'; // Tanker ships - green
+        if (shipType >= 70 && shipType <= 79) color = '#00ff00'; // Cargo ships - green
+        if (shipType >= 80 && shipType <= 89) color = '#ff0000'; // Tanker ships - red
         
         // Ensure heading is valid (0-359 degrees)
         const validHeading = isNaN(heading) || heading === 511 ? 0 : ((heading % 360) + 360) % 360;
@@ -1872,8 +1874,8 @@
     */
     function cleanupOldAISShips() {
         const now = Date.now();
-        const positionMaxAge = 10 * 60 * 1000; // 10 minutes for position data
-        const staticMaxAge = 30 * 60 * 1000; // 30 minutes for ships with static data (names)
+        const positionMaxAge = 5 * 60 * 1000; // 5 minutes for position data
+        const staticMaxAge = 10 * 60 * 1000; // 10 minutes for ships with static data (names)
         
         Object.keys(aisShips).forEach(mmsi => {
             const ship = aisShips[mmsi];
@@ -2505,11 +2507,19 @@
                 }),
                 zIndexOffset: zIndexWaypoint
             }).addTo(routeMarkers);
-            
+
+            const myIndex = index - nextWaypointIndex; // My index in the ETA array
             marker.bindTooltip(
+                /*`Waypoint ${index + 1} : ${waypoint.name}}<br>
+                ${displayLatitude(waypoint.lat)}<br>
+                ${displayLongitude(waypoint.lon)}<br>
+                ${nextWaypointIndex === index && nextWptETA ? `ETA: ${nextWptETA.toISOString().split('.')[0] + 'Z'}` : ''}`,
+                { permanent: false, direction: 'top' } */
+                
                 `Waypoint ${index + 1} : ${waypoint.name}}<br>
                 ${displayLatitude(waypoint.lat)}<br>
-                ${displayLongitude(waypoint.lon)}`,
+                ${displayLongitude(waypoint.lon)}<br>
+                ${waypointETAs.length > 0 && waypointETAs[myIndex] ? `ETA: ${waypointETAs[myIndex].eta.toISOString().split('.')[0] + 'Z'}` : ''}`,
                 { permanent: false, direction: 'top' }
             );
         });
@@ -2630,11 +2640,45 @@
     }
 
     /**
+     * Calculates the Estimated Time of Arrival (ETA) for the current route
+     * based on the current speed and route progress.
+     */
+    function etc_etaCalculation(): void {
+        if (!isRouteLoaded || !lastLatitude || !lastLongitude) return;
+        const effectiveSpeed = testModeEnabled ? testSOG : mySpeedOverGround;
+        if (effectiveSpeed > 0) {
+            const remainingDistance = (routeDistance * (1 - routeProgress));
+            estimatedTimeToCompletion = remainingDistance / effectiveSpeed;
+            const etcMilliseconds = estimatedTimeToCompletion * 60 * 60 * 1000;
+            if (routeStartTime && (routeStartTime.getTime() - Date.now()) > 0) {
+                estimatedTimeOfArrival = new Date(routeStartTime.getTime() + etcMilliseconds);
+            } else {
+                estimatedTimeOfArrival = new Date(Date.now() + etcMilliseconds);
+            }
+        } else {
+            estimatedTimeToCompletion = 0;
+            estimatedTimeOfArrival = null;
+        }
+    }
+
+    /**
      * Finds the next waypoint to current position and calculates progress
     */
     function updateRouteProgress(): void {
         if (!isRouteLoaded || !lastLatitude || !lastLongitude) return;
-
+        
+        // if the route departure is in the future calculate the eta of the entire route and do not pass any waypoint.
+        if (!routeStartTime || Date.now() < routeStartTime.getTime()) {
+            etc_etaCalculation();
+            waypointETAs = computeWaypointsETAs();
+        
+            // Refresh waypoint display if next waypoint changed
+            if (showRouteWaypoints && routeMarkers) {
+                displayRouteWaypoints();
+            }
+            return
+        };
+        
         // Step 1: Find the first segment where the projection parameter t >= 1 (i.e., vessel is past the end of the segment)
         // Navigation/progress logic (use only this for nextWaypointIndex)
         let bestSegmentIndex = 0;
@@ -2717,10 +2761,58 @@
             estimatedTimeOfArrival = null;
         }
 
+        /*
+        // Calculate next waypoint ETA as a Date object
+        const distanceToNextWpt = calculateDistance(
+            lastLatitude!, lastLongitude!,
+            gpxRoute[nextWaypointIndex].lat, gpxRoute[nextWaypointIndex].lon
+        );
+        if (effectiveSpeed > 0) {
+            const hoursToNextWpt = distanceToNextWpt / effectiveSpeed;
+            nextWptETA = new Date(Date.now() + hoursToNextWpt * 60 * 60 * 1000);
+        } else {
+            nextWptETA = null;
+        }
+        */
+        waypointETAs = computeWaypointsETAs();
+        /*waypointETAs.forEach(e => {
+            console.log(`ETA for ${e.name} : ${e.eta.toLocaleString()} (cumulative distance : ${e.distance.toFixed(2)} NM)`);
+        });*/
+
         // Refresh waypoint display if next waypoint changed
         if (showRouteWaypoints && routeMarkers) {
             displayRouteWaypoints();
         }
+    }
+
+    /** Calculate the ETAs for all remaining waypoints
+     * @param
+     * @returns 
+     * */
+    function computeWaypointsETAs() {
+        let now = Date.now();
+        let sog = mySpeedOverGround > 0 ? mySpeedOverGround : testSOG; // SOG in knots, default value if 0
+        let etas = [];
+        let totalDist = 0;
+        let lastLat = lastLatitude ?? gpxRoute[nextWaypointIndex]?.lat ?? 0;
+        let lastLon = lastLongitude ?? gpxRoute[nextWaypointIndex]?.lon ?? 0;
+
+        for (let i = nextWaypointIndex; i < gpxRoute.length; i++) {
+            let wp = gpxRoute[i];
+            let dist = calculateDistance(lastLat, lastLon, wp.lat, wp.lon);
+            totalDist += dist;
+            let hours = totalDist / sog;
+            let etaDate = new Date(now + hours * 3600 * 1000);
+            etas.push({
+                index: i,
+                name: wp.name || `WP${i+1}`,
+                eta: etaDate,
+                distance: totalDist
+            });
+            lastLat = wp.lat;
+            lastLon = wp.lon;
+        }
+        return etas;
     }
 
     /**
