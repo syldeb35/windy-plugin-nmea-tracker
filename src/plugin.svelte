@@ -418,6 +418,7 @@
     let lastDataUpdateTime: number = 0;
     let socket: any = null;
     let markerLayer: any = null;
+    let ownShipMarker: any = null;
     let aisShipsLayer: any = null; // Layer for AIS ships
     let boatPath: any = null;
     let projectionArrow: any = null;
@@ -2426,6 +2427,67 @@
     }
 
     /**
+     *  
+     * @param lat1
+     * @param lon1
+     * @param lat2
+     * @param lon2
+     * @param fraction
+     */
+    function interpolateGreatCirclePoint(lat1: number, lon1: number, lat2: number, lon2: number, fraction: number) {
+        // All in degrees, fraction in [0,1]
+        lat1 = toRadians(lat1); lon1 = toRadians(lon1);
+        lat2 = toRadians(lat2); lon2 = toRadians(lon2);
+
+        const d = 2 * Math.asin(Math.sqrt(
+            Math.sin((lat2 - lat1) / 2) ** 2 +
+            Math.cos(lat1) * Math.cos(lat2) * Math.sin((lon2 - lon1) / 2) ** 2
+        ));
+        if (d === 0) return { lat: toDegrees(lat1), lon: toDegrees(lon1) };
+        const A = Math.sin((1 - fraction) * d) / Math.sin(d);
+        const B = Math.sin(fraction * d) / Math.sin(d);
+        const x = A * Math.cos(lat1) * Math.cos(lon1) + B * Math.cos(lat2) * Math.cos(lon2);
+        const y = A * Math.cos(lat1) * Math.sin(lon1) + B * Math.cos(lat2) * Math.sin(lon2);
+        const z = A * Math.sin(lat1) + B * Math.sin(lat2);
+        const lat = Math.atan2(z, Math.sqrt(x * x + y * y));
+        const lon = Math.atan2(y, x);
+        return { lat: toDegrees(lat), lon: toDegrees(lon) };
+    }
+
+    /**
+     * 
+     * @param lat1
+     * @param lon1
+     * @param lat2
+     * @param lon2
+     * @param numPoints
+     * @returns 
+     */
+    function interpolateGreatCircle(lat1: number, lon1: number, lat2: number, lon2: number, numPoints = 100) {
+        // Returns an array of LatLngs along the great circle
+        lat1 = toRadians(lat1); lon1 = toRadians(lon1);
+        lat2 = toRadians(lat2); lon2 = toRadians(lon2);
+        
+        const d = 2 * Math.asin(Math.sqrt(
+            Math.sin((lat2 - lat1) / 2) ** 2 +
+            Math.cos(lat1) * Math.cos(lat2) * Math.sin((lon2 - lon1) / 2) ** 2
+        ));
+        const points = [];
+        for (let i = 0; i <= numPoints; i++) {
+            const f = i / numPoints;
+            const A = Math.sin((1 - f) * d) / Math.sin(d);
+            const B = Math.sin(f * d) / Math.sin(d);
+            const x = A * Math.cos(lat1) * Math.cos(lon1) + B * Math.cos(lat2) * Math.cos(lon2);
+            const y = A * Math.cos(lat1) * Math.sin(lon1) + B * Math.cos(lat2) * Math.sin(lon2);
+            const z = A * Math.sin(lat1) + B * Math.sin(lat2);
+            const lat = Math.atan2(z, Math.sqrt(x * x + y * y));
+            const lon = Math.atan2(y, x);
+            points.push([toDegrees(lat), toDegrees(lon)]);
+        }
+        return points;
+    }
+
+    /**
      * Displays the route on the map
     */
     function displayRoute(): void {
@@ -2439,7 +2501,22 @@
         routeMarkers = createLayerGroup(map, zIndexWaypoint); // Waypoint markers in middle layer
 
         // Create route line
-        const routeLatLngs = gpxRoute.map(wp => L.latLng(wp.lat, wp.lon));
+        let routeLatLngs: any[] = [];
+        for (let i = 0; i < gpxRoute.length - 1; i++) {
+            const wp1 = gpxRoute[i];
+            const wp2 = gpxRoute[i + 1];
+            const dist = calculateDistance(wp1.lat, wp1.lon, wp2.lat, wp2.lon);
+            if (dist > 500) {
+                // Interpolate great circle points
+                const gcPoints = interpolateGreatCircle(wp1.lat, wp1.lon, wp2.lat, wp2.lon, 50);
+                routeLatLngs = routeLatLngs.concat(gcPoints);
+            } else {
+                routeLatLngs.push([wp1.lat, wp1.lon]);
+            }
+        }
+        // Always add the last waypoint
+        routeLatLngs.push([gpxRoute[gpxRoute.length - 1].lat, gpxRoute[gpxRoute.length - 1].lon]);
+
         const routeLine = L.polyline(routeLatLngs, {
             color: '#ff6600',
             weight: 3,
@@ -2817,16 +2894,14 @@
 
     /**
      * Projects vessel position along the loaded route with timing consideration and heading calculation
-     * @param currentSOG Speed over ground of the vessel
-     * @param duration Duration for the projection (in seconds)
-     * @param lat Latitude of the vessel
-     * @param lon Longitude of the vessel
-     * @param cog Course over ground of the vessel
-     * @returns Projected position as a Leaflet LatLng object
+     * @param {number} currentSOG Speed over ground of the vessel
+     * @param {number} duration Duration for the projection (in seconds)
+     * @returns {{lat: number, lon: number, heading: number} | null} Projected position as a Leaflet LatLng object
     */
     function computeRouteProjection(currentSOG: number, duration: number): {lat: number, lon: number, heading: number} | null {
         console.log(`Computing route projection: SOG=${currentSOG}, duration=${duration.toFixed(1)}`);
         if (!isRouteLoaded || gpxRoute.length < 2 || currentSOG <= 0) return null;
+        
         if (routeStartTime) {
             const targetTime = windyStore.get('timestamp');
             const now = Date.now();
@@ -2848,6 +2923,10 @@
             let snappedLat = startLat;
             let snappedLon = startLon;
 
+            // Total distance to travel in NM
+            const distanceToTravel = (currentSOG * duration) / 3600; // knots * hours
+            let distanceCovered = 0;
+
             // Snap to closest point on route
             for (let i = 0; i < gpxRoute.length - 1; i++) {
                 const segStart = gpxRoute[i];
@@ -2861,8 +2940,12 @@
                     minDistance = proj.distance;
                     bestSegmentIndex = i;
                     const t = Math.max(0, Math.min(1, proj.progress));
-                    snappedLat = segStart.lat + (segEnd.lat - segStart.lat) * t;
-                    snappedLon = segStart.lon + (segEnd.lon - segStart.lon) * t;
+                    // Use great circle interpolation for snap
+                    const snapped = interpolateGreatCirclePoint(segStart.lat, segStart.lon, segEnd.lat, segEnd.lon, t);
+                    snappedLat = snapped.lat;
+                    snappedLon = snapped.lon;
+                    //snappedLat = segStart.lat + (segEnd.lat - segStart.lat) * t;
+                    //snappedLon = segStart.lon + (segEnd.lon - segStart.lon) * t;
                 }
             }
 
@@ -2886,8 +2969,12 @@
                     currentIndex++;
                 } else {
                     const ratio = segmentDistance === 0 ? 0 : remainingDistance / segmentDistance;
-                    currentLat += (nextWaypoint.lat - currentLat) * ratio;
-                    currentLon += (nextWaypoint.lon - currentLon) * ratio;
+                    // Use great circle interpolation for projection
+                    const gc = interpolateGreatCirclePoint(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon, ratio);
+                    currentLat = gc.lat;
+                    currentLon = gc.lon;
+                    //currentLat += (nextWaypoint.lat - currentLat) * ratio;
+                    //currentLon += (nextWaypoint.lon - currentLon) * ratio;
                     remainingDistance = 0;
                 }
             }
@@ -2924,8 +3011,12 @@
                 minDistance = proj.distance;
                 bestSegmentIndex = i;
                 const t = Math.max(0, Math.min(1, proj.progress));
-                snappedLat = segStart.lat + (segEnd.lat - segStart.lat) * t;
-                snappedLon = segStart.lon + (segEnd.lon - segStart.lon) * t;
+                // Use great circle interpolation for snap
+                const snapped = interpolateGreatCirclePoint(segStart.lat, segStart.lon, segEnd.lat, segEnd.lon, t);
+                snappedLat = snapped.lat;
+                snappedLon = snapped.lon;
+                //snappedLat = segStart.lat + (segEnd.lat - segStart.lat) * t;
+                //snappedLon = segStart.lon + (segEnd.lon - segStart.lon) * t;
             }
         }
 
@@ -2949,8 +3040,12 @@
                 currentIndex++;
             } else {
                 const ratio = segmentDistance === 0 ? 0 : remainingDistance / segmentDistance;
-                currentLat += (nextWaypoint.lat - currentLat) * ratio;
-                currentLon += (nextWaypoint.lon - currentLon) * ratio;
+                // Use great circle interpolation for projection
+                const gc = interpolateGreatCirclePoint(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon, ratio);
+                currentLat = gc.lat;
+                currentLon = gc.lon;
+                //currentLat += (nextWaypoint.lat - currentLat) * ratio;
+                //currentLon += (nextWaypoint.lon - currentLon) * ratio;
                 remainingDistance = 0;
             }
         }
@@ -3152,7 +3247,7 @@
      */
     function addBoatMarker(lat: number, lon: number, cog: number) {
         if (!map || !markerLayer) return;
-
+        
         // Validate input parameters to prevent NaN errors
         if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
             console.warn(`Invalid coordinates in addBoatMarker: lat=${lat}, lon=${lon}`);
@@ -3227,17 +3322,20 @@
                 projectionArrow = null;
             }
         }
-
+        if (ownShipMarker) {
+           markerLayer.removeLayer(ownShipMarker);
+            ownShipMarker = null;
+        }
         // Main marker (current position)
         const icon = createRotatingBoatIcon(trueHeading, 0.846008, boatIconSize);
-        const marker = L.marker(Position, { 
+        ownShipMarker = L.marker(Position, { 
             icon: icon,
-            zIndexOffset: zIndexOwnShip  // High z-index for your boat
+            zIndexOffset: zIndexOwnShip
         }).addTo(markerLayer);
-        marker.bindTooltip(vesselName, { permanent: false, direction: 'top', className: 'boat-tooltip' });
+        ownShipMarker.bindTooltip(vesselName, { permanent: false, direction: 'top', className: 'boat-tooltip' });
 
         // Click on vessel: weather at current time
-        marker.on('click', () => {
+        ownShipMarker.on('click', () => {
             if (openedPopup) {
                 openedPopup.remove();
                 openedPopup = null;
@@ -3307,7 +3405,7 @@
         }
 
         // Dynamic rotation of the main icon
-        const iconDiv = marker.getElement()?.querySelector('.rotatable') as HTMLElement;
+        const iconDiv = ownShipMarker.getElement()?.querySelector('.rotatable') as HTMLElement;
         if (iconDiv) {
             iconDiv.style.transformOrigin = '12px 12px';
             iconDiv.style.transform = `rotateZ(${trueHeading}deg)`;
@@ -3380,9 +3478,9 @@
             const now = getRoundedHourTimestamp(Date.now());
             const ts = getRoundedHourTimestamp(windyStore.get('timestamp'));
             // If timeline is at current time (±1h)
-            if (projectionHours !== null && projectionHours < 1) {
+            if (projectionHours !== null && projectionHours < 0.1) {
                 showMyPopup(lastLatitude, lastLongitude, false);
-            } else if (projectionHours !== null && projectionHours >= 1) {
+            } else if (projectionHours !== null && projectionHours >= 0.1) {
                 // Display on projected position if timeline in the future
                 const projected = computeProjection(lastLatitude, lastLongitude, effectiveCOG, effectiveSOG, projectionHours);
                 showMyPopup(projected.lat, projected.lng, true);
@@ -3394,7 +3492,7 @@
     }
     
     /**
-     * Rounds a timestamp (or Date.now() if not provided) to the nearest full hour (in ms)
+     * Rounds a timestamp (or Date.now() if not provided) to the nearest 1/10 hour (in ms)
      * @param ts
      * @returns Rounded timestamp in ms
      */
