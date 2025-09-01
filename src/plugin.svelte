@@ -359,6 +359,10 @@
     import { createRotatingBoatIcon } from './boatIcon';
     import config from './pluginConfig';
 
+    /**
+     * Constants declaration
+     */
+    const { title } = config;
     // Explicit type assertions to avoid TypeScript module confusion
     const bcast = bcastImport as {
         emit: (event: string, data?: any) => void;
@@ -381,7 +385,6 @@
     // Use global Leaflet from Windy
     const L = (window as any).L;
     
-    const title = 'NMEA tracker plugin';
 
     /**
      * Variables declarations
@@ -424,7 +427,8 @@
     let projectionArrow: any = null;
     let headingArrow: any = null;
     let forecastIcon: any = null;
-    let pathLatLngs: any[] = [];
+    let pathLatLngs: any[] = []; // Array to hold path latitude/longitude points
+    let shortPathLatLngs: any[] = []; // Array to hold short path latitude/longitude points
     let openedPopup: any = null;
     // Store AIS ships data globally so all functions can access it
     let aisShips: { [mmsi: string]: any } = {};
@@ -433,8 +437,8 @@
 
     let myMMSI = loadVesselMMSI(); // Our own MMSI for comparison
 
-    let unsubscribeTimeline: (() => void) | null = null;
-    let unsubscribeOverlay: (() => void) | null = null;
+    let unsubscribeTimeline: (() => void) | null = null; // Unsubscribe function for timeline updates
+    let unsubscribeOverlay: (() => void) | null = null; // Unsubscribe function for overlay updates
     let projectionHours: number | null = null; // for projection
     let lastRouteProjection: {lat: number, lon: number, heading: number} | null = null;
     let lastFallbackProjection: {lat: number, lon: number, heading: number} | null = null;
@@ -470,7 +474,7 @@
     let routeProjectionActive: boolean = false; // Flag to indicate route-based projection
     
     // GPX Route variables
-    let gpxRoute: Array<{lat: number, lon: number, name?: string, time?: Date}> = []; // Route waypoints  
+    let gpxRoute: Array<{lat: number, lon: number, name?: string, time?: Date, type?: string}> = []; // Route waypoints
     let routeLayer: any = null; // Layer for displaying the route
     let atonLayer: any = null; // Layer for displaying AtoN markers
     let routeMarkers: any = null; // Layer for route waypoints
@@ -498,6 +502,100 @@
 
     let helpVisible = false;
     let lastWakeTime = Date.now();
+
+    let userOS: string = 'Uknown';
+
+    /**
+     * Initialization when plugin opens
+     * 
+    */
+    export const onopen = () => {
+        console.log('Plugin opened');
+    }
+
+    /**
+     * 
+    */
+    onMount(() => {
+        console.log('Plugin start mounted');
+        projectionHours = 0; // Reset projection hours
+        userOS = detectOSAdvanced();
+        console.log('User OS detected:', userOS);
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        window.addEventListener('focus', handleVisibilityChange);
+        
+        // Restore saved data
+        // Load track history
+        const savedTrack = loadTrackHistory();
+        if (savedTrack.length > 0) {
+            pathLatLngs = savedTrack;
+            // Redraw the track on map
+            if (pathLatLngs.length > 1) {
+                boatPath = L.polyline(pathLatLngs, { color: 'blue', weight: 3 }).addTo(map);
+            }
+        }
+
+        // Load GPX route
+        if (loadGpxRoute()) {
+            calculateRouteDistance();
+            displayRoute();
+            // Initialize route on component load
+            updateRoute();
+        }
+
+        // Initialize layers with proper z-index ordering        
+        aisShipsLayer = createLayerGroup(map, zIndexAisShips); // Bottom layer: Other AIS ships
+        atonLayer = createLayerGroup(map, zIndexAtoN); // AtoN markers
+        markerLayer = createLayerGroup(map, zIndexOwnShip); // Top layer: Your ship
+
+        // Start cleanup timer for old AIS ships (every 5 minutes)
+        setInterval(cleanupOldAISShips, 5 * 60 * 1000);
+        
+        // Start the no frame detection timer
+        startNoFrameTimer();
+        
+        // Démarrer le nettoyage des fragments AIS
+        startFragmentCleanup();
+
+        // Create initial socket connection
+        createSocketConnection();
+
+        // Subscribe to Windy timeline changes
+        const unsub = store.on('timestamp', (ts: number) => {
+            // This code will be executed on every timeline change
+            console.log('Windy timeline changed, new timestamp:', ts);
+            // You can trigger an action here, update a variable, etc.
+            windyStore.set('timestamp', getRoundedHourTimestamp(ts));
+            updateProjectionForTimeline(ts);
+        });
+
+        if (typeof unsub === 'function') {
+            unsubscribeTimeline = unsub;
+        } else {
+            unsubscribeTimeline = null;
+        }
+
+        // Subscribe to Windy overlay changes
+        const unsubOverlay = store.on('overlay', (overlay: string) => {
+            console.log('Windy overlay changed, new overlay:', overlay);
+           
+            CurrentOverlay = overlay;
+            updateButtonText();
+        });
+        if (typeof unsubOverlay === 'function') {
+            unsubscribeOverlay = unsubOverlay;
+        } else {
+            unsubscribeOverlay = null;
+        }
+        // Restore test SOG value
+        const savedTestSOG = localStorage.getItem('testSOG');
+            if (savedTestSOG !== null) {
+                testSOG = parseFloat(savedTestSOG);
+        }
+        
+        console.log('Plugin full mounted');
+    });
 
     /**
      * 
@@ -737,9 +835,9 @@
         return 'Unknown';
     }
 
-    const userOS = detectOSAdvanced();
-    console.log('User OS detected:', userOS);
-
+    /**
+     * Toggle help visibility
+     */
     function toggleHelp() {
         helpVisible = !helpVisible;
     }
@@ -756,6 +854,18 @@
             return 'YOUR BOAT';
         }
     }
+
+    /**
+     * Save vessel name to localStorage
+    */
+    function saveVesselName(name: string): void {
+        try {
+            localStorage.setItem('windy-nmea-vessel-name', name);
+            console.log('Vessel name saved:', name);
+        } catch (error) {
+            console.warn('Failed to save vessel name to localStorage:', error);
+        }
+    }
     
     /**
      * Load vessel MMSI from localStorage
@@ -767,18 +877,6 @@
         } catch (error) {
             console.warn('Failed to load vessel MMSI from localStorage:', error);
             return 'YOUR MMSI';
-        }
-    }
-
-    /**
-     * Save vessel name to localStorage
-    */
-    function saveVesselName(name: string): void {
-        try {
-            localStorage.setItem('windy-nmea-vessel-name', name);
-            console.log('Vessel name saved:', name);
-        } catch (error) {
-            console.warn('Failed to save vessel name to localStorage:', error);
         }
     }
 
@@ -807,13 +905,32 @@
     }
 
     /**
+     * Maintain track history limits
+    */
+    function maintainTrackLimits(): void {
+        const MAX_TRACK_POINTS = 100000; // Adjust as needed
+        
+        if (shortPathLatLngs.length > MAX_TRACK_POINTS) {
+            // Remove oldest points, keep most recent
+            shortPathLatLngs = pathLatLngs.slice(-MAX_TRACK_POINTS);
+            
+            // Update the polyline on the map
+            if (boatPath) {
+                boatPath.setLatLngs(pathLatLngs);
+            }
+            
+            // console.log(`Track history trimmed to ${MAX_TRACK_POINTS} points`);
+        }
+    }
+
+    /**
      * Save track history to localStorage
     */
     function saveTrackHistory(): void {
         try {
-            if (pathLatLngs.length > 0) {
+            if (shortPathLatLngs.length > 0) {
                 // Convert LatLng objects to simple {lat, lng} objects for JSON storage
-                const trackData = pathLatLngs.map(latLng => ({
+                const trackData = shortPathLatLngs.map(latLng => ({
                     lat: latLng.lat,
                     lng: latLng.lng
                 }));
@@ -858,7 +975,8 @@
                         lat: wp.lat,
                         lon: wp.lon,
                         name: wp.name,
-                        time: wp.time ? wp.time.toISOString() : null
+                        time: wp.time ? wp.time.toISOString() : null,
+                        type: wp.type
                     })),
                     fileName: routeFileName,
                     startTime: routeStartTime ? routeStartTime.toISOString() : null,
@@ -887,7 +1005,8 @@
                     lat: wp.lat,
                     lon: wp.lon,
                     name: wp.name,
-                    time: wp.time ? new Date(wp.time) : undefined
+                    time: wp.time ? new Date(wp.time) : undefined,
+                    type: wp.type
                 }));
                 
                 routeFileName = routeData.fileName || 'Restored Route';
@@ -931,32 +1050,12 @@
     }
 
     /**
-     * Maintain track history limits
-    */
-    function maintainTrackLimits(): void {
-        const MAX_TRACK_POINTS = 100000; // Adjust as needed
-        
-        if (pathLatLngs.length > MAX_TRACK_POINTS) {
-            // Remove oldest points, keep most recent
-            pathLatLngs = pathLatLngs.slice(-MAX_TRACK_POINTS);
-            
-            // Update the polyline on the map
-            if (boatPath) {
-                boatPath.setLatLngs(pathLatLngs);
-            }
-            
-            // console.log(`Track history trimmed to ${MAX_TRACK_POINTS} points`);
-        }
-    }
-
-    /**
      * Throttles the route progress updates to avoid excessive calls
     */
     function throttledUpdateRouteProgress() {
-        const now = Date.now();
-        if (now - lastRouteProgressUpdate > 5000) { // 5000 ms = 5 seconds
+        if (Date.now() - lastRouteProgressUpdate > 5000) { // 5000 ms = 5 seconds
             updateRouteProgress();
-            lastRouteProgressUpdate = now;
+            lastRouteProgressUpdate = Date.now();
         }
     }
 
@@ -1003,9 +1102,8 @@
             } else {
                 const ts = getRoundedHourTimestamp(windyStore.get('timestamp'));
                 let hours = '0';
-                const now = Date.now();
                 if (routeStartTime) {
-                    if (routeStartTime.getMilliseconds() > now) {
+                    if (routeStartTime.getMilliseconds() > Date.now()) {
                         hours = ((ts - routeStartTime.getTime()) / (3600 * 1000)).toFixed(1);
                         if (parseInt(hours) < 0) {
                             hours = (-parseInt(hours)).toFixed(1);
@@ -1014,7 +1112,7 @@
                             buttonText = `🌬️ Show ${myOverlay} prediction<br>(${hours}h after route start)`;
                         }
                     } else {
-                        hours = ((ts - now) / (3600 * 1000)).toFixed(1);
+                        hours = ((ts - Date.now()) / (3600 * 1000)).toFixed(1);
                         buttonText = `🌬️ Show ${myOverlay} prediction<br>(${hours}h after current time)`;
                     }
                 }
@@ -1089,14 +1187,13 @@
     }
 
     /**
-     * Nettoie les fragments AIS expirés (plus de 30 secondes)
+     * Nettoie les fragments AIS expirés (plus de 60 secondes)
     */
     function cleanupExpiredAISFragments() {
-        const now = Date.now();
         const maxAge = 60 * 1000; // 60 secondes
         
         Object.keys(aisFragments).forEach(fragKey => {
-            if (now - aisFragments[fragKey].timestamp > maxAge) {
+            if (Date.now() - aisFragments[fragKey].timestamp > maxAge) {
                 console.warn(`AIS fragment expired: ${fragKey}`);
                 delete aisFragments[fragKey];
             }
@@ -1481,10 +1578,8 @@
                 }
             }
             
-            const currentTime = Date.now();
-            
             // Only update if this is more recent data
-            if (currentTime > lastDataUpdateTime) {
+            if (Date.now() > lastDataUpdateTime) {
                 myLatitude = (latitudesal !== null && latDirection !== null)
                     ? displayLatitude(latitudesal, latDirection)
                     : null;
@@ -1499,7 +1594,7 @@
                     mySpeedOverGround = parseFloat(speedOverGround.toFixed(1));
                 }
                 
-                lastDataUpdateTime = currentTime;
+                lastDataUpdateTime = Date.now();
             }
 
             // Always update internal position for mapping (only if validation passed)
@@ -1808,6 +1903,10 @@
         return 'Unknown';
     }
 
+    /**
+     * Get AIS status text from status code
+     * @param status
+     */
     function getAisStatusText(status: number): string {
         // See ITU-R M.1371 Table 44
         const statuses = [
@@ -1831,6 +1930,10 @@
         return statuses[status] || "Unknown";
     }
 
+    /**
+     * Get AtoN type text from AtoNType code
+     * @param AtoNType
+     */
     function getAtoNTypeText(AtoNType: number): string {
         const types = [
             "Default, Type of AtoN not specified",
@@ -1874,13 +1977,12 @@
      * Clean up old AIS ships (older than 10 minutes)
     */
     function cleanupOldAISShips() {
-        const now = Date.now();
         const positionMaxAge = 5 * 60 * 1000; // 5 minutes for position data
         const staticMaxAge = 10 * 60 * 1000; // 10 minutes for ships with static data (names)
         
         Object.keys(aisShips).forEach(mmsi => {
             const ship = aisShips[mmsi];
-            const age = now - ship.lastUpdate;
+            const age = Date.now() - ship.lastUpdate;
             
             // Use longer timeout for ships with names (static data)
             const maxAge = ship.name && ship.name !== 'Unknown' ? staticMaxAge : positionMaxAge;
@@ -1980,16 +2082,14 @@
                     
                     data = `AIS MMSI: ${mmsi} (Own vessel)\nLat: ${lat.toFixed(5)}\nLon: ${lon.toFixed(5)}\nCOG: ${cog.toFixed(1)}°\nSOG: ${sog.toFixed(1)} nds`;
                     
-                    const currentTime = Date.now();
-                    
                     // Only update display if this is more recent data
-                    if (currentTime > lastDataUpdateTime) {
+                    if (Date.now() > lastDataUpdateTime) {
                         myLatitude = displayLatitude(lat);
                         myLongitude = displayLongitude(lon);
                         myCourseOverGroundT = parseFloat(cog.toFixed(1));
                         mySpeedOverGround = parseFloat(sog.toFixed(1));
                         
-                        lastDataUpdateTime = currentTime;
+                        lastDataUpdateTime = Date.now();
                     }
                     
                     // Always update internal position for mapping
@@ -2279,76 +2379,101 @@
     */
     function parseGpxContent(gpxXml: string, fileName: string): void {
         try {
+            // Remove BOM if present and trim whitespace
+            if (gpxXml.charCodeAt(0) === 0xFEFF) {
+                gpxXml = gpxXml.slice(1);
+            }
+            gpxXml = gpxXml.trim();
+
             const parser = new DOMParser();
             const xmlDoc = parser.parseFromString(gpxXml, 'text/xml');
-            
-            // Check for parsing errors
-            const parserError = xmlDoc.querySelector('parsererror');
+
+            // Check for parsing errors (cross-browser)
+            let parserError = xmlDoc.querySelector('parsererror');
+            if (!parserError) {
+                // Fallback for some browsers
+                const errors = xmlDoc.getElementsByTagName('parsererror');
+                if (errors.length > 0) parserError = errors[0];
+            }
             if (parserError) {
+                console.error('GPX parsererror:', parserError.textContent || parserError.innerHTML || parserError);
                 throw new Error('Invalid GPX XML format');
             }
-            
-            const waypoints: Array<{lat: number, lon: number, name?: string, time?: Date}> = [];
-            
-            // PRIORITY 1: Extract route points (rtept) from route blocks - most appropriate for navigation
-            const routePoints = xmlDoc.querySelectorAll('rte rtept');
-            routePoints.forEach((rtept, index) => {
+
+            // Helper to get first child element by tag name (namespace-agnostic)
+            function getFirstChildByTagName(parent: Element, tag: string): Element | null {
+                const children = parent.getElementsByTagName(tag);
+                for (let i = 0; i < children.length; i++) {
+                    if (children[i].parentNode === parent) return children[i];
+                }
+                return null;
+            }
+
+            // Always use a new waypoints array for reactivity
+            let waypoints: Array<{lat: number, lon: number, name?: string, time?: Date, type?: string}> = [];
+
+            // PRIORITY 1: Extract route points (rtept) from route blocks
+            const routePoints = xmlDoc.getElementsByTagName('rtept');
+            for (let i = 0; i < routePoints.length; i++) {
+                const rtept = routePoints[i];
                 const lat = parseFloat(rtept.getAttribute('lat') || '0');
                 const lon = parseFloat(rtept.getAttribute('lon') || '0');
-                
                 if (validateCoordinates(lat, lon)) {
-                    const nameElement = rtept.querySelector('name');
-                    const timeElement = rtept.querySelector('time');
-                    
+                    const nameElement = getFirstChildByTagName(rtept, 'name');
+                    const timeElement = getFirstChildByTagName(rtept, 'time');
+                    const legType = getFirstChildByTagName(rtept, 'type');
                     waypoints.push({
                         lat,
                         lon,
-                        name: nameElement?.textContent || `Route Point ${index + 1}`,
-                        time: timeElement?.textContent ? new Date(timeElement.textContent) : undefined
+                        name: nameElement?.textContent || `Route Point ${i + 1}`,
+                        time: timeElement?.textContent ? new Date(timeElement.textContent) : undefined,
+                        type: legType?.textContent || undefined
                     });
                 }
-            });
-                
-            // PRIORITY 2: If no route points, try track points (trkpt) - GPS tracks
-            if (waypoints.length === 0) {
-                const trackPoints = xmlDoc.querySelectorAll('trkpt');
-                trackPoints.forEach((trkpt, index) => {
-                    const lat = parseFloat(trkpt.getAttribute('lat') || '0');
-                    const lon = parseFloat(trkpt.getAttribute('lon') || '0');
-                    
-                    if (validateCoordinates(lat, lon)) {
-                        const nameElement = trkpt.querySelector('name');
-                        const timeElement = trkpt.querySelector('time');
-                        
-                        waypoints.push({
-                            lat,
-                            lon,
-                            name: nameElement?.textContent || `Track Point ${index + 1}`,
-                            time: timeElement?.textContent ? new Date(timeElement.textContent) : undefined
-                        });
-                    }
-                });
             }
 
-            // PRIORITY 3: If still no points, try regular waypoints (wpt) - individual waypoints
+            // PRIORITY 2: If no route points, try track points (trkpt)
             if (waypoints.length === 0) {
-                const wptPoints = xmlDoc.querySelectorAll('wpt');
-                wptPoints.forEach((wpt, index) => {
-                    const lat = parseFloat(wpt.getAttribute('lat') || '0');
-                    const lon = parseFloat(wpt.getAttribute('lon') || '0');
-                    
+                const trackPoints = xmlDoc.getElementsByTagName('trkpt');
+                for (let i = 0; i < trackPoints.length; i++) {
+                    const trkpt = trackPoints[i];
+                    const lat = parseFloat(trkpt.getAttribute('lat') || '0');
+                    const lon = parseFloat(trkpt.getAttribute('lon') || '0');
                     if (validateCoordinates(lat, lon)) {
-                        const nameElement = wpt.querySelector('name');
-                        const timeElement = wpt.querySelector('time');
-                        
+                        const nameElement = getFirstChildByTagName(trkpt, 'name');
+                        const timeElement = getFirstChildByTagName(trkpt, 'time');
+                        const legType = getFirstChildByTagName(trkpt, 'type');
                         waypoints.push({
                             lat,
                             lon,
-                            name: nameElement?.textContent || `Waypoint ${index + 1}`,
-                            time: timeElement?.textContent ? new Date(timeElement.textContent) : undefined
+                            name: nameElement?.textContent || `Track Point ${i + 1}`,
+                            time: timeElement?.textContent ? new Date(timeElement.textContent) : undefined,
+                            type: legType?.textContent || undefined
                         });
                     }
-                });
+                }
+            }
+
+            // PRIORITY 3: If still no points, try regular waypoints (wpt)
+            if (waypoints.length === 0) {
+                const wptPoints = xmlDoc.getElementsByTagName('wpt');
+                for (let i = 0; i < wptPoints.length; i++) {
+                    const wpt = wptPoints[i];
+                    const lat = parseFloat(wpt.getAttribute('lat') || '0');
+                    const lon = parseFloat(wpt.getAttribute('lon') || '0');
+                    if (validateCoordinates(lat, lon)) {
+                        const nameElement = getFirstChildByTagName(wpt, 'name');
+                        const timeElement = getFirstChildByTagName(wpt, 'time');
+                        const legType = getFirstChildByTagName(wpt, 'type');
+                        waypoints.push({
+                            lat,
+                            lon,
+                            name: nameElement?.textContent || `Waypoint ${i + 1}`,
+                            time: timeElement?.textContent ? new Date(timeElement.textContent) : undefined,
+                            type: legType?.textContent || undefined
+                        });
+                    }
+                }
             }
             
             if (waypoints.length < 2) {
@@ -2360,7 +2485,7 @@
             routeStartTime = waypoints[0].time || null;
             
             // Success - load the route
-            gpxRoute = waypoints;
+            gpxRoute = [...waypoints]; // Ensure Svelte reactivity
             routeFileName = fileName;
             isRouteLoaded = true;
             routeProjectionActive = true; // Enable route-based projection
@@ -2372,7 +2497,14 @@
             }
 
             calculateRouteDistance();
+            /*// Always clear old route/waypoints before drawing new
+            if (map) {
+                clearRouteDisplay();
+                routeLayer = createLayerGroup(map, zIndexRoute);
+                routeMarkers = createLayerGroup(map, zIndexWaypoint);
+            }*/
             displayRoute();
+            displayRouteWaypoints();
 
             // If we have current position, calculate proper waypoint indices
             if (lastLatitude && lastLongitude) {
@@ -2495,29 +2627,30 @@
         
         // Clear existing route display
         clearRouteDisplay();
-        
-        // Create route layer groups with proper z-index ordering
-        routeLayer = createLayerGroup(map, zIndexRoute); // Route lines in middle layer
-        routeMarkers = createLayerGroup(map, zIndexWaypoint); // Waypoint markers in middle layer
 
+        // Always re-create route and marker layers after clearing
+        routeLayer = createLayerGroup(map, zIndexRoute); // Route lines in middle layer
+        routeMarkers = createLayerGroup(map, zIndexWaypoint); // Waypoint markers
+        
         // Create route line
         let routeLatLngs: any[] = [];
         for (let i = 0; i < gpxRoute.length - 1; i++) {
             const wp1 = gpxRoute[i];
             const wp2 = gpxRoute[i + 1];
-            const dist = calculateDistance(wp1.lat, wp1.lon, wp2.lat, wp2.lon);
-            if (dist > 500) {
+            if (wp1.type === 'GC') {
                 // Interpolate great circle points
-                const gcPoints = interpolateGreatCircle(wp1.lat, wp1.lon, wp2.lat, wp2.lon, 50);
+                const dist = calculateDistance(wp1.lat, wp1.lon, wp2.lat, wp2.lon);
+                const gcPoints = interpolateGreatCircle(wp1.lat, wp1.lon, wp2.lat, wp2.lon, dist / 10);
                 routeLatLngs = routeLatLngs.concat(gcPoints);
             } else {
+                // RL or undefined: just draw a straight line
                 routeLatLngs.push([wp1.lat, wp1.lon]);
             }
         }
         // Always add the last waypoint
         routeLatLngs.push([gpxRoute[gpxRoute.length - 1].lat, gpxRoute[gpxRoute.length - 1].lon]);
 
-        const routeLine = L.polyline(routeLatLngs, {
+        L.polyline(routeLatLngs, {
             color: '#ff6600',
             weight: 3,
             opacity: 0.7,
@@ -2587,12 +2720,6 @@
 
             const myIndex = index - nextWaypointIndex; // My index in the ETA array
             marker.bindTooltip(
-                /*`Waypoint ${index + 1} : ${waypoint.name}}<br>
-                ${displayLatitude(waypoint.lat)}<br>
-                ${displayLongitude(waypoint.lon)}<br>
-                ${nextWaypointIndex === index && nextWptETA ? `ETA: ${nextWptETA.toISOString().split('.')[0] + 'Z'}` : ''}`,
-                { permanent: false, direction: 'top' } */
-                
                 `Waypoint ${index + 1} : ${waypoint.name}}<br>
                 ${displayLatitude(waypoint.lat)}<br>
                 ${displayLongitude(waypoint.lon)}<br>
@@ -2781,18 +2908,6 @@
         }
         nextWaypointIndex = bestSegmentIndex + 1;
 
-        // (Optional) Closest waypoint for display only
-        /*let closestWaypointIndex = 0;
-        let minWaypointDist = Infinity;
-        for (let i = 0; i < gpxRoute.length; i++) {
-            const d = calculateDistance(lastLatitude!, lastLongitude!, gpxRoute[i].lat, gpxRoute[i].lon);
-            if (d < minWaypointDist) {
-                minWaypointDist = d;
-                closestWaypointIndex = i;
-            }
-        }*/
-
-
         // Step 2: Calculate route progress (for ETC/ETA)
         let distanceCovered = 0;
         for (let i = 0; i < bestSegmentIndex; i++) {
@@ -2817,11 +2932,6 @@
         // Step 4: Update closestWaypointIndex for internal use
         closestWaypointIndex = bestProgress > 0 ? bestSegmentIndex + 1 : bestSegmentIndex;
 
-        // Log for debug
-        // console.log(`${formatDateTime(new Date(Date.now()))}: Route progress updated`);
-        // console.log(`Navigation: closest Waypoint ${closestWaypointIndex}`);
-        // console.log(`Navigation: Current segment ${bestSegmentIndex}->${bestSegmentIndex + 1} (${(bestProgress * 100).toFixed(1)}%), Next waypoint: ${nextWaypointIndex + 1}/${gpxRoute.length}`);
-
         // Step 5: Calculate ETC/ETA
         const effectiveSpeed = testModeEnabled ? testSOG : mySpeedOverGround;
         if (effectiveSpeed > 0) {
@@ -2837,25 +2947,7 @@
             estimatedTimeToCompletion = 0;
             estimatedTimeOfArrival = null;
         }
-
-        /*
-        // Calculate next waypoint ETA as a Date object
-        const distanceToNextWpt = calculateDistance(
-            lastLatitude!, lastLongitude!,
-            gpxRoute[nextWaypointIndex].lat, gpxRoute[nextWaypointIndex].lon
-        );
-        if (effectiveSpeed > 0) {
-            const hoursToNextWpt = distanceToNextWpt / effectiveSpeed;
-            nextWptETA = new Date(Date.now() + hoursToNextWpt * 60 * 60 * 1000);
-        } else {
-            nextWptETA = null;
-        }
-        */
         waypointETAs = computeWaypointsETAs();
-        /*waypointETAs.forEach(e => {
-            console.log(`ETA for ${e.name} : ${e.eta.toLocaleString()} (cumulative distance : ${e.distance.toFixed(2)} NM)`);
-        });*/
-
         // Refresh waypoint display if next waypoint changed
         if (showRouteWaypoints && routeMarkers) {
             displayRouteWaypoints();
@@ -2867,7 +2959,6 @@
      * @returns 
      * */
     function computeWaypointsETAs() {
-        let now = Date.now();
         let sog = mySpeedOverGround > 0 ? mySpeedOverGround : testSOG; // SOG in knots, default value if 0
         let etas = [];
         let totalDist = 0;
@@ -2879,7 +2970,7 @@
             let dist = calculateDistance(lastLat, lastLon, wp.lat, wp.lon);
             totalDist += dist;
             let hours = totalDist / sog;
-            let etaDate = new Date(now + hours * 3600 * 1000);
+            let etaDate = new Date( Date.now() + hours * 3600 * 1000);
             etas.push({
                 index: i,
                 name: wp.name || `WP${i+1}`,
@@ -2940,12 +3031,15 @@
                     minDistance = proj.distance;
                     bestSegmentIndex = i;
                     const t = Math.max(0, Math.min(1, proj.progress));
-                    // Use great circle interpolation for snap
-                    const snapped = interpolateGreatCirclePoint(segStart.lat, segStart.lon, segEnd.lat, segEnd.lon, t);
-                    snappedLat = snapped.lat;
-                    snappedLon = snapped.lon;
-                    //snappedLat = segStart.lat + (segEnd.lat - segStart.lat) * t;
-                    //snappedLon = segStart.lon + (segEnd.lon - segStart.lon) * t;
+                    if (segStart.type === 'GC') {
+                        const snapped = interpolateGreatCirclePoint(segStart.lat, segStart.lon, segEnd.lat, segEnd.lon, t);
+                        snappedLat = snapped.lat;
+                        snappedLon = snapped.lon;
+                    } else {
+                        // Linear interpolation (rhumb line)
+                        snappedLat = segStart.lat + (segEnd.lat - segStart.lat) * t;
+                        snappedLon = segStart.lon + (segEnd.lon - segStart.lon) * t;
+                    }
                 }
             }
 
@@ -2953,7 +3047,7 @@
             let currentLon = snappedLon;
             let currentIndex = bestSegmentIndex;
 
-            // --- THIS IS THE KEY LINE: duration from now to timeline ---
+            // Duration from now to timeline ---
             const projectionDurationSeconds = (targetTime - now) / 1000; // seconds
             let remainingDistance = currentSOG * (projectionDurationSeconds / 3600); // in NM
 
@@ -2969,12 +3063,16 @@
                     currentIndex++;
                 } else {
                     const ratio = segmentDistance === 0 ? 0 : remainingDistance / segmentDistance;
-                    // Use great circle interpolation for projection
-                    const gc = interpolateGreatCirclePoint(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon, ratio);
-                    currentLat = gc.lat;
-                    currentLon = gc.lon;
-                    //currentLat += (nextWaypoint.lat - currentLat) * ratio;
-                    //currentLon += (nextWaypoint.lon - currentLon) * ratio;
+                    if (gpxRoute[currentIndex].type === 'GC') {
+                        // Use great circle interpolation for projection
+                        const gc = interpolateGreatCirclePoint(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon, ratio);
+                        currentLat = gc.lat;
+                        currentLon = gc.lon;
+                    } else {
+                        // Linear interpolation (rhumb line)
+                        currentLat += (nextWaypoint.lat - currentLat) * ratio;
+                        currentLon += (nextWaypoint.lon - currentLon) * ratio;
+                    }
                     remainingDistance = 0;
                 }
             }
@@ -3491,6 +3589,15 @@
         }
     }
     
+    /*
+    *
+    *
+    * 
+    * UTILITY FUNCTIONS
+    * 
+    * 
+    */
+
     /**
      * Rounds a timestamp (or Date.now() if not provided) to the nearest 1/10 hour (in ms)
      * @param ts
@@ -3554,6 +3661,7 @@
     function toDegrees(rad: number): number {
         return rad * 180 / Math.PI;
     }
+
     /**
      * Calculate the bearing between two points
      * @param lat1
@@ -3590,15 +3698,6 @@
     }
 
     /**
-     * Initialization when plugin opens
-     * 
-    */
-    export const onopen = () => {
-        console.log('Plugin opened');
-        projectionHours = 0; // Reset projection hours
-    };
-
-    /**
      * Function to update the icon when the size changes
     */
     $: {
@@ -3610,141 +3709,61 @@
     }
     
     /**
-     * 
-    */
-    onMount(() => {
-
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-        window.addEventListener('focus', handleVisibilityChange);
-        // Restore saved data
-        // Load track history
-        const savedTrack = loadTrackHistory();
-        if (savedTrack.length > 0) {
-            pathLatLngs = savedTrack;
-            // Redraw the track on map
-            if (pathLatLngs.length > 1) {
-                boatPath = L.polyline(pathLatLngs, { color: 'blue', weight: 3 }).addTo(map);
-            }
-        }
-
-        // Load GPX route
-        if (loadGpxRoute()) {
-            calculateRouteDistance();
-            displayRoute();
-            // Initialize route on component load
-            updateRoute();
-        }
-
-        // Initialize layers with proper z-index ordering
-        // Bottom layer: Other AIS ships
-        aisShipsLayer = createLayerGroup(map, zIndexAisShips);
-        atonLayer = createLayerGroup(map, zIndexAtoN); // or a new zIndexAtoN
-
-        // Top layer: Your ship
-        markerLayer = createLayerGroup(map, zIndexOwnShip);
-
-        // Start cleanup timer for old AIS ships (every 5 minutes)
-        setInterval(cleanupOldAISShips, 5 * 60 * 1000);
-        
-        // Start the no frame detection timer
-        startNoFrameTimer();
-        
-        // Démarrer le nettoyage des fragments AIS
-        startFragmentCleanup();
-
-        // Create initial socket connection
-        createSocketConnection();
-
-        // Subscribe to Windy timeline changes
-        const unsub = store.on('timestamp', (ts: number) => {
-            // This code will be executed on every timeline change
-            console.log('Windy timeline changed, new timestamp:', ts);
-            // You can trigger an action here, update a variable, etc.
-            windyStore.set('timestamp', getRoundedHourTimestamp(ts));
-            updateProjectionForTimeline(ts);
-        });
-
-        if (typeof unsub === 'function') {
-            unsubscribeTimeline = unsub;
-        } else {
-            unsubscribeTimeline = null;
-        }
-
-        // Subscribe to Windy overlay changes
-        const unsubOverlay = store.on('overlay', (overlay: string) => {
-            console.log('Windy overlay changed, new overlay:', overlay);
-           
-            CurrentOverlay = overlay;
-            updateButtonText();
-        });
-        if (typeof unsubOverlay === 'function') {
-            unsubscribeOverlay = unsubOverlay;
-        } else {
-            unsubscribeOverlay = null;
-        }
-        // Restore test SOG value
-        const savedTestSOG = localStorage.getItem('testSOG');
-            if (savedTestSOG !== null) {
-                testSOG = parseFloat(savedTestSOG);
-        }
-    });
-
-    /**
      * Cleanup when plugin closes
     */
-    onDestroy(() => {
+    onDestroy(() => 
+        {
+            // Save data before closing
+            saveTrackHistory();
+            if (isRouteLoaded) {
+                saveGpxRoute();
+            }
 
-        // Save data before closing
-        saveTrackHistory();
-        if (isRouteLoaded) {
-            saveGpxRoute();
-        }
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+            }
+            // Clear connection lost timer
+            if (connectionLostTimer) {
+                clearTimeout(connectionLostTimer);
+                connectionLostTimer = null;
+            }
+            // Clear no frame timer
+            if (noFrameTimer) {
+                clearTimeout(noFrameTimer);
+                noFrameTimer = null;
+            }
+            openedPopup?.remove();
+            markerLayer.clearLayers();
+            aisShipsLayer?.clearLayers(); // Clear AIS ships layer
+            boatPath?.remove();
+            projectionArrow?.remove();
+            forecastIcon?.remove();
+            boatPath = null;
+            projectionArrow = null;
+            forecastIcon = null;
+            pathLatLngs = [];
 
-        if (socket) {
-            socket.disconnect();
-            socket = null;
-        }
-        // Clear connection lost timer
-        if (connectionLostTimer) {
-            clearTimeout(connectionLostTimer);
-            connectionLostTimer = null;
-        }
-        // Clear no frame timer
-        if (noFrameTimer) {
-            clearTimeout(noFrameTimer);
-            noFrameTimer = null;
-        }
-        openedPopup?.remove();
-        markerLayer.clearLayers();
-        aisShipsLayer?.clearLayers(); // Clear AIS ships layer
-        boatPath?.remove();
-        projectionArrow?.remove();
-        forecastIcon?.remove();
-        boatPath = null;
-        projectionArrow = null;
-        forecastIcon = null;
-        pathLatLngs = [];
-
-        // Unsubscribe from Windy timeline
-        if (unsubscribeTimeline) unsubscribeTimeline();
-        
-        // Unsubscribe from Windy overlay changes
-        if (unsubscribeOverlay) unsubscribeOverlay();
+            // Unsubscribe from Windy timeline
+            if (unsubscribeTimeline) unsubscribeTimeline();
+            
+            // Unsubscribe from Windy overlay changes
+            if (unsubscribeOverlay) unsubscribeOverlay();
             // Arrêter le timer de nettoyage des fragments
-        if (fragmentCleanupTimer) {
-            clearInterval(fragmentCleanupTimer);
-            fragmentCleanupTimer = null;
+            if (fragmentCleanupTimer) {
+                clearInterval(fragmentCleanupTimer);
+                fragmentCleanupTimer = null;
+            }
+
+            // Clear route display
+            clearRouteDisplay();
+
+            // Clean up pending fragments
+            aisFragments = {};
+            // Clean up pending fragments
+            aisFragments = {};
         }
-
-        // Clear route display
-        clearRouteDisplay();
-
-        // Clean up pending fragments
-        aisFragments = {};
-    // Clean up pending fragments
-    aisFragments = {};
-    }
-);
+    );
 </script>
 
 <style lang="less">
