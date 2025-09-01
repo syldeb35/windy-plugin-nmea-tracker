@@ -1,3 +1,35 @@
+
+
+        <!-- GPX Leg Type Editor Modal -->
+        {#if showLegEditor && gpxRoute.length > 1}
+        <div class="modal-overlay" style="position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4); z-index:2000; display:flex; align-items:center; justify-content:center;">
+            <div class="modal-content" style="background:white; color:black; border-radius:8px; padding:24px 20px 16px 20px; min-width:320px; max-width:90vw; max-height:90vh; overflow:auto; box-shadow:0 8px 32px rgba(0,0,0,0.25); position:relative;">
+                <button on:click={() => showLegEditor = false} style="position:absolute; top:8px; right:12px; background:none; border:none; font-size:22px; cursor:pointer; color:#888;">✕</button>
+                <h2 style="text-align:center;">Edit Leg Types</h2>
+                <table style="width:100%; border-collapse:collapse; margin-bottom:8px;">
+                    <tr>
+                        <th style="text-align:center;">From</th>
+                        <th style="text-align:center;">To</th>
+                        <th style="text-align:center;">Type</th>
+                    </tr>
+                    {#each gpxRoute.slice(0, -1) as wp, i}
+                    <tr>
+                        <td style="font-size: small;">{i+1}</td>
+                        <td style="font-size: small;">{wp.name || `WP ${i+1}`}</td>
+                        <td style="font-size: small;">{gpxRoute[i+1].name || `WP ${i+2}`}</td>
+                        <td>
+                            <select bind:value={gpxRoute[i].type}>
+                                <option value="RL">R-L</option>
+                                <option value="GC">G-C</option>
+                            </select>
+                        </td>
+                    </tr>
+                    {/each}
+                </table>
+                <button on:click={saveEditedGpx} style="margin-top:4px;">Save & Download GPX</button>
+            </div>
+        </div>
+        {/if}
 <div class="plugin__mobile-header">
     {title}
 </div>
@@ -302,11 +334,42 @@
                 <button on:click={clearRoute} style="background: #ff4444; margin-left: 10px;">
                     🗑️ Clear Route
                 </button>
+                <button on:click={() => showLegEditor = !showLegEditor} style="margin-left: 10px;">
+                    ✏️ Edit Leg Types
+                </button>
             </div>
 
             <p style="font-size: 11px; color: #666; margin-top: 5px;">
                 🧭 Vessel will be projected along the route based on current/test speed
             </p>
+
+            <!-- GPX Leg Type Editor -->
+            {#if showLegEditor && gpxRoute.length > 1}
+            <div class="gpx-leg-editor" style="margin-top: 16px;">
+                <h2 style="text-align:center;">Edit Leg Types</h2>
+                <table style="width:100%; border-collapse:collapse; margin-bottom:8px;">
+                    <tr>
+                        <th style="text-align:center;">From</th>
+                        <th style="text-align:center;">To</th>
+                        <th style="text-align:center;">Type</th>
+                    </tr>
+                    {#each gpxRoute.slice(0, -1) as wp, i}
+                    <tr>
+                        <td style="font-size: small;">{i+1}</td>
+                        <td style="font-size: small;">{wp.name || `WP ${i+1}`}</td>
+                        <td style="font-size: small;">{gpxRoute[i+1].name || `WP ${i+2}`}</td>
+                        <td>
+                            <select bind:value={gpxRoute[i].type}>
+                                <option value="RL">R-L</option>
+                                <option value="GC">G-C</option>
+                            </select>
+                        </td>
+                    </tr>
+                    {/each}
+                </table>
+                <button on:click={saveEditedGpx} style="margin-top:4px;">Save & Download GPX</button>
+            </div>
+            {/if}
         {/if}
     </div>
     <!-- Data Persistence Controls -->
@@ -347,6 +410,29 @@
 
 
 <script lang="ts">
+// Save handler for edited GPX
+function saveEditedGpx() {
+    // Build new GPX XML string with updated <type> for each rtept
+    let gpx = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="NMEA Tracker">\n  <rte>\n`;
+    gpxRoute.forEach((wp, i) => {
+        gpx += `    <rtept lat="${wp.lat}" lon="${wp.lon}">\n`;
+        if (wp.name) gpx += `      <name>${wp.name}</name>\n`;
+        if (wp.time) gpx += `      <time>${wp.time.toISOString()}</time>\n`;
+        // Only add <type> for all but the last point (leg type is for the segment starting at this point)
+        if (i < gpxRoute.length - 1 && wp.type) gpx += `      <type>${wp.type}</type>\n`;
+        gpx += `    </rtept>\n`;
+    });
+    gpx += `  </rte>\n</gpx>`;
+
+    // Download as file
+    const blob = new Blob([gpx], { type: 'application/gpx+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = routeFileName ? routeFileName.replace(/\.gpx$/i, '_edited.gpx') : 'route_edited.gpx';
+    a.click();
+    URL.revokeObjectURL(url);
+}
     import bcastImport from "@windy/broadcast";
     import { onMount, onDestroy } from 'svelte';
     import { map } from '@windy/map';
@@ -389,7 +475,7 @@
     /**
      * Variables declarations
      */
-
+    let showLegEditor = false;
     let route = 'https://localhost:5000'; // Replace with your NMEA server URL
     
      // Server configuration variables
