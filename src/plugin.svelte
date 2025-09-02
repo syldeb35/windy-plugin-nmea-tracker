@@ -99,10 +99,11 @@
         Server address : &nbsp; &nbsp;
         <input 
             type="text"
-            id="serverHost"
-            name="serverHost"
-            bind:value={serverHost} 
-            on:input={updateRoute}
+            id="serverAddress"
+            name="serverAddress"
+            bind:value={serverAddress}
+            on:keydown={handleServerAddressKeydown}
+            on:blur={handleServerAddressBlur}
             placeholder="localhost or IP address" 
             style="width: 150px; height: 20px; font-weight: bold;"
         />
@@ -389,29 +390,6 @@
 
 
 <script lang="ts">
-// Save handler for edited GPX
-function saveEditedGpx() {
-    // Build new GPX XML string with updated <type> for each rtept
-    let gpx = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="NMEA Tracker">\n  <rte>\n`;
-    gpxRoute.forEach((wp, i) => {
-        gpx += `    <rtept lat="${wp.lat}" lon="${wp.lon}">\n`;
-        if (wp.name) gpx += `      <name>${wp.name}</name>\n`;
-        if (wp.time) gpx += `      <time>${wp.time.toISOString()}</time>\n`;
-        // Only add <type> for all but the last point (leg type is for the segment starting at this point)
-        if (i < gpxRoute.length - 1 && wp.type) gpx += `      <type>${wp.type}</type>\n`;
-        gpx += `    </rtept>\n`;
-    });
-    gpx += `  </rte>\n</gpx>`;
-
-    // Download as file
-    const blob = new Blob([gpx], { type: 'application/gpx+xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = routeFileName ? routeFileName.replace(/\.gpx$/i, '_edited.gpx') : 'route_edited.gpx';
-    a.click();
-    URL.revokeObjectURL(url);
-}
     import bcastImport from "@windy/broadcast";
     import { onMount, onDestroy } from 'svelte';
     import { map } from '@windy/map';
@@ -455,11 +433,10 @@ function saveEditedGpx() {
      * Variables declarations
      */
     let showLegEditor = false;
-    let route = 'https://localhost:5000'; // Replace with your NMEA server URL
-    
-     // Server configuration variables
-    let serverHost = 'localhost'; // Default server host
-    let serverPort = 5000; // Fixed port
+    // Server configuration variables
+    let serverAddress = loadServerAddress(); // e.g. 'localhost' or '192.168.1.10' or 'nmea.example.com'
+    let serverPort = 5000; // Default port (can be made editable if needed)
+    let route = makeRoute(serverAddress, serverPort);
     
 
     let latitudesal: number | null = null, latDirection: string | null = null;
@@ -677,15 +654,87 @@ function saveEditedGpx() {
     }
 
     /**
+     * --- Server address input handlers ---
+     * @param event
+     */
+    function handleServerAddressKeydown(event: KeyboardEvent) {
+        if (event.key === 'Enter') {
+            updateRoute((event.target as HTMLInputElement).value.trim());
+            (event.target as HTMLInputElement).blur(); // Optionally blur to commit
+        }
+    }
+    
+    /**
+     * Server address blur handler
+     * @param event
+     */
+    function handleServerAddressBlur(event: FocusEvent) {
+        updateRoute((event.target as HTMLInputElement).value.trim());
+    }
+
+    /**
+     * Save handler for edited GPX
+     */
+    function saveEditedGpx() {
+        // Build new GPX XML string with updated <type> for each rtept
+        let gpx = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="NMEA Tracker">\n  <rte>\n`;
+        gpxRoute.forEach((wp, i) => {
+            gpx += `    <rtept lat="${wp.lat}" lon="${wp.lon}">\n`;
+            if (wp.name) gpx += `      <name>${wp.name}</name>\n`;
+            if (wp.time) gpx += `      <time>${wp.time.toISOString()}</time>\n`;
+            // Only add <type> for all but the last point (leg type is for the segment starting at this point)
+            if (i < gpxRoute.length - 1 && wp.type) gpx += `      <type>${wp.type}</type>\n`;
+            gpx += `    </rtept>\n`;
+        });
+        gpx += `  </rte>\n</gpx>`;
+
+        // Download as file
+        const blob = new Blob([gpx], { type: 'application/gpx+xml' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = routeFileName ? routeFileName.replace(/\.gpx$/i, '_edited.gpx') : 'route_edited.gpx';
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    /**
      * Function to update the route when server host changes
      */
-    function updateRoute() {
-        route = `https://${serverHost}:${serverPort}`;
-        
+    function updateRoute(newAddress?: string) {
+        if (newAddress) {
+            serverAddress = newAddress;
+            saveServerAddress(serverAddress);
+        }
+        route = makeRoute(serverAddress, serverPort);
         // Reconnect to the new server if socket exists and is initialized
         if (socket !== null && socket !== undefined) {
             console.log('Server address changed, reconnecting to:', route);
             createSocketConnection();
+        }
+    }
+
+    function makeRoute(address: string, port: number) {
+        // Always use https for Windy plugins
+        return `https://${address}:${port}`;
+    }
+
+    function loadServerAddress(): string {
+        try {
+            const saved = localStorage.getItem('windy-nmea-server-address');
+            return saved || 'localhost';
+        } catch (error) {
+            console.warn('Failed to load server address from localStorage:', error);
+            return 'localhost';
+        }
+    }
+
+    function saveServerAddress(address: string): void {
+        try {
+            localStorage.setItem('windy-nmea-server-address', address);
+            console.log('Server address saved:', address);
+        } catch (error) {
+            console.warn('Failed to save server address to localStorage:', error);
         }
     }
     
