@@ -1,35 +1,5 @@
 
 
-        <!-- GPX Leg Type Editor Modal -->
-        {#if showLegEditor && gpxRoute.length > 1}
-        <div class="modal-overlay" style="position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4); z-index:2000; display:flex; align-items:center; justify-content:center;">
-            <div class="modal-content" style="background:white; color:black; border-radius:8px; padding:24px 20px 16px 20px; min-width:320px; max-width:90vw; max-height:90vh; overflow:auto; box-shadow:0 8px 32px rgba(0,0,0,0.25); position:relative;">
-                <button on:click={() => showLegEditor = false} style="position:absolute; top:8px; right:12px; background:none; border:none; font-size:22px; cursor:pointer; color:#888;">✕</button>
-                <h2 style="text-align:center;">Edit Leg Types</h2>
-                <table style="width:100%; border-collapse:collapse; margin-bottom:8px;">
-                    <tr>
-                        <th style="text-align:center;">From</th>
-                        <th style="text-align:center;">To</th>
-                        <th style="text-align:center;">Type</th>
-                    </tr>
-                    {#each gpxRoute.slice(0, -1) as wp, i}
-                    <tr>
-                        <td style="font-size: small;">{i+1}</td>
-                        <td style="font-size: small;">{wp.name || `WP ${i+1}`}</td>
-                        <td style="font-size: small;">{gpxRoute[i+1].name || `WP ${i+2}`}</td>
-                        <td>
-                            <select bind:value={gpxRoute[i].type}>
-                                <option value="RL">R-L</option>
-                                <option value="GC">G-C</option>
-                            </select>
-                        </td>
-                    </tr>
-                    {/each}
-                </table>
-                <button on:click={saveEditedGpx} style="margin-top:4px;">Save & Download GPX</button>
-            </div>
-        </div>
-        {/if}
 <div class="plugin__mobile-header">
     {title}
 </div>
@@ -278,6 +248,47 @@
       {/if}
     </div>
     <!-- GPX Route Controls -->
+    <!-- GPX Leg Type Editor Modal -->
+    {#if showLegEditor && gpxRoute.length > 1}
+    <div class="modal-overlay" style="position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4); z-index:2000; display:flex; align-items:center; justify-content:center;">
+        <div class="modal-content" style="background:white; color:black; border-radius:8px; padding:24px 20px 16px 20px; min-width:320px; max-width:90vw; max-height:90vh; overflow:hidden; box-shadow:0 8px 32px rgba(0,0,0,0.25); position:relative;">
+            <button on:click={() => showLegEditor = false} style="position:absolute; top:8px; right:12px; background:none; border:none; font-size:22px; cursor:pointer; color:#888;">✕</button>
+            <h2 style="text-align:center; margin-top:0;">Edit Leg Types</h2>
+            <div style="overflow-y:auto; max-height:55vh; margin-bottom:8px;">
+                <table style="width:100%; border-collapse:collapse;">
+                    <tr>
+                        <th style="text-align:center;">Id</th>
+                        <th style="text-align:center; min-width:260px; width:38%; resize:horizontal; overflow:auto;">From</th>
+                        <th style="text-align:center; min-width:260px; width:38%; resize:horizontal; overflow:auto;">To</th>
+                        <th style="text-align:center; min-width:80px; width:12%;">Distance (NM)</th>
+                        <th style="text-align:center;">Type</th>
+                    </tr>
+                    {#each gpxRoute.slice(0, -1) as wp, i}
+                    <tr style={i < nextWaypointIndex ? 'background:#e0ffe0;' : ''}>
+                        <td style="font-size: small;">{i+1}</td>
+                        <td style="font-size: small; min-width:260px; width:38%; resize:horizontal; overflow:auto;">{wp.name || `WP ${i+1}`}</td>
+                        <td style="font-size: small; min-width:260px; width:38%; resize:horizontal; overflow:auto;">{gpxRoute[i+1].name || `WP ${i+2}`}</td>
+                        <td style="font-size: small; min-width:80px; width:12%; text-align:center;">
+                            {#if gpxRoute[i].type === 'GC'}
+                                {calculateGreatCircleDistance(wp.lat, wp.lon, gpxRoute[i+1].lat, gpxRoute[i+1].lon).toFixed(2)}
+                            {:else}
+                                {calculateRhumbLineDistance(wp.lat, wp.lon, gpxRoute[i+1].lat, gpxRoute[i+1].lon).toFixed(2)}
+                            {/if}
+                        </td>
+                        <td>
+                            <select bind:value={gpxRoute[i].type}>
+                                <option value="RL">R-L</option>
+                                <option value="GC">G-C</option>
+                            </select>
+                        </td>
+                    </tr>
+                    {/each}
+                </table>
+            </div>
+            <button on:click={saveEditedGpx} style="margin-top:4px;">Save & Download GPX</button>
+        </div>
+    </div>
+    {/if}
     <hr />
     <div class="gpx-route-section">
         <p style="font-weight: bold; margin-bottom: 10px;">🗺️ GPX Route Navigation :</p>
@@ -323,14 +334,9 @@
 
             <!-- Route Controls -->
             <div class="plugin__buttons__centered" style="margin-bottom: 10px;">
-                <label class="centered">
-                    <input
-                        type="checkbox"
-                        bind:checked={showRouteWaypoints}
-                        on:change={toggleRouteWaypoints}
-                    />
-                    Show waypoints
-                </label>
+                <button id="toggleWaypointsButton" on:click={toggleRouteWaypoints} style="margin-left: 10px;">
+                    📍 {showRouteWaypoints ? 'Hide waypoints' : 'Show waypoints'}
+                </button>
                 <button on:click={clearRoute} style="background: #ff4444; margin-left: 10px;">
                     🗑️ Clear Route
                 </button>
@@ -343,33 +349,6 @@
                 🧭 Vessel will be projected along the route based on current/test speed
             </p>
 
-            <!-- GPX Leg Type Editor -->
-            {#if showLegEditor && gpxRoute.length > 1}
-            <div class="gpx-leg-editor" style="margin-top: 16px;">
-                <h2 style="text-align:center;">Edit Leg Types</h2>
-                <table style="width:100%; border-collapse:collapse; margin-bottom:8px;">
-                    <tr>
-                        <th style="text-align:center;">From</th>
-                        <th style="text-align:center;">To</th>
-                        <th style="text-align:center;">Type</th>
-                    </tr>
-                    {#each gpxRoute.slice(0, -1) as wp, i}
-                    <tr>
-                        <td style="font-size: small;">{i+1}</td>
-                        <td style="font-size: small;">{wp.name || `WP ${i+1}`}</td>
-                        <td style="font-size: small;">{gpxRoute[i+1].name || `WP ${i+2}`}</td>
-                        <td>
-                            <select bind:value={gpxRoute[i].type}>
-                                <option value="RL">R-L</option>
-                                <option value="GC">G-C</option>
-                            </select>
-                        </td>
-                    </tr>
-                    {/each}
-                </table>
-                <button on:click={saveEditedGpx} style="margin-top:4px;">Save & Download GPX</button>
-            </div>
-            {/if}
         {/if}
     </div>
     <!-- Data Persistence Controls -->
@@ -1442,75 +1421,45 @@ function saveEditedGpx() {
         if (lastLatitude === null || lastLongitude === null) {
             return true;
         }
-        
-        // Calculate distance between old and new position using Haversine formula
-        const distance = calculateDistance(lastLatitude, lastLongitude, newLat, newLon);
-        
+        // Always use GC for position jumps (navigation, not route legs)
+        const distance = calculateGreatCircleDistance(lastLatitude, lastLongitude, newLat, newLon);
         // Dynamic validation based on speed and time
         let maxJump = 1; // Default: 1 nautical mile
-        
-        // If we have speed information, calculate reasonable distance
         if (sog && sog > 0) {
-            // Calculate time since last position update (assuming max 60 seconds between updates)
             const maxTimeBetweenUpdates = 60; // seconds
-            const maxDistanceAtSpeed = (sog * maxTimeBetweenUpdates) / 3600; // km
-            
-            // Allow up to 3x the expected distance to account for course changes
-            maxJump = Math.max(maxDistanceAtSpeed * 3, 1); // At least 1 NM
-            
-            // But never allow more than 20 NM jump (37 km) - clearly erroneous
+            const maxDistanceAtSpeed = (sog * maxTimeBetweenUpdates) / 3600;
+            maxJump = Math.max(maxDistanceAtSpeed * 3, 1);
             maxJump = Math.min(maxJump, 20);
         } else {
-            // Without speed info, use fixed limits based on distance
-            if (distance > 20) { // > 20 NM is clearly wrong
-                maxJump = 1; // Strict limit
-            } else if (distance > 5) { // > 5 NM might be wrong
-                maxJump = 3; // 3 NM limit
+            if (distance > 20) {
+                maxJump = 1;
+            } else if (distance > 5) {
+                maxJump = 3;
             }
         }
-        
         if (distance > maxJump) {
             console.warn(`Position jump detected: ${distance.toFixed(3)}km > ${maxJump.toFixed(3)}km limit. SOG: ${sog || 'unknown'} knots. Rejecting position.`);
             return false;
         }
-        
         return true;
     }
 
     /**
-     * Calculate distance between two positions using Haversine formula
-     * @param {number} lat1 - Latitude start in decimal degrees
-     * @param {number} lon1 - Longitude start in decimal degrees  
-     * @param {number} lat2 - Latitude end in decimal degrees
-     * @param {number} lon2 - Longitude end in decimal degrees
-     * @returns {number} Distance in Nautical Miles
-    */
-    function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-        const R = 3440.065; // Earth radius in nautical miles
-        // Convert degrees to radians
-        const toRad = (deg: number) => deg * Math.PI / 180;
-        const φ1 = toRad(lat1);
-        const φ2 = toRad(lat2);
-        const Δφ = φ2 - φ1;
-        const Δλ = toRad(lon2 - lon1);
-
-        // Haversine formula (short distances)
-        const a = Math.sin(Δφ / 2) ** 2 +
-                Math.cos(φ1) * Math.cos(φ2) *
-                Math.sin(Δλ / 2) ** 2;
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        const haversineDist = R * c;
-
-        // For long legs, use great circle (orthodromic) distance formula
-        if (haversineDist > 300) {
-            // Spherical law of cosines
-            const gcDist = Math.acos(
-                Math.sin(φ1) * Math.sin(φ2) +
-                Math.cos(φ1) * Math.cos(φ2) * Math.cos(Δλ)
-            ) * R;
-            return gcDist;
+     * Calculates the distance between two points, honoring the leg type (GC/RL) if provided.
+     * If a legType is provided, uses the appropriate method. Otherwise defaults to GC.
+     * @param {number} lat1
+     * @param {number} lon1
+     * @param {number} lat2
+     * @param {number} lon2
+     * @param {string} [legType] - 'GC' for great circle, 'RL' for rhumb line, or undefined
+     * @returns {number} Distance in nautical miles
+     */
+    function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number, legType?: string): number {
+        if (legType === 'RL') {
+            return calculateRhumbLineDistance(lat1, lon1, lat2, lon2);
         } else {
-            return haversineDist;
+            // Default to GC if not specified or explicitly 'GC'
+            return calculateGreatCircleDistance(lat1, lon1, lat2, lon2);
         }
     }
     
@@ -2623,9 +2572,11 @@ function saveEditedGpx() {
         let totalDistanceNM = 0;
         
         for (let i = 0; i < gpxRoute.length - 1; i++) {
+            const legType = gpxRoute[i + 1].type || 'GC';
             const dist = calculateDistance(
                 gpxRoute[i].lat, gpxRoute[i].lon,
-                gpxRoute[i + 1].lat, gpxRoute[i + 1].lon
+                gpxRoute[i + 1].lat, gpxRoute[i + 1].lon,
+                legType
             );
             totalDistanceNM += dist;
         }
@@ -2723,14 +2674,20 @@ function saveEditedGpx() {
         for (let i = 0; i < gpxRoute.length - 1; i++) {
             const wp1 = gpxRoute[i];
             const wp2 = gpxRoute[i + 1];
-            if (wp1.type === 'GC') {
+            if (wp1.type === 'GC' || !wp1.type) {
                 // Interpolate great circle points
-                const dist = calculateDistance(wp1.lat, wp1.lon, wp2.lat, wp2.lon);
+                const dist = calculateGreatCircleDistance(wp1.lat, wp1.lon, wp2.lat, wp2.lon);
                 const gcPoints = interpolateGreatCircle(wp1.lat, wp1.lon, wp2.lat, wp2.lon, dist / 10);
                 routeLatLngs = routeLatLngs.concat(gcPoints);
-            } else {
-                // RL or undefined: just draw a straight line
+            } else if (wp1.type === 'RL') {
+                // Interpolate rhumb line points (or just straight line)
+                // For now, just push the endpoints for RL
                 routeLatLngs.push([wp1.lat, wp1.lon]);
+            } else {
+                // Fallback: treat as GC
+                const dist = calculateGreatCircleDistance(wp1.lat, wp1.lon, wp2.lat, wp2.lon);
+                const gcPoints = interpolateGreatCircle(wp1.lat, wp1.lon, wp2.lat, wp2.lon, dist / 10);
+                routeLatLngs = routeLatLngs.concat(gcPoints);
             }
         }
         // Always add the last waypoint
@@ -2820,11 +2777,12 @@ function saveEditedGpx() {
     */
     function toggleRouteWaypoints(): void {
         if (!routeMarkers) return;
-        
-        if (showRouteWaypoints) {
+        if (!showRouteWaypoints) {
             displayRouteWaypoints();
+            showRouteWaypoints = true;
         } else {
             routeMarkers.clearLayers();
+            showRouteWaypoints = false;
         }
     }
 
@@ -2921,7 +2879,7 @@ function saveEditedGpx() {
         const closestY = ay + tClamped * aby;
 
         // Distance from P to closest point
-        const distance = calculateDistance(py, px, closestY, closestX);
+    const distance = calculateGreatCircleDistance(py, px, closestY, closestX);
 
         return {
             distance: distance,
@@ -2997,15 +2955,19 @@ function saveEditedGpx() {
         // Step 2: Calculate route progress (for ETC/ETA)
         let distanceCovered = 0;
         for (let i = 0; i < bestSegmentIndex; i++) {
+            const legType = gpxRoute[i + 1].type || 'GC';
             distanceCovered += calculateDistance(
                 gpxRoute[i].lat, gpxRoute[i].lon,
-                gpxRoute[i + 1].lat, gpxRoute[i + 1].lon
+                gpxRoute[i + 1].lat, gpxRoute[i + 1].lon,
+                legType
             );
         }
         if (bestSegmentIndex < gpxRoute.length - 1) {
+            const legType = gpxRoute[bestSegmentIndex + 1].type || 'GC';
             const segmentDistance = calculateDistance(
                 gpxRoute[bestSegmentIndex].lat, gpxRoute[bestSegmentIndex].lon,
-                gpxRoute[bestSegmentIndex + 1].lat, gpxRoute[bestSegmentIndex + 1].lon
+                gpxRoute[bestSegmentIndex + 1].lat, gpxRoute[bestSegmentIndex + 1].lon,
+                legType
             );
             distanceCovered += segmentDistance * bestProgress;
         }
@@ -3053,7 +3015,8 @@ function saveEditedGpx() {
 
         for (let i = nextWaypointIndex; i < gpxRoute.length; i++) {
             let wp = gpxRoute[i];
-            let dist = calculateDistance(lastLat, lastLon, wp.lat, wp.lon);
+            let legType = wp.type || 'GC';
+            let dist = calculateDistance(lastLat, lastLon, wp.lat, wp.lon, legType);
             totalDist += dist;
             let hours = totalDist / sog;
             let etaDate = new Date( Date.now() + hours * 3600 * 1000);
@@ -3215,7 +3178,8 @@ function saveEditedGpx() {
         // Walk the route from the snapped point
         while (remainingDistance > 0 && currentIndex < gpxRoute.length - 1) {
             const nextWaypoint = gpxRoute[currentIndex + 1];
-            const segmentDistance = calculateDistance(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon);
+            const legType = nextWaypoint.type || 'GC';
+            const segmentDistance = calculateDistance(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon, legType);
 
             if (segmentDistance <= remainingDistance) {
                 remainingDistance -= segmentDistance;
@@ -3747,6 +3711,50 @@ function saveEditedGpx() {
     function toDegrees(rad: number): number {
         return rad * 180 / Math.PI;
     }
+    // --- Utility functions for leg distance types (used in Leg Editor table) ---
+
+    /**
+     * Calculates the Great Circle distance between two points on the Earth.
+     * @param lat1
+     * @param lon1
+     * @param lat2
+     * @param lon2
+     */
+    function calculateGreatCircleDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+        // Haversine formula (already used in calculateDistance)
+        const R = 3440.065;
+        const toRad = (deg: number) => deg * Math.PI / 180;
+        const φ1 = toRad(lat1);
+        const φ2 = toRad(lat2);
+        const Δφ = φ2 - φ1;
+        const Δλ = toRad(lon2 - lon1);
+        const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+    }
+    /**
+     * Calculates the rhumb line distance between two points on the Earth.
+     * @param lat1
+     * @param lon1
+     * @param lat2
+     * @param lon2
+     */
+    function calculateRhumbLineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+        // Rhumb line distance formula
+        const R = 3440.065;
+        const toRad = (deg: number) => deg * Math.PI / 180;
+        const φ1 = toRad(lat1);
+        const φ2 = toRad(lat2);
+        let Δλ = toRad(lon2 - lon1);
+        // Handle crossing the antimeridian
+        if (Math.abs(Δλ) > Math.PI) {
+            Δλ = Δλ > 0 ? -(2 * Math.PI - Δλ) : (2 * Math.PI + Δλ);
+        }
+        const Δψ = Math.log(Math.tan(Math.PI / 4 + φ2 / 2) / Math.tan(Math.PI / 4 + φ1 / 2));
+        const q = Math.abs(Δψ) > 1e-12 ? (φ2 - φ1) / Δψ : Math.cos(φ1);
+        const dist = Math.sqrt((φ2 - φ1) ** 2 + (q * Δλ) ** 2);
+        return R * dist;
+    }
 
     /**
      * Calculate the bearing between two points
@@ -3964,6 +3972,10 @@ function saveEditedGpx() {
         margin-right: 75px;
         text-align: right;
         align-items: right;
+    }
+    table, th, td {
+        border: 1px solid black;
+        border-collapse: collapse;
     }
     /* Styles for links */
     a {
