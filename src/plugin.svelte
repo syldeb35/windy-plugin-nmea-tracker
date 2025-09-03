@@ -1,5 +1,6 @@
 
 
+
 <div class="plugin__mobile-header">
     {title}
 </div>
@@ -401,6 +402,42 @@
     import io from './socket.io.min.js';
     import { createRotatingBoatIcon } from './boatIcon';
     import config from './pluginConfig';
+
+    /**
+     * Interpolates a point along a rhumb line between two coordinates.
+     * @param lat1 Start latitude (degrees)
+     * @param lon1 Start longitude (degrees)
+     * @param lat2 End latitude (degrees)
+     * @param lon2 End longitude (degrees)
+     * @param fraction Progress along the segment [0,1]
+     * @returns { lat, lon } interpolated point
+     */
+    function interpolateRhumbLinePoint(lat1: number, lon1: number, lat2: number, lon2: number, fraction: number) {
+        // Convert to radians
+        const toRad = (deg: number) => deg * Math.PI / 180;
+        const toDeg = (rad: number) => rad * 180 / Math.PI;
+        lat1 = toRad(lat1);
+        lon1 = toRad(lon1);
+        lat2 = toRad(lat2);
+        lon2 = toRad(lon2);
+
+        // Handle crossing the antimeridian
+        let dLon = lon2 - lon1;
+        if (Math.abs(dLon) > Math.PI) {
+            dLon = dLon > 0 ? -(2 * Math.PI - dLon) : (2 * Math.PI + dLon);
+        }
+
+        const dPhi = lat2 - lat1;
+        const dPsi = Math.log(Math.tan(Math.PI / 4 + lat2 / 2) / Math.tan(Math.PI / 4 + lat1 / 2));
+        const q = Math.abs(dPsi) > 1e-12 ? dPhi / dPsi : Math.cos(lat1);
+
+        const lat = lat1 + fraction * dPhi;
+        const lon = lon1 + fraction * dLon;
+        // Adjust longitude for rhumb line
+        const adjLon = lon1 + fraction * dLon;
+
+        return { lat: toDeg(lat), lon: toDeg(adjLon) };
+    }
 
     /**
      * Constants declaration
@@ -1495,7 +1532,7 @@
 
     /**
      * Calculates the distance between two points, honoring the leg type (GC/RL) if provided.
-     * If a legType is provided, uses the appropriate method. Otherwise defaults to GC.
+     * If a legType is provided, uses the appropriate method. Otherwise defaults to RL.
      * @param {number} lat1
      * @param {number} lon1
      * @param {number} lat2
@@ -1504,11 +1541,11 @@
      * @returns {number} Distance in nautical miles
      */
     function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number, legType?: string): number {
-        if (legType === 'RL') {
-            return calculateRhumbLineDistance(lat1, lon1, lat2, lon2);
-        } else {
-            // Default to GC if not specified or explicitly 'GC'
+        if (legType === 'GC') {
             return calculateGreatCircleDistance(lat1, lon1, lat2, lon2);
+        } else {
+            // Default to 'RL' if not specified or explicitly 'RL'
+            return calculateRhumbLineDistance(lat1, lon1, lat2, lon2);
         }
     }
     
@@ -1517,6 +1554,9 @@
      * Updates position, speed, heading, vessel name, etc.
      * @returns {string|null} Frame type if successfully processed, null if error
     */
+    // Timestamp of last valid GPS fix (GGA, GLL, RMC)
+    let lastGpsFixTime: number = 0;
+
     function processNMEA(data: string): string | null {
         // Reset the no frame timer since we received a frame
         resetNoFrameTimer();
@@ -1639,6 +1679,8 @@
         
         // Position variables update (for GPS frames that have position data)
         if (frameType && ['GLL', 'GGA', 'RMC'].includes(frameType)) {
+            // Mark time of last GPS fix
+            lastGpsFixTime = Date.now();
             latitude = (latitudesal !== null && latDirection !== null)
                 ? convertLatitude(latitudesal, latDirection)
                 : null;
@@ -2141,6 +2183,11 @@
             if (lat !== 91 && lon !== 181) { // Valid coordinates
                 // Validate position jump for own vessel before accepting new AIS coordinates
                 if (isOwnVessel) {
+                    // Only update from AIS if no GPS fix in last 10 seconds
+                    if (lastGpsFixTime && Date.now() - lastGpsFixTime < 10000) {
+                        // Ignore AIS update if GPS is active
+                        return;
+                    }
                     // Log for debugging if needed
                     if (mmsi !== myMMSI) {
                         console.log(`Warning: VDO message with different MMSI ${mmsi} vs known ${myMMSI}`);
@@ -2723,20 +2770,23 @@
         for (let i = 0; i < gpxRoute.length - 1; i++) {
             const wp1 = gpxRoute[i];
             const wp2 = gpxRoute[i + 1];
-            if (wp1.type === 'GC' || !wp1.type) {
+            if (wp1.type === 'GC') {
                 // Interpolate great circle points
                 const dist = calculateGreatCircleDistance(wp1.lat, wp1.lon, wp2.lat, wp2.lon);
                 const gcPoints = interpolateGreatCircle(wp1.lat, wp1.lon, wp2.lat, wp2.lon, dist / 10);
                 routeLatLngs = routeLatLngs.concat(gcPoints);
-            } else if (wp1.type === 'RL') {
-                // Interpolate rhumb line points (or just straight line)
-                // For now, just push the endpoints for RL
-                routeLatLngs.push([wp1.lat, wp1.lon]);
+            } else if (wp1.type === 'RL' || !wp1.type) {
+                // Interpolate rhumb line points for RL
+                const dist = calculateRhumbLineDistance(wp1.lat, wp1.lon, wp2.lat, wp2.lon);
+                const numPoints = Math.max(2, Math.round(dist / 1)); // 1 NM per segment, at least 2 points
+                for (let j = 0; j < numPoints; j++) {
+                    const f = j / (numPoints - 1);
+                    const pt = interpolateRhumbLinePoint(wp1.lat, wp1.lon, wp2.lat, wp2.lon, f);
+                    routeLatLngs.push([pt.lat, pt.lon]);
+                }
             } else {
-                // Fallback: treat as GC
-                const dist = calculateGreatCircleDistance(wp1.lat, wp1.lon, wp2.lat, wp2.lon);
-                const gcPoints = interpolateGreatCircle(wp1.lat, wp1.lon, wp2.lat, wp2.lon, dist / 10);
-                routeLatLngs = routeLatLngs.concat(gcPoints);
+                // Fallback: treat as RL
+                routeLatLngs.push([wp1.lat, wp1.lon]);
             }
         }
         // Always add the last waypoint
@@ -2901,39 +2951,64 @@
     function findClosestPointOnSegment(
         pointLat: number, pointLon: number,
         segmentStartLat: number, segmentStartLon: number,
-        segmentEndLat: number, segmentEndLon: number
-        ) {
-        // Convert to Cartesian (x, y) for small distances
-        const px = pointLon;
-        const py = pointLat;
-        const ax = segmentStartLon;
-        const ay = segmentStartLat;
-        const bx = segmentEndLon;
-        const by = segmentEndLat;
-
-        // Vector AB
-        const abx = bx - ax;
-        const aby = by - ay;
-        // Vector AP
-        const apx = px - ax;
-        const apy = py - ay;
-
-        // Project AP onto AB, get t (progress along segment)
-        const ab2 = abx * abx + aby * aby;
-        let t = ab2 === 0 ? 0 : (apx * abx + apy * aby) / ab2;
-
-        // Clamp t to [0, 1] for closest point on segment
-        const tClamped = Math.max(0, Math.min(1, t));
-        const closestX = ax + tClamped * abx;
-        const closestY = ay + tClamped * aby;
-
-        // Distance from P to closest point
-    const distance = calculateGreatCircleDistance(py, px, closestY, closestX);
-
-        return {
-            distance: distance,
-            progress: t // Note: return unclamped t for navigation logic!
-        };
+        segmentEndLat: number, segmentEndLon: number,
+        legType: string = 'GC'
+    ) {
+        if (legType === 'RL') {
+            // Rhumb line: search for t in [0,1] that minimizes distance (geodetic)
+            let minDist = Infinity;
+            let bestT = 0;
+            for (let t = 0; t <= 1.0001; t += 0.02) {
+                const pt = interpolateRhumbLinePoint(segmentStartLat, segmentStartLon, segmentEndLat, segmentEndLon, t);
+                const d = calculateRhumbLineDistance(pointLat, pointLon, pt.lat, pt.lon);
+                if (d < minDist) {
+                    minDist = d;
+                    bestT = t;
+                }
+            }
+            for (let dt = -0.02; dt <= 0.02; dt += 0.002) {
+                let t = bestT + dt;
+                if (t < 0) t = 0;
+                if (t > 1) t = 1;
+                const pt = interpolateRhumbLinePoint(segmentStartLat, segmentStartLon, segmentEndLat, segmentEndLon, t);
+                const d = calculateRhumbLineDistance(pointLat, pointLon, pt.lat, pt.lon);
+                if (d < minDist) {
+                    minDist = d;
+                    bestT = t;
+                }
+            }
+            return {
+                distance: minDist,
+                progress: bestT
+            };
+        } else {
+            // Great circle: search for t in [0,1] that minimizes distance
+            let minDist = Infinity;
+            let bestT = 0;
+            for (let t = 0; t <= 1.0001; t += 0.02) {
+                const pt = interpolateGreatCirclePoint(segmentStartLat, segmentStartLon, segmentEndLat, segmentEndLon, t);
+                const d = calculateGreatCircleDistance(pointLat, pointLon, pt.lat, pt.lon);
+                if (d < minDist) {
+                    minDist = d;
+                    bestT = t;
+                }
+            }
+            for (let dt = -0.02; dt <= 0.02; dt += 0.002) {
+                let t = bestT + dt;
+                if (t < 0) t = 0;
+                if (t > 1) t = 1;
+                const pt = interpolateGreatCirclePoint(segmentStartLat, segmentStartLon, segmentEndLat, segmentEndLon, t);
+                const d = calculateGreatCircleDistance(pointLat, pointLon, pt.lat, pt.lon);
+                if (d < minDist) {
+                    minDist = d;
+                    bestT = t;
+                }
+            }
+            return {
+                distance: minDist,
+                progress: bestT
+            };
+        }
     }
 
     /**
@@ -3004,7 +3079,7 @@
         // Step 2: Calculate route progress (for ETC/ETA)
         let distanceCovered = 0;
         for (let i = 0; i < bestSegmentIndex; i++) {
-            const legType = gpxRoute[i + 1].type || 'GC';
+            const legType = gpxRoute[i + 1].type || 'RL';
             distanceCovered += calculateDistance(
                 gpxRoute[i].lat, gpxRoute[i].lon,
                 gpxRoute[i + 1].lat, gpxRoute[i + 1].lon,
@@ -3012,7 +3087,7 @@
             );
         }
         if (bestSegmentIndex < gpxRoute.length - 1) {
-            const legType = gpxRoute[bestSegmentIndex + 1].type || 'GC';
+            const legType = gpxRoute[bestSegmentIndex + 1].type || 'RL';
             const segmentDistance = calculateDistance(
                 gpxRoute[bestSegmentIndex].lat, gpxRoute[bestSegmentIndex].lon,
                 gpxRoute[bestSegmentIndex + 1].lat, gpxRoute[bestSegmentIndex + 1].lon,
@@ -3088,9 +3163,39 @@
      * @returns {{lat: number, lon: number, heading: number} | null} Projected position as a Leaflet LatLng object
     */
     function computeRouteProjection(currentSOG: number, duration: number): {lat: number, lon: number, heading: number} | null {
-        console.log(`Computing route projection: SOG=${currentSOG}, duration=${duration.toFixed(1)}`);
         if (!isRouteLoaded || gpxRoute.length < 2 || currentSOG <= 0) return null;
-        
+
+        // Helper to snap to route (GC or RL)
+        function snapToRoute(lat: number, lon: number) {
+            let bestSegmentIndex = 0;
+            let minDistance = Infinity;
+            let snappedLat = lat;
+            let snappedLon = lon;
+            let snappedT = 0;
+            for (let i = 0; i < gpxRoute.length - 1; i++) {
+                const segStart = gpxRoute[i];
+                const segEnd = gpxRoute[i + 1];
+                const legType = segStart.type || 'GC';
+                const proj = findClosestPointOnSegment(lat, lon, segStart.lat, segStart.lon, segEnd.lat, segEnd.lon, legType);
+                if (proj.distance < minDistance) {
+                    minDistance = proj.distance;
+                    bestSegmentIndex = i;
+                    snappedT = Math.max(0, Math.min(1, proj.progress));
+                    if (legType === 'GC') {
+                        const snapped = interpolateGreatCirclePoint(segStart.lat, segStart.lon, segEnd.lat, segEnd.lon, snappedT);
+                        snappedLat = snapped.lat;
+                        snappedLon = snapped.lon;
+                    } else {
+                        // RL: interpolate along rhumb line
+                        const snapped = interpolateRhumbLinePoint(segStart.lat, segStart.lon, segEnd.lat, segEnd.lon, snappedT);
+                        snappedLat = snapped.lat;
+                        snappedLon = snapped.lon;
+                    }
+                }
+            }
+            return { snappedLat, snappedLon, bestSegmentIndex, snappedT };
+        }
+
         if (routeStartTime) {
             const targetTime = windyStore.get('timestamp');
             const now = Date.now();
@@ -3107,40 +3212,7 @@
             // After departure: project from vessel's real position, using duration from now to timeline
             let startLat = lastLatitude ?? gpxRoute[0].lat;
             let startLon = lastLongitude ?? gpxRoute[0].lon;
-            let bestSegmentIndex = 0;
-            let minDistance = Infinity;
-            let snappedLat = startLat;
-            let snappedLon = startLon;
-
-            // Total distance to travel in NM
-            const distanceToTravel = (currentSOG * duration) / 3600; // knots * hours
-            let distanceCovered = 0;
-
-            // Snap to closest point on route
-            for (let i = 0; i < gpxRoute.length - 1; i++) {
-                const segStart = gpxRoute[i];
-                const segEnd = gpxRoute[i + 1];
-                const proj = findClosestPointOnSegment(
-                    startLat, startLon,
-                    segStart.lat, segStart.lon,
-                    segEnd.lat, segEnd.lon
-                );
-                if (proj.distance < minDistance) {
-                    minDistance = proj.distance;
-                    bestSegmentIndex = i;
-                    const t = Math.max(0, Math.min(1, proj.progress));
-                    if (segStart.type === 'GC') {
-                        const snapped = interpolateGreatCirclePoint(segStart.lat, segStart.lon, segEnd.lat, segEnd.lon, t);
-                        snappedLat = snapped.lat;
-                        snappedLon = snapped.lon;
-                    } else {
-                        // Linear interpolation (rhumb line)
-                        snappedLat = segStart.lat + (segEnd.lat - segStart.lat) * t;
-                        snappedLon = segStart.lon + (segEnd.lon - segStart.lon) * t;
-                    }
-                }
-            }
-
+            let { snappedLat, snappedLon, bestSegmentIndex } = snapToRoute(startLat, startLon);
             let currentLat = snappedLat;
             let currentLon = snappedLon;
             let currentIndex = bestSegmentIndex;
@@ -3152,7 +3224,8 @@
             // Walk the route from the snapped point
             while (remainingDistance > 0 && currentIndex < gpxRoute.length - 1) {
                 const nextWaypoint = gpxRoute[currentIndex + 1];
-                const segmentDistance = calculateDistance(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon);
+                const legType = gpxRoute[currentIndex].type || 'GC';
+                const segmentDistance = calculateDistance(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon, legType);
 
                 if (segmentDistance <= remainingDistance) {
                     remainingDistance -= segmentDistance;
@@ -3161,13 +3234,11 @@
                     currentIndex++;
                 } else {
                     const ratio = segmentDistance === 0 ? 0 : remainingDistance / segmentDistance;
-                    if (gpxRoute[currentIndex].type === 'GC') {
-                        // Use great circle interpolation for projection
+                    if (legType === 'GC') {
                         const gc = interpolateGreatCirclePoint(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon, ratio);
                         currentLat = gc.lat;
                         currentLon = gc.lon;
                     } else {
-                        // Linear interpolation (rhumb line)
                         currentLat += (nextWaypoint.lat - currentLat) * ratio;
                         currentLon += (nextWaypoint.lon - currentLon) * ratio;
                     }
@@ -3189,33 +3260,7 @@
         // Fallback: project from current position for duration (in seconds)
         let startLat = lastLatitude ?? gpxRoute[0].lat;
         let startLon = lastLongitude ?? gpxRoute[0].lon;
-        let bestSegmentIndex = 0;
-        let minDistance = Infinity;
-        let snappedLat = startLat;
-        let snappedLon = startLon;
-
-        // Snap to closest point on route
-        for (let i = 0; i < gpxRoute.length - 1; i++) {
-            const segStart = gpxRoute[i];
-            const segEnd = gpxRoute[i + 1];
-            const proj = findClosestPointOnSegment(
-                startLat, startLon,
-                segStart.lat, segStart.lon,
-                segEnd.lat, segEnd.lon
-            );
-            if (proj.distance < minDistance) {
-                minDistance = proj.distance;
-                bestSegmentIndex = i;
-                const t = Math.max(0, Math.min(1, proj.progress));
-                // Use great circle interpolation for snap
-                const snapped = interpolateGreatCirclePoint(segStart.lat, segStart.lon, segEnd.lat, segEnd.lon, t);
-                snappedLat = snapped.lat;
-                snappedLon = snapped.lon;
-                //snappedLat = segStart.lat + (segEnd.lat - segStart.lat) * t;
-                //snappedLon = segStart.lon + (segEnd.lon - segStart.lon) * t;
-            }
-        }
-
+        let { snappedLat, snappedLon, bestSegmentIndex } = snapToRoute(startLat, startLon);
         let currentLat = snappedLat;
         let currentLon = snappedLon;
         let currentIndex = bestSegmentIndex;
@@ -3227,7 +3272,7 @@
         // Walk the route from the snapped point
         while (remainingDistance > 0 && currentIndex < gpxRoute.length - 1) {
             const nextWaypoint = gpxRoute[currentIndex + 1];
-            const legType = nextWaypoint.type || 'GC';
+            const legType = gpxRoute[currentIndex].type || 'GC';
             const segmentDistance = calculateDistance(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon, legType);
 
             if (segmentDistance <= remainingDistance) {
@@ -3237,12 +3282,15 @@
                 currentIndex++;
             } else {
                 const ratio = segmentDistance === 0 ? 0 : remainingDistance / segmentDistance;
-                // Use great circle interpolation for projection
-                const gc = interpolateGreatCirclePoint(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon, ratio);
-                currentLat = gc.lat;
-                currentLon = gc.lon;
-                //currentLat += (nextWaypoint.lat - currentLat) * ratio;
-                //currentLon += (nextWaypoint.lon - currentLon) * ratio;
+                if (legType === 'GC') {
+                    const gc = interpolateGreatCirclePoint(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon, ratio);
+                    currentLat = gc.lat;
+                    currentLon = gc.lon;
+                } else {
+                    const rh = interpolateRhumbLinePoint(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon, ratio);
+                    currentLat = rh.lat;
+                    currentLon = rh.lon;
+                }
                 remainingDistance = 0;
             }
         }
