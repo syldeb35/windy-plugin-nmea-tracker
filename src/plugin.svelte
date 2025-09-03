@@ -6,7 +6,7 @@
 </div>
 
 {#if helpVisible}
-<div id="help" class="plugin-summary" style="border-radius:8px; padding:12px; margin-bottom:16px; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); z-index:9999; background:#3c3c3c; color:white; box-shadow: 0 4px 20px rgba(0,0,0,0.5); max-width:600px; max-height:80vh; overflow-y:auto; border: 1px solid #555;">
+<div id="help" class="plugin-summary" style="border-radius:8px; padding:12px; margin-bottom:16px; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); z-index:9999; background:#3c3c3c; color:white; box-shadow: 0 4px 20px rgba(0,0,0,0.5); max-width:800px; max-height:80vh; overflow-y:auto; border: 1px solid #555;">
     <div style="text-align: center; margin-bottom: 15px;">
         <strong style="color:white; font-size: 18px;">🛳️ NMEA Tracker Help 🛳️</strong>
     </div>
@@ -14,25 +14,40 @@
     <div style="color:white; line-height: 1.4;">
         <p><strong>📍 What does this plugin do?</strong></p>
         <p style="margin-bottom: 12px;">Track your vessel's real-time position on the Windy map using NMEA or AIS data from your GPS/navigation system.</p>
-        
         <p><strong>🔧 How to get started:</strong></p>
         <ol style="margin: 8px 0 12px 20px; color:white;">
             <li><strong>Configure your server:</strong> Click the "Configuration" link to set up your data source (UDP, TCP, or Serial port)</li>
             <li><strong>Enter server address:</strong> Type your server's IP address or use "localhost" for local connections</li>
             <li><strong>Connect:</strong> The plugin will automatically connect and display your vessel's position</li>
         </ol>
-        
         <p><strong>⭐ Key Features:</strong></p>
         <ul style="margin: 8px 0 12px 18px; color:white;">
             <li>📡 <strong>Real-time tracking</strong> - See your vessel move live on the map</li>
             <li>🎯 <strong>Position details</strong> - View latitude, longitude, course, and speed</li>
             <li>🏷️ <strong>Vessel identification</strong> - Shows vessel name from AIS data</li>
             <li>📈 <strong>Track history</strong> - Visual trail of your vessel's path</li>
-            <li>🌤️ <strong>Weather at position</strong> - Get forecast for your current location</li>
+            <li>🌤️ <strong>Weather at position</strong> - Get forecast for your current location or projected position</li>
             <li>🎮 <strong>Test mode</strong> - Simulate movement for testing</li>
-            <li>🗺️ <strong>GPX route navigation</strong> - Upload and follow sailing routes</li>
+            <li>🗺️ <strong>GPX Route Editor</strong> - Upload, edit, and follow sailing routes with a user-friendly editor</li>
+            <li>🧭 <strong>Leg types: RL & GC</strong> - Each route leg can be set as Rhumb Line (RL, constant bearing) or Great Circle (GC, shortest path)</li>
+            <li>📏 <strong>Accurate distance calculation</strong> - Route and leg distances are computed using the correct geodetic method</li>
+            <li>📌 <strong>Waypoint ETA & progress</strong> - See estimated time of arrival and progress for each waypoint</li>
+            <li>🔄 <strong>Route projection</strong> - Project your future position based on SOG/COG or along the loaded route</li>
+            <li>🖊️ <strong>Route Editor modal</strong> - Edit waypoints, leg types, and export your route as GPX</li>
+            <li>🛰️ <strong>GPS-over-AIS priority</strong> - Always uses GPS position if available, falls back to AIS otherwise</li>
         </ul>
-         <!-- Layer Organization Section -->
+        <div style="background: rgba(255,255,255,0.1); padding: 10px; border-radius: 5px; margin: 12px 0;">
+            <strong>💡 Tips:</strong>
+            <ul style="margin: 6px 0 0 18px; color:white;">
+                <li>Use the <b>Route Editor</b> to set each leg as RL (constant bearing) or GC (great circle) for precise navigation.</li>
+                <li>Projection and weather forecast update instantly with timeline, SOG, or COG changes—even with no route loaded.</li>
+                <li>Passed waypoints are colored for easy progress tracking.</li>
+                <li>All server and route settings are saved for your next session.</li>
+            </ul>
+        </div>
+        <p style="font-size: 90%; color: #ccc; margin-top: 15px; text-align: center;">
+            Perfect for sailing, motor boating, commercial vessels, and maritime enthusiasts!
+        </p>
         <hr />
         <div class="layer-organization-section">
             <p style="font-weight: bold; margin-bottom: 10px;">📚 Icon Layer Organization:</p>
@@ -145,8 +160,8 @@
         <!-- <p><strong>Last received NMEA frames:</strong></p>
         <p class="nmea-types">{nmeaHistory.join(', ')}</p> -->
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; width: 100%; margin-bottom: 8px;">
-            <div><strong>&phi;:</strong> {myLatitude}</div>
-            <div><strong>&lambda;:</strong> {myLongitude}</div>
+            <div><strong>&phi;:</strong> {myLatitude !== null ? myLatitude : '--'}</div>
+            <div><strong>&lambda;:</strong> {myLongitude !== null ? myLongitude : '--'}</div>
             <div>
                 <strong>COG:</strong>
                 {testModeEnabled ? `${testCOG.toFixed(1)}° (TEST)` : `${myCourseOverGroundT.toFixed(1)}°`}
@@ -2475,7 +2490,7 @@
             deg = Math.floor(Math.abs(val) / 100);
             min = Math.abs(val) - deg * 100;
         }
-        return ('00' + deg).slice(-2) + '° ' + ('0' + ((Math.floor(min * 1000) / 1000).toFixed(4))).slice(-7) + "' " + hemisphere;
+        return ('00' + deg).slice(-2) + '° ' + ('0' + ((Math.floor(min * 1000) / 1000).toFixed(2))).slice(-7) + "' " + hemisphere;
     }
 
     /**
@@ -2497,7 +2512,7 @@
             deg = Math.floor(Math.abs(val) / 100);
             min = Math.abs(val) - deg * 100;
         }
-        return ('000' + deg).slice(-3) + '° ' + ('0' + ((Math.floor(min * 1000) / 1000).toFixed(4))).slice(-7) + "' " + hemisphere;
+        return ('000' + deg).slice(-3) + '° ' + ('0' + ((Math.floor(min * 1000) / 1000).toFixed(2))).slice(-7) + "' " + hemisphere;
     }
     
     /**
