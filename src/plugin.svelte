@@ -266,7 +266,7 @@
                         <th style="text-align:center;">Type</th>
                     </tr>
                     {#each gpxRoute.slice(0, -1) as wp, i}
-                    <tr style={i < nextWaypointIndex ? 'background:#e0ffe0;' : ''}>
+                    <tr style={i+1 < nextWaypointIndex ? 'background:#e0ffe0;' : ''}>
                         <td style="font-size: small;">{i+1}</td>
                         <td style="font-size: small; min-width:260px; width:38%; resize:horizontal; overflow:auto;">{wp.name || `WP ${i+1}`}</td>
                         <td style="font-size: small; min-width:260px; width:38%; resize:horizontal; overflow:auto;">{gpxRoute[i+1].name || `WP ${i+2}`}</td>
@@ -339,9 +339,6 @@
                 <button id="toggleWaypointsButton" on:click={toggleRouteWaypoints} style="margin-left: 10px;">
                     📍 {showRouteWaypoints ? 'Hide waypoints' : 'Show waypoints'}
                 </button>
-                <button on:click={clearRoute} style="background: #ff4444; margin-left: 10px;">
-                    🗑️ Clear Route
-                </button>
                 <button on:click={() => showLegEditor = !showLegEditor} style="margin-left: 10px;">
                     ✏️ Edit Leg Types
                 </button>
@@ -358,14 +355,11 @@
     <div class="persistence-section">
         <p style="font-weight: bold; margin-bottom: 10px;">💾 Data Storage:</p>
         <div class="plugin__buttons__centered" style="margin-bottom: 10px;">
-            <button on:click={saveTrackHistory} style="background: #4CAF50;">
-                💾 Save Track
+            <button on:click={() => {clearStoredData('track-history'); }} style="background: #2196F3;">
+                🗑️ Clear Track
             </button>
-            <button on:click={() => { saveGpxRoute(); }} style="background: #2196F3;">
-                💾 Save Route
-            </button>
-            <button on:click={clearStoredData} style="background: #f44336;">
-                🗑️ Clear All
+            <button on:click={() => { clearRoute(); clearStoredData('gpx-route'); }} style="background: #ff6600;">
+                🗑️ Clear Route
             </button>
         </div>
         <p style="font-size: 11px; color: #666; margin: 5px 0;">
@@ -647,6 +641,11 @@
             // You can trigger an action here, update a variable, etc.
             windyStore.set('timestamp', getRoundedHourTimestamp(ts));
             updateProjectionForTimeline(ts);
+            updateButtonText();
+            if (!isRouteLoaded && lastLatitude !== null && lastLongitude !== null) {
+                const cog = testModeEnabled ? testCOG : myCourseOverGroundT;
+                addBoatMarker(lastLatitude, lastLongitude, cog);
+            }
         });
 
         if (typeof unsub === 'function') {
@@ -1079,6 +1078,8 @@
     */
     function saveTrackHistory(): void {
         try {
+            // Always keep shortPathLatLngs in sync with pathLatLngs
+            shortPathLatLngs = [...pathLatLngs];
             if (shortPathLatLngs.length > 0) {
                 // Convert LatLng objects to simple {lat, lng} objects for JSON storage
                 const trackData = shortPathLatLngs.map(latLng => ({
@@ -1190,11 +1191,22 @@
     /**
      * Clear all stored data
     */
-    function clearStoredData(): void {
+    function clearStoredData(item: string): void {
         try {
-            localStorage.removeItem('windy-nmea-track-history');
-            localStorage.removeItem('windy-nmea-gpx-route');
-            console.log('All stored navigation data cleared');
+            switch (item) {
+                case 'track-history':
+                    localStorage.removeItem('windy-nmea-track-history');
+                    break;
+                case 'gpx-route':
+                    localStorage.removeItem('windy-nmea-gpx-route');
+                    break;
+                case 'all':
+                    localStorage.removeItem('windy-nmea-track-history');
+                    localStorage.removeItem('windy-nmea-gpx-route');
+                    break;
+                default:
+                    break;
+            }
         } catch (error) {
             console.warn('Failed to clear stored data:', error);
         }
@@ -1249,7 +1261,7 @@
         }
         if (projectionHours !== null && projectionHours > 0) {
             if (!routeProjectionActive) {
-                buttonText = `🌬️ Show ${myOverlay} prediction (in ${getRoundedHourTimestamp(projectionHours)}h)`;
+                buttonText = `🌬️ Show ${myOverlay} prediction (in ${projectionHours.toFixed(1)}h)`;
             } else {
                 const ts = getRoundedHourTimestamp(windyStore.get('timestamp'));
                 let hours = '0';
@@ -1298,8 +1310,16 @@
         testCOG = normalizeCOG(rawValue);
         // Update the input field to reflect the normalized value
         target.value = testCOG.toString();
+        // Update the projection for the current testCOG & timeline
+        updateProjectionForTimeline(windyStore.get('timestamp'));
+        updateButtonText();
+        if (!isRouteLoaded && lastLatitude !== null && lastLongitude !== null) {
+            const cog = testModeEnabled ? testCOG : myCourseOverGroundT;
+            addBoatMarker(lastLatitude, lastLongitude, cog);
+        }
+        localStorage.setItem('testCOG', target.value);
     }
-    
+
     /**
      * Handles SOG input changes
      * @param event - The input change event
@@ -1309,6 +1329,11 @@
         testSOG = parseFloat(target.value) || 0;
         // Update the projection for the current testSOG & timeline
         updateProjectionForTimeline(windyStore.get('timestamp'));
+        updateButtonText();
+        if (!isRouteLoaded && lastLatitude !== null && lastLongitude !== null) {
+            const cog = testModeEnabled ? testCOG : myCourseOverGroundT;
+            addBoatMarker(lastLatitude, lastLongitude, cog);
+        }
         localStorage.setItem('testSOG', target.value);
     }
 
@@ -3316,13 +3341,11 @@
      * @returns Projected position as a Leaflet LatLng object
     */
     function computeProjection(lat: number, lon: number, cog: number, sog: number, duration?: number): any {
-        // Use cached route projection if available
+        // Use cached route projection if available (only for route-based projection)
         if (lastRouteProjection) {
             return L.latLng(lastRouteProjection.lat, lastRouteProjection.lon);
         }
-        if (lastFallbackProjection) {
-            return L.latLng(lastFallbackProjection.lat, lastFallbackProjection.lon);
-        }
+        // For fallback (COG/SOG) projection, always recalculate, do not use cache
 
         // Fallback: traditional COG/SOG projection if no cached value
         const ts = getRoundedHourTimestamp(windyStore.get('timestamp'));
@@ -3667,10 +3690,11 @@
      * @param ts
      */
     function updateProjectionForTimeline(ts: number) {
-        projectionHours = (getRoundedHourTimestamp(ts) - getRoundedHourTimestamp()) / (3600 * 1000); // in hours
-        //projectionHours = (ts - Date.now()) / (3600 * 1000); // in hours
+        //projectionHours = (getRoundedHourTimestamp(ts) - getRoundedHourTimestamp()) / (3600 * 1000); // in hours
+        projectionHours = (ts - Date.now()) / (3600 * 1000); // in hours
         updateButtonText();
 
+        // Always use latest test values if test mode is enabled
         let effectiveSOG = testModeEnabled ? testSOG : mySpeedOverGround;
         let effectiveCOG = testModeEnabled ? testCOG : myCourseOverGroundT;
 
@@ -3680,7 +3704,7 @@
             lastRouteProjection = computeRouteProjection(effectiveSOG, durationSeconds);
             lastFallbackProjection = null;
         } else {
-            // Fallback: COG/SOG projection from current position
+            // Fallback: COG/SOG projection from current position, always use latest testCOG/testSOG if test mode
             if (lastLatitude !== null && lastLongitude !== null && effectiveSOG > 0.5 && projectionHours > 0) {
                 const fallback = computeProjection(lastLatitude, lastLongitude, effectiveCOG, effectiveSOG, projectionHours);
                 lastFallbackProjection = {
