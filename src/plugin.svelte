@@ -1,6 +1,4 @@
 
-
-
 <div class="plugin__mobile-header">
     {title}
 </div>
@@ -126,7 +124,7 @@
     </label>
     <p style="margin-bottom: 12px;">Test the server: <a href="{route}" target="_blank"><code>Testing</code></a></p>
     <p class="connection-state" style="margin-bottom: 12px;">
-      🔌 Connection: <span class={isConnected ? ' connected' : ' disconnected'}>
+      🔌 Server status: <span class={isConnected ? ' connected' : ' disconnected'}>
         {isConnected ? ' Connected' : ' Disconnected'}
       </span>
     </p>
@@ -173,38 +171,16 @@
         </div>
         
         <div class="plugin__buttons__centered">
-            <button on:click={centerShip}>📍 Center on vessel</button>
-            <button on:click={toggleFollowShip}>
-                {followShip ? '🛑 Stop Tracking' : '▶️ Follow vessel'}
+            <button on:click={centerShip} title="Center on the vessel present position">📍 Center</button>
+            <button on:click={toggleFollowShip} title="Toggle vessel tracking">
+                {followShip ? '🛑 Stop' : '▶️ Follow'}
             </button>
+            <button on:click={setTimelineNow} title="Set timeline to present time">⏰ Now</button>
         </div>
         <div class="plugin__buttons__centered">
             <button id="button" on:click={showWeatherPopup}>{@html buttonText}</button>
         </div>
     {/if}
-    <!-- Boat Icon Size Control -->
-    <hr />
-    <div class="icon-size-section">
-        <label for="boatIconSize" style="display: block; margin-bottom: 8px;">
-            <strong>🚢 Boat Icon Size: {boatIconSize.toFixed(1)}x</strong>
-        </label>
-        <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 12px;">Small</span>
-            <input 
-                type="range" 
-                id="boatIconSize"
-                bind:value={boatIconSize}
-                min="0.5" 
-                max="2.0" 
-                step="0.1"
-                style="flex: 1;"
-            />
-            <span style="font-size: 12px;">Large</span>
-        </div>
-        <p style="font-size: 12px; color: #666; margin: 5px 0;">
-            Adjust the size of your boat icon on the map (0.5x to 2.0x)
-        </p>
-    </div>    
     <!-- Test Mode Controls -->
     <hr />
     <div class="test-mode-section">
@@ -281,7 +257,13 @@
                         <th style="text-align:center;">Type</th>
                     </tr>
                     {#each gpxRoute.slice(0, -1) as wp, i}
-                    <tr style={i+1 < nextWaypointIndex ? 'background:#e0ffe0;' : ''}>
+                    <tr style={
+                        i+1 < nextWaypointIndex
+                            ? 'background:#e0ffe0;'
+                            : i+1 === nextWaypointIndex
+                                ? 'color:green; font-weight: bold;'
+                                : ''
+                    }>
                         <td style="font-size: small;">{i+1}</td>
                         <td style="font-size: small; min-width:260px; width:38%; resize:horizontal; overflow:auto;">{wp.name || `WP ${i+1}`}</td>
                         <td style="font-size: small; min-width:260px; width:38%; resize:horizontal; overflow:auto;">{gpxRoute[i+1].name || `WP ${i+2}`}</td>
@@ -383,7 +365,29 @@
     </div>
     <div class="error" id="err">
         <p></p>
-    </div>
+    </div><!-- Boat Icon Size Control -->
+    <hr />
+    <div class="icon-size-section">
+        <label for="boatIconSize" style="display: block; margin-bottom: 8px;">
+            <strong>🚢 Boat Icon Size: {boatIconSize.toFixed(1)}x</strong>
+        </label>
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 12px;">Small</span>
+            <input 
+                type="range" 
+                id="boatIconSize"
+                bind:value={boatIconSize}
+                min="0.5" 
+                max="2.0" 
+                step="0.1"
+                style="flex: 1;"
+            />
+            <span style="font-size: 12px;">Large</span>
+        </div>
+        <p style="font-size: 12px; color: #666; margin: 5px 0;">
+            Adjust the size of your boat icon on the map (0.5x to 2.0x)
+        </p>
+    </div>    
     <div id="footer">
     <div class="centered">
                 <button on:click={toggleHelp}>🛳️ <big>Help</big> 🛳️</button>
@@ -517,6 +521,9 @@
     let forecastIcon: any = null;
     let pathLatLngs: any[] = []; // Array to hold path latitude/longitude points
     let shortPathLatLngs: any[] = []; // Array to hold short path latitude/longitude points
+    // --- 24h short track history logic ---
+    let shortTrackHistory: any[] = [];
+    let lastShortTrackSaveTime: number = 0;
     let openedPopup: any = null;
     // Store AIS ships data globally so all functions can access it
     let aisShips: { [mmsi: string]: any } = {};
@@ -613,17 +620,38 @@
         document.addEventListener('visibilitychange', handleVisibilityChange);
         window.addEventListener('focus', handleVisibilityChange);
         
-        // Restore saved data
-        // Load track history
-        const savedTrack = loadTrackHistory();
-        if (savedTrack.length > 0) {
-            pathLatLngs = savedTrack;
-            // Redraw the track on map
-            if (pathLatLngs.length > 1) {
-                boatPath = L.polyline(pathLatLngs, { color: 'blue', weight: 3 }).addTo(map);
-            }
+        // Load short track on plugin start
+        loadShortTrackHistory();
+        let shortLatLngs = [];
+        if (shortTrackHistory.length > 0) {
+            shortLatLngs = shortTrackHistory.map(p => L.latLng(p.lat, p.lon));
         }
-
+        // Load main track
+        const savedTrack = loadTrackHistory();
+        // Merge: Only add main track points that are newer than the last short track point
+        let mergedLatLngs = [...shortLatLngs];
+        if (savedTrack.length > 0) {
+            let lastShort = shortTrackHistory.length > 0 ? shortTrackHistory[shortTrackHistory.length - 1] : null;
+            let startIdx = 0;
+            if (lastShort) {
+                for (let i = 0; i < savedTrack.length; i++) {
+                    if (
+                        Math.abs(savedTrack[i].lat - lastShort.lat) < 1e-6 &&
+                        Math.abs(savedTrack[i].lng - lastShort.lon) < 1e-6
+                    ) {
+                        startIdx = i + 1;
+                        break;
+                    }
+                }
+            }
+            mergedLatLngs = [...mergedLatLngs, ...savedTrack.slice(startIdx)];
+        }
+        pathLatLngs = mergedLatLngs;
+        // Redraw the track on map
+        if (pathLatLngs.length > 1) {
+            boatPath = L.polyline(pathLatLngs, { color: 'blue', weight: 3 }).addTo(map);
+        }
+    
         // Load GPX route
         if (loadGpxRoute()) {
             calculateRouteDistance();
@@ -1090,11 +1118,15 @@
 
     /**
      * Save track history to localStorage
-    */
+     */
     function saveTrackHistory(): void {
         try {
             // Always keep shortPathLatLngs in sync with pathLatLngs
+            // Limit to the most recent 1000 points to avoid quota errors
             shortPathLatLngs = [...pathLatLngs];
+            if (shortPathLatLngs.length > 86400) {
+                shortPathLatLngs = shortPathLatLngs.slice(-86400);
+            }
             if (shortPathLatLngs.length > 0) {
                 // Convert LatLng objects to simple {lat, lng} objects for JSON storage
                 const trackData = shortPathLatLngs.map(latLng => ({
@@ -1102,8 +1134,7 @@
                     lng: latLng.lng
                 }));
                 localStorage.setItem('windy-nmea-track-history', JSON.stringify(trackData));
-                
-                //console.log(`Track history saved: ${trackData.length} points`);
+                console.log(`Track history saved: ${trackData.length} points`);
             }
         } catch (error) {
             console.warn('Failed to save track history to localStorage:', error);
@@ -1129,6 +1160,46 @@
             console.warn('Failed to load track history from localStorage:', error);
         }
         return [];
+    }
+
+    /**
+     * Save a short track point to localStorage
+     * @param lat
+     * @param lon
+     */
+    function saveShortTrackPoint(lat: any, lon: any): void {
+        const now = Date.now();
+        // Remove points older than 24h
+        const cutoff = now - 24 * 60 * 60 * 1000;
+        shortTrackHistory = shortTrackHistory.filter(p => p.t >= cutoff);
+        const last = shortTrackHistory.length > 0 ? shortTrackHistory[shortTrackHistory.length - 1] : null;
+        // Only save if 60s have passed since last save and position is different from last
+        if (
+            (now - lastShortTrackSaveTime >= 60000) &&
+            (!last || Math.abs(lat - last.lat) > 1e-6 || Math.abs(lon - last.lon) > 1e-6)
+        ) {
+            shortTrackHistory.push({ lat, lon, t: now });
+            localStorage.setItem('windy-nmea-shorttrack', JSON.stringify(shortTrackHistory));
+            lastShortTrackSaveTime = now;
+            console.log(`Short track point saved: ${shortTrackHistory.length} points`);
+        }
+    }
+
+    /**
+     * Load short track history from localStorage
+     */
+    function loadShortTrackHistory() {
+        try {
+            const saved = localStorage.getItem('windy-nmea-shorttrack');
+            if (saved) {
+                shortTrackHistory = JSON.parse(saved);
+            } else {
+                shortTrackHistory = [];
+            }
+        } catch (e) {
+            shortTrackHistory = [];
+        }
+        console.log(`Short track history loaded: ${shortTrackHistory.length} points`);
     }
 
     /**
@@ -1241,39 +1312,8 @@
      * Updates the button text based on current overlay and projection hours
     */
     function updateButtonText() {
-        let myOverlay = CurrentOverlay;
-
-        switch (myOverlay) {
-            case 'Windy':
-                myOverlay = 'wind';
-                break;
-            case 'gust':
-                myOverlay = 'wind gusts';
-                break;
-            case 'temp':
-                myOverlay = 'temperature';
-                break;
-            case 'sst':
-                myOverlay = 'sea surface temperature';
-                break;
-            case 'swell1':
-                myOverlay = 'primary swell';
-                break;
-            case 'swell2':
-                myOverlay = 'secondary swell';
-                break;
-            case 'swell3':
-                myOverlay = 'tertiary swell';
-                break;
-            case 'currentsTide':
-                myOverlay = 'tide currents';
-                break;
-            case 'wwaves':
-                myOverlay = 'wind waves';
-                break;
-            default:
-                myOverlay = CurrentOverlay;
-        }
+        
+        const myOverlay = getOverlayName();
         if (projectionHours !== null && projectionHours > 0) {
             if (!routeProjectionActive) {
                 buttonText = `🌬️ Show ${myOverlay} prediction (in ${projectionHours.toFixed(1)}h)`;
@@ -3406,7 +3446,7 @@
         popup.on('remove', () => {
             openedPopup = null;
         });
-
+        
         getLatLonInterpolator().then((interpolator: any) => {
             if (!interpolator) {
                 popup.setContent('Weather layer not available.');
@@ -3423,12 +3463,14 @@
             const forecastDate = ts ? new Date(ts) : new Date();
 
             const overlay = windyStore.get('overlay');
+            const overlayName = getOverlayName();
+
             const values = interpolator({ lat, lon });
-            let content = `<div style="text-align: center;"><strong>${vesselName}</strong><br>φ = ${displayLatitude(lat)}, λ= ${displayLongitude(lon)}</div>`;
-            if (projectionHours === 0) {
-                content += `<hr><div><small><strong>${overlay} actual forecast :</strong></small></div>`;
-            } else if (projectionHours !== null && projectionHours > 0) {
-                content += `<hr><div><small><strong>${overlay} forecast in ${projectionHours} hours :</strong></small></div>`;
+            let content = `<div style="text-align: center;"><strong>${vesselName}</strong><br>φ = ${displayLatitude(lat)}, λ= ${displayLongitude(lon)}</div><hr>`;
+                if (Math.abs(projectionHours ?? 0) < 0.1) {
+                    content += `<div><small><strong>${capitalizeWords(overlayName)} actual forecast :</strong></small></div>`;
+                } else if (projectionHours !== null && projectionHours > 0) {
+                content += `<div><small><strong>${capitalizeWords(overlayName)} forecast in ${projectionHours.toFixed(1)} hours :</strong></small></div>`;
             }
             if (!Array.isArray(values)) {
                 content += '❌ No interpolated data.';
@@ -3555,9 +3597,12 @@
             saveTrackHistory();
         }
 
+        // Save one point every 60 seconds to 24h short track
+        saveShortTrackPoint(lat, lon);
+
         // Use test values if test mode is enabled
         let effectiveSOG = mySpeedOverGround;
-        let effectiveCOG = cog;
+        let effectiveCOG = validCOG;
         
         if (testModeEnabled) {
             effectiveSOG = testSOG;
@@ -3695,8 +3740,14 @@
         }
         
         // Automatic vessel tracking
-        if (followShip) {
-            map.setView(Position);
+       if (followShip) {
+            if (lastRouteProjection) {
+                map.setView([lastRouteProjection.lat, lastRouteProjection.lon]);
+            } else if (lastFallbackProjection) {
+                map.setView([lastFallbackProjection.lat, lastFallbackProjection.lon]);
+            } else {
+                map.setView(Position); // fallback to actual position if no projection
+            }
         }
     } // End addBoatMarker
 
@@ -3785,6 +3836,46 @@
     */
 
     /**
+     * Gets the name of the overlay for display purposes.
+     * @param overlay
+     * @returns Overlay name
+     */
+    function getOverlayName(overlay = CurrentOverlay) {
+        switch (overlay) {
+            case 'Windy': return 'wind';
+            case 'gust': return 'wind gusts';
+            case 'temp': return 'temperature';
+            case 'sst': return 'sea surface temperature';
+            case 'swell1': return 'primary swell';
+            case 'swell2': return 'secondary swell';
+            case 'swell3': return 'tertiary swell';
+            case 'currentsTide': return 'tide currents';
+            case 'wwaves': return 'wind waves';
+            default: return overlay;
+        }
+    }
+
+    /**
+     * Set the Windy timeline to the present hour/minute
+     */
+    function setTimelineNow() {
+        // Set timeline to current time (rounded to nearest 10 minutes for Windy)
+        const now = Date.now();
+        windyStore.set('timestamp', now);
+    }
+
+    /**
+     * Capitalizes the first letter of each word in a string.
+     * @param str
+     * @returns Capitalized string
+     */
+    function capitalizeWords(str: string): string {
+        return str.replace(/\b\w+\b/g, word =>
+            word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+        );
+    }
+
+    /**
      * Rounds a timestamp (or Date.now() if not provided) to the nearest 1/10 hour (in ms)
      * @param ts
      * @returns Rounded timestamp in ms
@@ -3847,14 +3938,15 @@
     function toDegrees(rad: number): number {
         return rad * 180 / Math.PI;
     }
-    // --- Utility functions for leg distance types (used in Leg Editor table) ---
 
+    // --- Utility functions for leg distance types (used in Leg Editor table) ---
     /**
      * Calculates the Great Circle distance between two points on the Earth.
      * @param lat1
      * @param lon1
      * @param lat2
      * @param lon2
+     * @returns Great Circle distance in nautical miles
      */
     function calculateGreatCircleDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
         // Haversine formula (already used in calculateDistance)
@@ -3868,12 +3960,14 @@
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         return R * c;
     }
+
     /**
      * Calculates the rhumb line distance between two points on the Earth.
      * @param lat1
      * @param lon1
      * @param lat2
      * @param lon2
+     * @returns Rhumb line distance in nautical miles
      */
     function calculateRhumbLineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
         // Rhumb line distance formula
@@ -3945,6 +4039,7 @@
         {
             // Save data before closing
             saveTrackHistory();
+            
             if (isRouteLoaded) {
                 saveGpxRoute();
             }
