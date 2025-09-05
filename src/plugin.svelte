@@ -3703,8 +3703,8 @@
             }).addTo(markerLayer);
 
             const tooltipText = testModeEnabled ?
-                `Weather forecast in ${projectionHours} hours (TEST MODE: SOG=${testSOG}kt, COG=${testCOG}°)` :
-                `Weather forecast in ${projectionHours} hours`;
+                `Weather forecast in ${projectionHours.toFixed(1)} hours (TEST MODE: SOG=${testSOG}kt, COG=${testCOG}°)` :
+                `Weather forecast in ${projectionHours.toFixed(1)} hours`;
             forecastIcon.bindTooltip(tooltipText, { permanent: false, direction: 'top', className: 'forecast-tooltip' });
 
             // Click on projection: weather at projection time
