@@ -569,7 +569,7 @@
     let routeProjectionActive: boolean = false; // Flag to indicate route-based projection
     
     // GPX Route variables
-    let gpxRoute: Array<{lat: number, lon: number, name?: string, time?: Date, type?: string}> = []; // Route waypoints
+    let gpxRoute: Array<{lat: number, lon: number, name?: string, time?: Date, passedTime?: Date, type?: string}> = []; // Route waypoints
     let routeLayer: any = null; // Layer for displaying the route
     let atonLayer: any = null; // Layer for displaying AtoN markers
     let routeMarkers: any = null; // Layer for route waypoints
@@ -581,6 +581,7 @@
     let estimatedTimeOfArrival: Date | null = null; // ETA as a Date object
     let showRouteWaypoints: boolean = true; // Show/hide waypoint markers
     let nextWaypointIndex: number = 0; // Index of next waypoint to current position
+    let prevNextWaypointIndex: number = 0; // Index of previous next waypoint
     let nextWptETA: Date | null = null; // Estimated time of arrival at next waypoint
     let waypointETAs: Array<{ index: number, name: string, eta: Date, distance: number }> = []; // Array to hold ETAs for waypoints
     let closestWaypointIndex: number = 0; // Index of closest waypoint to current position
@@ -1208,12 +1209,15 @@
     function saveGpxRoute(): void {
         try {
             if (isRouteLoaded && gpxRoute.length > 0) {
+                // TEMP: Reset all passedTime values for waypoints
+                // gpxRoute.forEach(wp => { wp.passedTime = undefined; });
                 const routeData = {
                     waypoints: gpxRoute.map(wp => ({
                         lat: wp.lat,
                         lon: wp.lon,
                         name: wp.name,
                         time: wp.time ? wp.time.toISOString() : null,
+                        passedTime: wp.passedTime ? (wp.passedTime instanceof Date ? wp.passedTime.toISOString() : wp.passedTime) : null,
                         type: wp.type
                     })),
                     fileName: routeFileName,
@@ -1244,9 +1248,9 @@
                     lon: wp.lon,
                     name: wp.name,
                     time: wp.time ? new Date(wp.time) : undefined,
+                    passedTime: wp.passedTime ? new Date(wp.passedTime) : undefined,
                     type: wp.type
                 }));
-                
                 routeFileName = routeData.fileName || 'Restored Route';
                 routeStartTime = routeData.startTime ? new Date(routeData.startTime) : null;
                 routeDistance = routeData.distance || 0;
@@ -2939,13 +2943,22 @@
                 }),
                 zIndexOffset: zIndexWaypoint
             }).addTo(routeMarkers);
-
+            
             const myIndex = index - nextWaypointIndex; // My index in the ETA array
+            let passedTime = 'Passed: --/--/-- --:--';
+            if (isStart && isPassed) {
+                passedTime = 'Departed';
+            } else if (isPassed && waypoint.passedTime instanceof Date && !isNaN(waypoint.passedTime.getTime())) {
+                const d = waypoint.passedTime;
+                passedTime = `Passed: ${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')} ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}:${String(d.getUTCSeconds()).padStart(2,'0')}`;
+            } else if (!isPassed) {
+                passedTime = `${waypointETAs.length > 0 && waypointETAs[myIndex] ? `ETA: ${waypointETAs[myIndex].eta.toISOString().split('.')[0] + 'Z'}` : ''}`
+            }
             marker.bindTooltip(
-                `Waypoint ${index + 1} : ${waypoint.name}}<br>
+                `Waypoint ${index + 1} : ${waypoint.name}<br>
                 ${displayLatitude(waypoint.lat)}<br>
                 ${displayLongitude(waypoint.lon)}<br>
-                ${waypointETAs.length > 0 && waypointETAs[myIndex] ? `ETA: ${waypointETAs[myIndex].eta.toISOString().split('.')[0] + 'Z'}` : ''}`,
+                ${passedTime}`,
                 { permanent: false, direction: 'top' }
             );
         });
@@ -3204,6 +3217,20 @@
         if (showRouteWaypoints && routeMarkers) {
             displayRouteWaypoints();
         }
+
+        // Only set passedTime when actually passing a waypoint (not on reload)
+        if (nextWaypointIndex > prevNextWaypointIndex && prevNextWaypointIndex < gpxRoute.length) {
+            if (!gpxRoute[prevNextWaypointIndex].passedTime) {
+                gpxRoute[prevNextWaypointIndex].passedTime = new Date();
+            }
+        }
+        prevNextWaypointIndex = nextWaypointIndex;
+        /*
+        // Mark passed time for waypoints
+        for (let i = 0; i < nextWaypointIndex; i++) {
+                gpxRoute[i].passedTime = undefined;
+        }
+        */
     }
 
     /** Calculate the ETAs for all remaining waypoints
