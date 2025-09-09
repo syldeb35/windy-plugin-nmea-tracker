@@ -172,13 +172,13 @@
         
         <div class="plugin__buttons__centered">
             <button on:click={centerShip} title="Center on the vessel present position">📍 Center</button>
-            <button on:click={toggleFollowShip} title="Toggle vessel tracking">
+            <button on:click={toggleFollowShip} title="Follow the projected vessel">
                 {followShip ? '🛑 Stop' : '▶️ Follow'}
             </button>
             <button on:click={setTimelineNow} title="Set timeline to present time">⏰ Now</button>
         </div>
         <div class="plugin__buttons__centered">
-            <button id="button" on:click={showWeatherPopup}>{@html buttonText}</button>
+            <button id="button" on:click={showWeatherPopup} title="Display the weather tooltip">{@html buttonText}</button>
         </div>
     {/if}
     <!-- Test Mode Controls -->
@@ -240,54 +240,7 @@
         </div>
       {/if}
     </div>
-    <!-- GPX Route Controls -->
-    <!-- GPX Leg Type Editor Modal -->
-    {#if showLegEditor && gpxRoute.length > 1}
-    <div class="modal-overlay" style="position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.4); z-index:2000; display:flex; align-items:center; justify-content:center;">
-        <div class="modal-content" style="background:white; color:black; border-radius:8px; padding:24px 20px 16px 20px; min-width:320px; max-width:90vw; max-height:90vh; overflow:hidden; box-shadow:0 8px 32px rgba(0,0,0,0.25); position:relative;">
-            <button on:click={() => showLegEditor = false} style="position:absolute; top:8px; right:12px; background:none; border:none; font-size:22px; cursor:pointer; color:#888;">✕</button>
-            <h2 style="text-align:center; margin-top:0;">Edit Leg Types</h2>
-            <div style="overflow-y:auto; max-height:55vh; margin-bottom:8px;">
-                <table style="width:100%; border-collapse:collapse;">
-                    <tr>
-                        <th style="text-align:center;">Id</th>
-                        <th style="text-align:center; min-width:260px; width:38%; resize:horizontal; overflow:auto;">From</th>
-                        <th style="text-align:center; min-width:260px; width:38%; resize:horizontal; overflow:auto;">To</th>
-                        <th style="text-align:center; min-width:80px; width:12%;">Distance (NM)</th>
-                        <th style="text-align:center;">Type</th>
-                    </tr>
-                    {#each gpxRoute.slice(0, -1) as wp, i}
-                    <tr style={
-                        i+1 < nextWaypointIndex
-                            ? 'background:#e0ffe0;'
-                            : i+1 === nextWaypointIndex
-                                ? 'color:green; font-weight: bold;'
-                                : ''
-                    }>
-                        <td style="font-size: small;">{i+1}</td>
-                        <td style="font-size: small; min-width:260px; width:38%; resize:horizontal; overflow:auto;">{wp.name || `WP ${i+1}`}</td>
-                        <td style="font-size: small; min-width:260px; width:38%; resize:horizontal; overflow:auto;">{gpxRoute[i+1].name || `WP ${i+2}`}</td>
-                        <td style="font-size: small; min-width:80px; width:12%; text-align:center;">
-                            {#if gpxRoute[i].type === 'GC'}
-                                {calculateGreatCircleDistance(wp.lat, wp.lon, gpxRoute[i+1].lat, gpxRoute[i+1].lon).toFixed(2)}
-                            {:else}
-                                {calculateRhumbLineDistance(wp.lat, wp.lon, gpxRoute[i+1].lat, gpxRoute[i+1].lon).toFixed(2)}
-                            {/if}
-                        </td>
-                        <td>
-                            <select bind:value={gpxRoute[i].type}>
-                                <option value="RL">R-L</option>
-                                <option value="GC">G-C</option>
-                            </select>
-                        </td>
-                    </tr>
-                    {/each}
-                </table>
-            </div>
-            <button on:click={saveEditedGpx} style="margin-top:4px;">Save & Download GPX</button>
-        </div>
-    </div>
-    {/if}
+    
     <hr />
     <div class="gpx-route-section">
         <p style="font-weight: bold; margin-bottom: 10px;">🗺️ GPX Route Navigation :</p>
@@ -305,9 +258,9 @@
                 on:change={handleGpxFileUpload}
                 style="width: 100%; margin-bottom: 5px;"
             />
-            {#if routeFileName}
+            {#if routeMetadata.filename}
                 <p style="font-size: 12px; color: #0a0; margin: 2px 0;">
-                    ✅ Loaded: {routeFileName}
+                    ✅ Loaded: {routeMetadata.filename}
                 </p>
             {/if}
         </div>
@@ -336,7 +289,10 @@
                 <button id="toggleWaypointsButton" on:click={toggleRouteWaypoints} style="margin-left: 10px;">
                     📍 {showRouteWaypoints ? 'Hide waypoints' : 'Show waypoints'}
                 </button>
-                <button on:click={() => showLegEditor = !showLegEditor} style="margin-left: 10px;">
+                <button on:click={() => {
+                    console.debug('Leg editor button clicked');
+                    showLegEditorModal();
+                }} style="margin-left: 10px;">
                     ✏️ Edit Leg Types
                 </button>
             </div>
@@ -417,42 +373,6 @@
     import config from './pluginConfig';
 
     /**
-     * Interpolates a point along a rhumb line between two coordinates.
-     * @param lat1 Start latitude (degrees)
-     * @param lon1 Start longitude (degrees)
-     * @param lat2 End latitude (degrees)
-     * @param lon2 End longitude (degrees)
-     * @param fraction Progress along the segment [0,1]
-     * @returns { lat, lon } interpolated point
-     */
-    function interpolateRhumbLinePoint(lat1: number, lon1: number, lat2: number, lon2: number, fraction: number) {
-        // Convert to radians
-        const toRad = (deg: number) => deg * Math.PI / 180;
-        const toDeg = (rad: number) => rad * 180 / Math.PI;
-        lat1 = toRad(lat1);
-        lon1 = toRad(lon1);
-        lat2 = toRad(lat2);
-        lon2 = toRad(lon2);
-
-        // Handle crossing the antimeridian
-        let dLon = lon2 - lon1;
-        if (Math.abs(dLon) > Math.PI) {
-            dLon = dLon > 0 ? -(2 * Math.PI - dLon) : (2 * Math.PI + dLon);
-        }
-
-        const dPhi = lat2 - lat1;
-        const dPsi = Math.log(Math.tan(Math.PI / 4 + lat2 / 2) / Math.tan(Math.PI / 4 + lat1 / 2));
-        const q = Math.abs(dPsi) > 1e-12 ? dPhi / dPsi : Math.cos(lat1);
-
-        const lat = lat1 + fraction * dPhi;
-        const lon = lon1 + fraction * dLon;
-        // Adjust longitude for rhumb line
-        const adjLon = lon1 + fraction * dLon;
-
-        return { lat: toDeg(lat), lon: toDeg(adjLon) };
-    }
-
-    /**
      * Constants declaration
      */
     const { title } = config;
@@ -482,7 +402,6 @@
     /**
      * Variables declarations
      */
-    let showLegEditor = false;
     // Server configuration variables
     let serverAddress = loadServerAddress(); // e.g. 'localhost' or '192.168.1.10' or 'nmea.example.com'
     let serverPort = 5000; // Default port (can be made editable if needed)
@@ -495,18 +414,14 @@
     let longitude: number | null = null;
     let myLatitude: string | null = null;
     let myLongitude: string | null = null;
-    let data = 'No data received yet...';
     let nmeaHistory: string[] = []; // Store last 10 NMEA frame types
     let lastLatitude: number | null = null;
     let lastLongitude: number | null = null;
     let courseOverGroundT: number = 0; // True
     let myCourseOverGroundT: number = 0; // True
     let trueHeading: number = 0; // True heading
-    let courseOverGroundM: number = 0; // Magnetic
-    let magneticVariation: number = 0; // Magnetic variation
     let speedOverGround: number = 0; // In knots
     let mySpeedOverGround: number = 0; // In knots
-    //let heurePrev: number | null = null; // for projection
     let followShip = false; // do not follow ship by default
     let vesselName = loadVesselName(); // Load from localStorage or default
     let CurrentOverlay = 'Windy'; // Default overlay, can be changed later
@@ -520,9 +435,15 @@
     let headingArrow: any = null;
     let forecastIcon: any = null;
     let pathLatLngs: any[] = []; // Array to hold path latitude/longitude points
-    let shortPathLatLngs: any[] = []; // Array to hold short path latitude/longitude points
-    // --- 24h short track history logic ---
-    let shortTrackHistory: any[] = [];
+    // --- Track history configuration ---
+    // 📝 CONFIGURATION: Change TRACK_HISTORY_DAYS to adjust track retention duration
+    // Options: 1 day (sailing), 7 days (coastal), 30 days (ocean), 90 days (RTW)
+    // Storage: ~70KB/day, so 30 days ≈ 2.1 MB (safe for localStorage)
+    const TRACK_HISTORY_DAYS = 30; // Duration in days (30 days = ~2.1 MB storage for ocean passages)
+    const TRACK_HISTORY_DURATION = TRACK_HISTORY_DAYS * 24 * 60 * 60 * 1000; // Convert to milliseconds
+    
+    // --- Track history logic ---
+    let shortTrackHistory: any[] = []; // TODO: Rename to trackHistory for clarity
     let lastShortTrackSaveTime: number = 0;
     let openedPopup: any = null;
     // Store AIS ships data globally so all functions can access it
@@ -541,7 +462,6 @@
     let connectionLostTimer: any | null = null; // Timer for connection lost alert
     let lastError: string = ''; // Store the last error to persist until valid frame
     let errorList: string[] = []; // Store multiple errors
-    let lastFrameReceived: number = Date.now(); // Timestamp of last received frame
     let noFrameTimer: any | null = null; // Timer for no frame detection
 
     // Test mode variables for when vessel is stopped
@@ -582,18 +502,26 @@
     let showRouteWaypoints: boolean = true; // Show/hide waypoint markers
     let nextWaypointIndex: number = 0; // Index of next waypoint to current position
     let prevNextWaypointIndex: number = 0; // Index of previous next waypoint
-    let nextWptETA: Date | null = null; // Estimated time of arrival at next waypoint
     let waypointETAs: Array<{ index: number, name: string, eta: Date, distance: number }> = []; // Array to hold ETAs for waypoints
-    let closestWaypointIndex: number = 0; // Index of closest waypoint to current position
     let routeFileName: string = ''; // Name of loaded GPX file
     let lastRouteProgressUpdate = 0;
+    
+    // Store all route metadata in a single object for easy access
+    let routeMetadata: {
+        name?: string;
+        filename?: string;
+        desc?: string;
+        author?: string;
+        time?: string;
+        keywords?: string;
+        [key: string]: any;
+    } = {};
 
     // Z order of the overlay
     let zIndexOwnShip: number = 1000; // Own ship marker
     let zIndexWaypoint: number = 800; // Waypoint markers
     let zIndexRoute: number = 600; // Route markers
     let zIndexAisShips: number = 400; // AIS ships markers
-    let zIndexTrack: number = 200; // Track markers
     let zIndexAtoN: number = 100; // AtoN markers
 
     let helpVisible = false;
@@ -602,63 +530,44 @@
     let userOS: string = 'Uknown';
 
     /**
-     * Initialization when plugin opens
-     * 
-    */
-    export const onopen = () => {
-        console.log('Plugin opened');
-    }
-
-    /**
      * 
     */
     onMount(() => {
-        console.log('Plugin start mounted');
+        console.debug('Plugin start mounted');
         projectionHours = 0; // Reset projection hours
         userOS = detectOSAdvanced();
-        console.log('User OS detected:', userOS);
+        console.debug('User OS detected:', userOS);
 
         document.addEventListener('visibilitychange', handleVisibilityChange);
         window.addEventListener('focus', handleVisibilityChange);
         
-        // Load short track on plugin start
+        // Load track history on plugin start
         loadShortTrackHistory();
-        let shortLatLngs = [];
+        let trackLatLngs = [];
         if (shortTrackHistory.length > 0) {
-            shortLatLngs = shortTrackHistory.map(p => L.latLng(p.lat, p.lon));
+            trackLatLngs = shortTrackHistory.map(p => L.latLng(p.lat, p.lon));
         }
-        // Load main track
-        const savedTrack = loadTrackHistory();
-        // Merge: Only add main track points that are newer than the last short track point
-        let mergedLatLngs = [...shortLatLngs];
-        if (savedTrack.length > 0) {
-            let lastShort = shortTrackHistory.length > 0 ? shortTrackHistory[shortTrackHistory.length - 1] : null;
-            let startIdx = 0;
-            if (lastShort) {
-                for (let i = 0; i < savedTrack.length; i++) {
-                    if (
-                        Math.abs(savedTrack[i].lat - lastShort.lat) < 1e-6 &&
-                        Math.abs(savedTrack[i].lng - lastShort.lon) < 1e-6
-                    ) {
-                        startIdx = i + 1;
-                        break;
-                    }
-                }
-            }
-            mergedLatLngs = [...mergedLatLngs, ...savedTrack.slice(startIdx)];
-        }
-        pathLatLngs = mergedLatLngs;
+
+        pathLatLngs = trackLatLngs;
         // Redraw the track on map
         if (pathLatLngs.length > 1) {
             boatPath = L.polyline(pathLatLngs, { color: 'blue', weight: 3 }).addTo(map);
         }
-    
+
+        // --- Restore GPX route and metadata from raw GPX file if available ---
+        const savedRawGpx = localStorage.getItem('windy-nmea-gpx-raw');
+        if (savedRawGpx) {
+            // Use a placeholder filename if not available
+            parseGpxMetadata(savedRawGpx, 'Restored.gpx');
+            parseGpxRoute(savedRawGpx, 'Restored.gpx');
+        }
+
         // Load GPX route
         if (loadGpxRoute()) {
             calculateRouteDistance();
-            displayRoute();
             // Initialize route on component load
-            updateRoute();
+            // updateRouteProgress();
+            displayRoute();
         }
 
         // Initialize layers with proper z-index ordering        
@@ -681,11 +590,16 @@
         // Subscribe to Windy timeline changes
         const unsub = store.on('timestamp', (ts: number) => {
             // This code will be executed on every timeline change
-            console.log('Windy timeline changed, new timestamp:', ts);
-            // You can trigger an action here, update a variable, etc.
-            windyStore.set('timestamp', getRoundedHourTimestamp(ts));
-            updateProjectionForTimeline(ts);
-            updateButtonText();
+            console.debug('Windy timeline changed, new timestamp:', ts);
+            
+            // Use the rounded timestamp consistently for all timeline-based operations
+            const roundedTimestamp = getRoundedHourTimestamp(ts);
+            
+            // Update projection for the rounded timeline timestamp
+            updateProjectionForTimeline(roundedTimestamp);
+            updateButtonText(roundedTimestamp);
+            
+            // Update boat marker if no route is loaded
             if (!isRouteLoaded && lastLatitude !== null && lastLongitude !== null) {
                 const cog = testModeEnabled ? testCOG : myCourseOverGroundT;
                 addBoatMarker(lastLatitude, lastLongitude, cog);
@@ -700,10 +614,10 @@
 
         // Subscribe to Windy overlay changes
         const unsubOverlay = store.on('overlay', (overlay: string) => {
-            console.log('Windy overlay changed, new overlay:', overlay);
+            console.debug('Windy overlay changed, new overlay:', overlay);
            
             CurrentOverlay = overlay;
-            updateButtonText();
+            updateButtonText(windyStore.get('timestamp'));
         });
         if (typeof unsubOverlay === 'function') {
             unsubscribeOverlay = unsubOverlay;
@@ -716,17 +630,25 @@
                 testSOG = parseFloat(savedTestSOG);
         }
         
-        console.log('Plugin full mounted');
+        console.debug('Plugin full mounted');
     });
 
     /**
+     * Initialization when plugin opens
      * 
+    */
+    export const onopen = () => {
+        console.debug('Plugin opened');
+    }
+
+    /**
+     * Handle visibility change events
      */
     function handleVisibilityChange() {
         if (!document.hidden) {
             // Tab is visible again (could be after sleep)
             if (Date.now() - lastWakeTime > 10000) { // 10s threshold for sleep
-                console.log('Detected wake from sleep or long inactivity, reconnecting socket...');
+                console.debug('Detected wake from sleep or long inactivity, reconnecting socket...');
                 createSocketConnection();
             }
             lastWakeTime = Date.now();
@@ -739,7 +661,7 @@
      */
     function handleServerAddressKeydown(event: KeyboardEvent) {
         if (event.key === 'Enter') {
-            updateRoute((event.target as HTMLInputElement).value.trim());
+            updateServerRoute((event.target as HTMLInputElement).value.trim());
             (event.target as HTMLInputElement).blur(); // Optionally blur to commit
         }
     }
@@ -749,39 +671,107 @@
      * @param event
      */
     function handleServerAddressBlur(event: FocusEvent) {
-        updateRoute((event.target as HTMLInputElement).value.trim());
+        updateServerRoute((event.target as HTMLInputElement).value.trim());
     }
 
     /**
-     * Save handler for edited GPX
+     * General function to export GPX with custom filename suffix
+     * @param filenameSuffix - Suffix to add to the filename (e.g., '_edited', '_progress_2024-01-15T14-30-25')
+     * @param includeTimestamp - Whether to add timestamp to filename (for auto-downloads)
      */
-    function saveEditedGpx() {
-        // Build new GPX XML string with updated <type> for each rtept
-        let gpx = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="NMEA Tracker">\n  <rte>\n`;
+    function exportGpxFile(filenameSuffix: string = '', includeTimestamp: boolean = false) {
+        if (!gpxRoute || gpxRoute.length === 0) {
+            console.debug('No route loaded, skipping GPX export');
+            return;
+        }
+
+        // Build GPX XML string
+        let gpx = '';
+        gpx += `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n`;
+        gpx += `<gpx xmlns="http://www.topografix.com/GPX/1/1" xmlns:cmacgm="http://www.cmacgm.com" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" creator="NMEA Tracker" version="1.1" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">\n`;
+        gpx += `    <metadata>\n`;
+        gpx += `        <name>${routeMetadata.name || 'NMEA Tracker Route'}</name>\n`;
+        gpx += `        <filename>${routeMetadata.filename || 'nmea-route.gpx'}</filename>\n`;
+        gpx += `        <desc>${routeMetadata.desc || 'Route with navigation data'}</desc>\n`;
+        gpx += `        <author>\n            <name>${routeMetadata.author || 'NMEA Tracker'}</name>\n        </author>\n`;
+        gpx += `        <time>${routeMetadata.time || new Date().toISOString()}</time>\n`;
+        gpx += `        <keywords>${routeMetadata.keywords || 'navigation,nmea,tracking'}</keywords>\n`;
+        gpx += `    </metadata>\n`;
+        gpx += `    <rte>\n`;
+        
         gpxRoute.forEach((wp, i) => {
-            gpx += `    <rtept lat="${wp.lat}" lon="${wp.lon}">\n`;
-            if (wp.name) gpx += `      <name>${wp.name}</name>\n`;
-            if (wp.time) gpx += `      <time>${wp.time.toISOString()}</time>\n`;
+            gpx += `        <rtept lat="${wp.lat}" lon="${wp.lon}">\n`;
+            if (wp.time) gpx += `           <time>${wp.time.toISOString()}</time>\n`;
+            if (wp.name) gpx += `           <name>${wp.name}</name>\n`;
+            // Save passedTime as <timePassed> if present
+            if (wp.passedTime) {
+                const passedTimeStr = wp.passedTime instanceof Date ? wp.passedTime.toISOString() : wp.passedTime;
+                gpx += `           <timePassed>${passedTimeStr}</timePassed>\n`;
+            }
             // Only add <type> for all but the last point (leg type is for the segment starting at this point)
-            if (i < gpxRoute.length - 1 && wp.type) gpx += `      <type>${wp.type}</type>\n`;
-            gpx += `    </rtept>\n`;
+            if (i < gpxRoute.length - 1 && wp.type) gpx += `           <type>${wp.type}</type>\n`;
+            gpx += `        </rtept>\n`;
         });
-        gpx += `  </rte>\n</gpx>`;
+        
+        gpx += `    </rte>\n</gpx>`;
+
+        // Create filename
+        const baseFilename = routeMetadata.filename ? routeMetadata.filename.replace(/\.gpx$/i, '') : 'nmea-route';
+        let filename = baseFilename;
+        
+        if (includeTimestamp) {
+            const now = new Date();
+            const timestamp = now.toISOString().replace(/[:.]/g, '-').substring(0, 19);
+            filename = `${baseFilename}${filenameSuffix}_${timestamp}.gpx`;
+        } else {
+            filename = `${baseFilename}${filenameSuffix}.gpx`;
+        }
 
         // Download as file
         const blob = new Blob([gpx], { type: 'application/gpx+xml' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = routeFileName ? routeFileName.replace(/\.gpx$/i, '_edited.gpx') : 'route_edited.gpx';
+        a.download = filename;
         a.click();
         URL.revokeObjectURL(url);
+
+        console.debug(`GPX exported as: ${filename}`);
+    }
+
+    /**
+     * Save handler for edited GPX (legacy wrapper)
+     */
+    function saveEditedGpx() {
+        exportGpxFile('_edited', false);
+    }
+
+    /**
+     * Automatically download GPX file with waypoint passing times when waypoints are passed
+     */
+    function downloadGpxWithPassedTimes() {
+        if (!gpxRoute || gpxRoute.length === 0) {
+            console.debug('No route loaded, skipping auto-download');
+            return;
+        }
+
+        // Check if any waypoints have been passed
+        const passedWaypoints = gpxRoute.filter(wp => wp.passedTime);
+        if (passedWaypoints.length === 0) {
+            console.debug('No waypoints passed yet, skipping auto-download');
+            return;
+        }
+
+        console.debug(`Auto-downloading GPX with ${passedWaypoints.length} passed waypoints`);
+        
+        // Use the general export function with timestamp
+        exportGpxFile('_progress', true);
     }
 
     /**
      * Function to update the route when server host changes
      */
-    function updateRoute(newAddress?: string) {
+    function updateServerRoute(newAddress?: string) {
         if (newAddress) {
             serverAddress = newAddress;
             saveServerAddress(serverAddress);
@@ -789,7 +779,7 @@
         route = makeRoute(serverAddress, serverPort);
         // Reconnect to the new server if socket exists and is initialized
         if (socket !== null && socket !== undefined) {
-            console.log('Server address changed, reconnecting to:', route);
+            console.debug('Server address changed, reconnecting to:', route);
             createSocketConnection();
         }
     }
@@ -812,7 +802,7 @@
     function saveServerAddress(address: string): void {
         try {
             localStorage.setItem('windy-nmea-server-address', address);
-            console.log('Server address saved:', address);
+            console.debug('Server address saved:', address);
         } catch (error) {
             console.warn('Failed to save server address to localStorage:', error);
         }
@@ -828,7 +818,7 @@
             socket = null;
         }
         
-        console.log('Connecting to NMEA server at:', route);
+        console.debug('Connecting to NMEA server at:', route);
         
         // @ts-ignore: socket.io injected via global script
         socket = io(route, {
@@ -849,7 +839,7 @@
 
         // Connection event handlers (same as before)
         socket.on('connect', () => {
-            console.log('WebSocket connected to NMEA server');
+            console.debug('WebSocket connected to NMEA server');
             isConnected = true;
             if (connectionLostTimer) {
                 clearTimeout(connectionLostTimer);
@@ -866,7 +856,7 @@
         });
 
         socket.on('disconnect', (reason: string) => {
-            console.log('WebSocket disconnected:', reason);
+            console.debug('WebSocket disconnected:', reason);
             isConnected = false;
             addError("⚠️ Connection lost to NMEA server");
             
@@ -889,7 +879,7 @@
         });
 
         socket.on('reconnect', (attemptNumber: number) => {
-            console.log('WebSocket reconnected after', attemptNumber, 'attempts');
+            console.debug('WebSocket reconnected after', attemptNumber, 'attempts');
             isConnected = true;
             if (connectionLostTimer) {
                 clearTimeout(connectionLostTimer);
@@ -1055,7 +1045,7 @@
     function saveVesselName(name: string): void {
         try {
             localStorage.setItem('windy-nmea-vessel-name', name);
-            console.log('Vessel name saved:', name);
+            console.debug('Vessel name saved:', name);
         } catch (error) {
             console.warn('Failed to save vessel name to localStorage:', error);
         }
@@ -1080,7 +1070,7 @@
     function saveVesselMMSI(mmsi: string): void {
         try {
             localStorage.setItem('windy-nmea-vessel-mmsi', mmsi);
-            console.log('Vessel MMSI saved:', mmsi);
+            console.debug('Vessel MMSI saved:', mmsi);
         } catch (error) {
             console.warn('Failed to save vessel name to localStorage:', error);
         }
@@ -1099,79 +1089,14 @@
     }
 
     /**
-     * Maintain track history limits
-    */
-    function maintainTrackLimits(): void {
-        const MAX_TRACK_POINTS = 100000; // Adjust as needed
-        
-        if (shortPathLatLngs.length > MAX_TRACK_POINTS) {
-            // Remove oldest points, keep most recent
-            shortPathLatLngs = pathLatLngs.slice(-MAX_TRACK_POINTS);
-            
-            // Update the polyline on the map
-            if (boatPath) {
-                boatPath.setLatLngs(pathLatLngs);
-            }
-            
-            // console.log(`Track history trimmed to ${MAX_TRACK_POINTS} points`);
-        }
-    }
-
-    /**
-     * Save track history to localStorage
-     */
-    function saveTrackHistory(): void {
-        try {
-            // Always keep shortPathLatLngs in sync with pathLatLngs
-            // Limit to the most recent 1000 points to avoid quota errors
-            shortPathLatLngs = [...pathLatLngs];
-            if (shortPathLatLngs.length > 86400) {
-                shortPathLatLngs = shortPathLatLngs.slice(-86400);
-            }
-            if (shortPathLatLngs.length > 0) {
-                // Convert LatLng objects to simple {lat, lng} objects for JSON storage
-                const trackData = shortPathLatLngs.map(latLng => ({
-                    lat: latLng.lat,
-                    lng: latLng.lng
-                }));
-                localStorage.setItem('windy-nmea-track-history', JSON.stringify(trackData));
-                console.log(`Track history saved: ${trackData.length} points`);
-            }
-        } catch (error) {
-            console.warn('Failed to save track history to localStorage:', error);
-        }
-    }
-
-    /**
-     * Load track history from localStorage
-    */
-    function loadTrackHistory(): any[] {
-        try {
-            const saved = localStorage.getItem('windy-nmea-track-history');
-            if (saved) {
-                const trackData = JSON.parse(saved);
-                // Convert back to LatLng objects
-                const restoredTrack = trackData.map((point: {lat: number, lng: number}) => 
-                    L.latLng(point.lat, point.lng)
-                );
-                console.log(`Track history loaded: ${restoredTrack.length} points`);
-                return restoredTrack;
-            }
-        } catch (error) {
-            console.warn('Failed to load track history from localStorage:', error);
-        }
-        return [];
-    }
-
-    /**
-     * Save a short track point to localStorage
+     * Save a track point to localStorage with configurable duration
      * @param lat
      * @param lon
      */
     function saveShortTrackPoint(lat: any, lon: any): void {
         const now = Date.now();
-        // Remove points older than 24h
-        const cutoff = now - 24 * 60 * 60 * 1000;
+        // Remove points older than configured duration (30 days by default)
+        const cutoff = now - TRACK_HISTORY_DURATION;
         shortTrackHistory = shortTrackHistory.filter(p => p.t >= cutoff);
         const last = shortTrackHistory.length > 0 ? shortTrackHistory[shortTrackHistory.length - 1] : null;
         // Only save if 60s have passed since last save and position is different from last
@@ -1182,12 +1107,12 @@
             shortTrackHistory.push({ lat, lon, t: now });
             localStorage.setItem('windy-nmea-shorttrack', JSON.stringify(shortTrackHistory));
             lastShortTrackSaveTime = now;
-            console.log(`Short track point saved: ${shortTrackHistory.length} points`);
+            console.debug(`Track point saved: ${shortTrackHistory.length} points (${TRACK_HISTORY_DAYS} days history)`);
         }
     }
 
     /**
-     * Load short track history from localStorage
+     * Load track history from localStorage
      */
     function loadShortTrackHistory() {
         try {
@@ -1200,7 +1125,7 @@
         } catch (e) {
             shortTrackHistory = [];
         }
-        console.log(`Short track history loaded: ${shortTrackHistory.length} points`);
+        console.debug(`Track history loaded: ${shortTrackHistory.length} points (${TRACK_HISTORY_DAYS} days retention)`);
     }
 
     /**
@@ -1226,7 +1151,7 @@
                     showWaypoints: showRouteWaypoints
                 };
                 localStorage.setItem('windy-nmea-gpx-route', JSON.stringify(routeData));
-                console.log(`GPX route saved: ${routeFileName} with ${gpxRoute.length} waypoints`);
+                console.debug(`GPX route saved: ${routeFileName} with ${gpxRoute.length} waypoints`);
             }
         } catch (error) {
             console.warn('Failed to save GPX route to localStorage:', error);
@@ -1241,8 +1166,7 @@
             const saved = localStorage.getItem('windy-nmea-gpx-route');
             if (saved) {
                 const routeData = JSON.parse(saved);
-                
-                // Restore waypoints with proper Date objects
+                // Restore waypoints with proper Date objects, including passedTime
                 gpxRoute = routeData.waypoints.map((wp: any) => ({
                     lat: wp.lat,
                     lon: wp.lon,
@@ -1255,21 +1179,20 @@
                 routeStartTime = routeData.startTime ? new Date(routeData.startTime) : null;
                 routeDistance = routeData.distance || 0;
                 showRouteWaypoints = routeData.showWaypoints !== undefined ? routeData.showWaypoints : true;
-                
+
                 // Set route as loaded and active
                 isRouteLoaded = true;
                 routeProjectionActive = true;
-                
+
                 // Reset waypoint indices only if no current position available
                 if (!lastLatitude || !lastLongitude) {
-                    closestWaypointIndex = 0;
                     nextWaypointIndex = 0;
                 } else {
                     // Calculate proper waypoint indices based on current position
                     updateRouteProgress();
                 }
-                
-                console.log(`GPX route loaded: ${routeFileName} with ${gpxRoute.length} waypoints`);
+
+                console.debug(`GPX route loaded: ${routeFileName} with ${gpxRoute.length} waypoints`);
                 return true;
             }
         } catch (error) {
@@ -1285,14 +1208,16 @@
         try {
             switch (item) {
                 case 'track-history':
-                    localStorage.removeItem('windy-nmea-track-history');
+                    localStorage.removeItem('windy-nmea-shorttrack');
                     break;
                 case 'gpx-route':
                     localStorage.removeItem('windy-nmea-gpx-route');
+                    localStorage.removeItem('windy-nmea-gpx-raw');
                     break;
                 case 'all':
-                    localStorage.removeItem('windy-nmea-track-history');
+                    localStorage.removeItem('windy-nmea-shorttrack');
                     localStorage.removeItem('windy-nmea-gpx-route');
+                    localStorage.removeItem('windy-nmea-gpx-raw');
                     break;
                 default:
                     break;
@@ -1315,14 +1240,13 @@
     /**
      * Updates the button text based on current overlay and projection hours
     */
-    function updateButtonText() {
-        
+    function updateButtonText(ts: number) {
+
         const myOverlay = getOverlayName();
         if (projectionHours !== null && projectionHours > 0) {
             if (!routeProjectionActive) {
                 buttonText = `🌬️ Show ${myOverlay} prediction (in ${projectionHours.toFixed(1)}h)`;
             } else {
-                const ts = getRoundedHourTimestamp(windyStore.get('timestamp'));
                 let hours = '0';
                 if (routeStartTime) {
                     if (routeStartTime.getMilliseconds() > Date.now()) {
@@ -1371,7 +1295,7 @@
         target.value = testCOG.toString();
         // Update the projection for the current testCOG & timeline
         updateProjectionForTimeline(windyStore.get('timestamp'));
-        updateButtonText();
+        updateButtonText(windyStore.get('timestamp'));
         if (!isRouteLoaded && lastLatitude !== null && lastLongitude !== null) {
             const cog = testModeEnabled ? testCOG : myCourseOverGroundT;
             addBoatMarker(lastLatitude, lastLongitude, cog);
@@ -1388,7 +1312,7 @@
         testSOG = parseFloat(target.value) || 0;
         // Update the projection for the current testSOG & timeline
         updateProjectionForTimeline(windyStore.get('timestamp'));
-        updateButtonText();
+        updateButtonText(windyStore.get('timestamp'));
         if (!isRouteLoaded && lastLatitude !== null && lastLongitude !== null) {
             const cog = testModeEnabled ? testCOG : myCourseOverGroundT;
             addBoatMarker(lastLatitude, lastLongitude, cog);
@@ -1419,6 +1343,342 @@
     */
     function isValidMMSI(mmsi: string): boolean {
         return /^\d{9}$/.test(mmsi);
+    }
+
+    /**
+     * Create and show the leg editor modal outside the plugin container
+     */
+    function showLegEditorModal() {
+        // Make required functions available globally for the modal FIRST
+        (window as any).modalCalculateGreatCircleDistance = calculateGreatCircleDistance;
+        (window as any).modalCalculateStraightLineDistance = calculateStraightLineDistance;
+        (window as any).modalFormatDateTime = formatDateTime;
+        (window as any).modalSaveEditedGpx = saveEditedGpx;
+
+        // Remove any existing modal
+        const existingModal = document.getElementById('leg-editor-modal-external');
+        if (existingModal) {
+            existingModal.remove();
+        }
+
+        // Create modal overlay
+        const overlay = document.createElement('div');
+        overlay.id = 'leg-editor-modal-external';
+        overlay.style.cssText = `
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            background: rgba(0, 0, 0, 0.8) !important;
+            z-index: 999999 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            padding: 20px !important;
+        `;
+
+        // Create modal content
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            background: white !important;
+            color: black !important;
+            border-radius: 12px !important;
+            width: 95vw !important;
+            max-width: 1200px !important;
+            height: 85vh !important;
+            overflow: hidden !important;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important;
+            position: relative !important;
+            display: flex !important;
+            flex-direction: column !important;
+        `;
+
+        // Create header
+        const header = document.createElement('div');
+        header.style.cssText = `
+            padding: 20px 24px 16px 24px;
+            border-bottom: 2px solid #eee;
+            flex-shrink: 0;
+        `;
+        
+        const closeBtn = document.createElement('button');
+        closeBtn.innerHTML = '✕';
+        closeBtn.style.cssText = `
+            position: absolute;
+            top: 16px;
+            right: 20px;
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+            z-index: 1;
+        `;
+        closeBtn.onclick = () => overlay.remove();
+
+        const title = document.createElement('h2');
+        title.textContent = 'Edit Leg Types';
+        title.style.cssText = `margin: 0; color: #333; font-size: 24px; text-align: center;`;
+
+        const subtitle = document.createElement('p');
+        subtitle.textContent = `${routeMetadata.filename} — ${routeMetadata.name}`;
+        subtitle.style.cssText = `margin: 8px 0 0 0; color: #666; font-size: 14px; text-align: center;`;
+
+        header.appendChild(closeBtn);
+        header.appendChild(title);
+        header.appendChild(subtitle);
+
+        // Create table header
+        const tableHeader = document.createElement('div');
+        tableHeader.style.cssText = `
+            background: #f8f9fa;
+            border-bottom: 2px solid #dee2e6;
+            flex-shrink: 0;
+        `;
+        
+        const headerTable = document.createElement('table');
+        headerTable.style.cssText = `width: 100%; border-collapse: collapse;`;
+        headerTable.innerHTML = `
+            <thead>
+                <tr style="background: #e9ecef;">
+                    <th style="padding: 12px 8px; text-align: center; font-weight: bold; border-right: 1px solid #dee2e6; width: 40px;">Id</th>
+                    <th style="padding: 12px 8px; text-align: left; font-weight: bold; border-right: 1px solid #dee2e6; width: 200px;">From</th>
+                    <th style="padding: 12px 8px; text-align: left; font-weight: bold; border-right: 1px solid #dee2e6; width: 200px;">To</th>
+                    <th style="padding: 12px 8px; text-align: center; font-weight: bold; border-right: 1px solid #dee2e6; width: 100px;">Distance (NM)</th>
+                    <th style="padding: 12px 8px; text-align: center; font-weight: bold; border-right: 1px solid #dee2e6; width: 80px;">Type</th>
+                    <th style="padding: 12px 8px; text-align: center; font-weight: bold; border-right: 1px solid #dee2e6; width: 140px;">ETA</th>
+                    <th style="padding: 12px 8px; text-align: center; font-weight: bold; width: 140px;">Passed Time</th>
+                </tr>
+            </thead>
+        `;
+        tableHeader.appendChild(headerTable);
+
+        // Create scrollable table body
+        const content = document.createElement('div');
+        content.style.cssText = `
+            flex: 1;
+            overflow-y: auto;
+            background: white;
+        `;
+        
+        const bodyTable = document.createElement('table');
+        bodyTable.style.cssText = `width: 100%; border-collapse: collapse;`;
+        
+        // Generate table rows for each leg
+        let tableRows = '';
+        for (let i = 0; i < gpxRoute.length - 1; i++) {
+            const wp = gpxRoute[i];
+            const nextWp = gpxRoute[i + 1];
+            
+            // Determine row style based on progress
+            let rowStyle = 'border-bottom: 1px solid #dee2e6;';
+            if (i + 1 < nextWaypointIndex) {
+                rowStyle = 'background: #d4edda; border-bottom: 1px solid #c3e6cb;'; // Completed
+            } else if (i + 1 === nextWaypointIndex) {
+                rowStyle = 'background: #fff3cd; border-bottom: 1px solid #ffeaa7; font-weight: bold;'; // Current
+            }
+            
+            // Calculate distance based on leg type
+            const legType = wp.type || 'RL';
+            let distance;
+            if (legType === 'GC') {
+                distance = (window as any).modalCalculateGreatCircleDistance(wp.lat, wp.lon, nextWp.lat, nextWp.lon);
+            } else {
+                distance = (window as any).modalCalculateStraightLineDistance(wp.lat, wp.lon, nextWp.lat, nextWp.lon);
+            }
+            
+            // Format ETA
+            let etaText = '-';
+            if (i < nextWaypointIndex && wp.time) {
+                etaText = (window as any).modalFormatDateTime(wp.time);
+            } else if (waypointETAs && waypointETAs[i - nextWaypointIndex]) {
+                etaText = (window as any).modalFormatDateTime(new Date(waypointETAs[i - nextWaypointIndex].eta));
+            }
+            
+            // Format passed time
+            let passedTimeText = '-';
+            if (wp.passedTime && wp.passedTime instanceof Date) {
+                passedTimeText = (window as any).modalFormatDateTime(wp.passedTime);
+            }
+            
+            tableRows += `
+                <tr style="${rowStyle}">
+                    <td style="padding: 10px 8px; text-align: center; border-right: 1px solid #dee2e6; font-size: 14px; width: 40px;">${i}</td>
+                    <td style="padding: 10px 8px; text-align: left; border-right: 1px solid #dee2e6; font-size: 14px; width: 200px; overflow: hidden; text-overflow: ellipsis;">${wp.name || `WP ${i}`}</td>
+                    <td style="padding: 10px 8px; text-align: left; border-right: 1px solid #dee2e6; font-size: 14px; width: 200px; overflow: hidden; text-overflow: ellipsis;">${nextWp.name || `WP ${i + 1}`}</td>
+                    <td style="padding: 10px 8px; text-align: center; border-right: 1px solid #dee2e6; font-size: 14px; font-weight: bold; color: #495057; width: 100px;">${distance.toFixed(2)}</td>
+                    <td style="padding: 10px 8px; text-align: center; border-right: 1px solid #dee2e6; width: 80px;">
+                        <select onchange="updateLegType(${i}, this.value)" style="padding: 4px 8px; border: 1px solid #ced4da; border-radius: 4px; background: white; font-size: 14px;">
+                            <option value="RL" ${legType === 'RL' ? 'selected' : ''}>R-L</option>
+                            <option value="GC" ${legType === 'GC' ? 'selected' : ''}>G-C</option>
+                        </select>
+                    </td>
+                    <td style="padding: 10px 8px; text-align: center; border-right: 1px solid #dee2e6; font-size: 13px; color: #6c757d; width: 140px;">${etaText}</td>
+                    <td style="padding: 10px 8px; text-align: center; font-size: 13px; color: #6c757d; width: 140px;">${passedTimeText}</td>
+                </tr>
+            `;
+        }
+        
+        // Note: Total distance moved to footer for better visibility
+        
+        bodyTable.innerHTML = `<tbody>${tableRows}</tbody>`;
+        content.appendChild(bodyTable);
+
+        // Create footer with total distance and save button
+        const footer = document.createElement('div');
+        footer.style.cssText = `
+            padding: 16px 24px;
+            border-top: 2px solid #eee;
+            background: #f8f9fa;
+            flex-shrink: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        `;
+        
+        // Total distance display
+        const totalDistanceDiv = document.createElement('div');
+        totalDistanceDiv.id = 'modal-total-distance';
+        totalDistanceDiv.style.cssText = `
+            font-size: 16px;
+            font-weight: bold;
+            color: #495057;
+        `;
+        totalDistanceDiv.innerHTML = `Total Distance: <span style="color: #007bff;">${routeDistance.toFixed(2)} NM</span>`;
+        
+        const saveBtn = document.createElement('button');
+        saveBtn.textContent = '💾 Save & Download GPX';
+        saveBtn.style.cssText = `
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        `;
+        saveBtn.onclick = () => {
+            (window as any).modalSaveEditedGpx();
+            overlay.remove();
+        };
+        
+        footer.appendChild(totalDistanceDiv);
+        footer.appendChild(saveBtn);
+
+        // Assemble modal
+        modal.appendChild(header);
+        modal.appendChild(tableHeader);
+        modal.appendChild(content);
+        modal.appendChild(footer);
+        overlay.appendChild(modal);
+
+        // Add global function for leg type updates
+        (window as any).updateLegType = (index: number, newType: string) => {
+            if (gpxRoute[index]) {
+                gpxRoute[index].type = newType;
+                // Trigger reactivity update
+                gpxRoute = [...gpxRoute];
+                
+                // Recalculate route distance and save immediately
+                calculateRouteDistance();
+                saveGpxRoute();
+                
+                // Update the route display on the map immediately
+                displayRoute();
+                
+                console.debug(`Updated leg ${index} to type ${newType} - route refreshed on map`);
+                
+                // Update the distance in the modal table
+                (window as any).updateModalDistance(index, newType);
+                
+                // Update the total distance in the modal
+                (window as any).updateModalTotalDistance();
+                
+                // Visual feedback - briefly highlight the updated row
+                (window as any).highlightUpdatedRow(index);
+            }
+        };
+
+        // Function to update the distance display in the modal
+        (window as any).updateModalDistance = (index: number, newType: string) => {
+            const wp = gpxRoute[index];
+            const nextWp = gpxRoute[index + 1];
+            if (!wp || !nextWp) return;
+            
+            // Calculate new distance
+            let distance;
+            if (newType === 'GC') {
+                distance = (window as any).modalCalculateGreatCircleDistance(wp.lat, wp.lon, nextWp.lat, nextWp.lon);
+            } else {
+                distance = (window as any).modalCalculateStraightLineDistance(wp.lat, wp.lon, nextWp.lat, nextWp.lon);
+            }
+            
+            // Find and update the distance cell
+            const modal = document.getElementById('leg-editor-modal-external');
+            if (modal) {
+                const rows = modal.querySelectorAll('tbody tr');
+                const targetRow = rows[index];
+                if (targetRow) {
+                    const distanceCell = (targetRow as HTMLTableRowElement).cells[3]; // Distance column is 4th (index 3)
+                    if (distanceCell) {
+                        distanceCell.textContent = distance.toFixed(2);
+                    }
+                }
+            }
+        };
+
+        // Function to update the total distance in the modal footer
+        (window as any).updateModalTotalDistance = () => {
+            const totalDistanceDiv = document.getElementById('modal-total-distance');
+            if (totalDistanceDiv) {
+                totalDistanceDiv.innerHTML = `Total Distance: <span style="color: #007bff;">${routeDistance.toFixed(2)} NM</span>`;
+                console.debug(`Updated modal total distance to ${routeDistance.toFixed(2)} NM`);
+            }
+        };
+
+        // Function to provide visual feedback when a leg type is updated
+        (window as any).highlightUpdatedRow = (index: number) => {
+            const modal = document.getElementById('leg-editor-modal-external');
+            if (modal) {
+                const rows = modal.querySelectorAll('tbody tr');
+                const targetRow = rows[index] as HTMLTableRowElement;
+                if (targetRow) {
+                    // Save original background
+                    const originalBackground = targetRow.style.background;
+                    
+                    // Apply highlight
+                    targetRow.style.background = '#28a745'; // Green highlight
+                    targetRow.style.transition = 'background-color 0.3s ease';
+                    
+                    // Remove highlight after 1 second
+                    setTimeout(() => {
+                        targetRow.style.background = originalBackground;
+                    }, 1000);
+                }
+            }
+        };
+
+        // Add to document body
+        document.body.appendChild(overlay);
+
+        // Close on overlay click
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                overlay.remove();
+            }
+        });
+    }
+
+    /**
+     * Close the external leg editor modal
+     */
+    function closeLegEditorModal() {
+        const modal = document.getElementById('leg-editor-modal-external');
+        if (modal) {
+            modal.remove();
+        }
     }
 
     /**
@@ -1494,7 +1754,7 @@
                     
                     if (hasAllFragments) {
                         const fullPayload = aisFragments[fragKey].payloads.join('');
-                        console.log(`AIS message assembled from ${total} fragments: ${fragKey}`);
+                        console.debug(`AIS message assembled from ${total} fragments: ${fragKey}`);
                         delete aisFragments[fragKey];
                         decodeAISMessage(fullPayload, isOwnVessel);
                         return true;
@@ -1629,7 +1889,7 @@
             return calculateGreatCircleDistance(lat1, lon1, lat2, lon2);
         } else {
             // Default to 'RL' if not specified or explicitly 'RL'
-            return calculateRhumbLineDistance(lat1, lon1, lat2, lon2);
+            return calculateStraightLineDistance(lat1, lon1, lat2, lon2);
         }
     }
     
@@ -1731,9 +1991,7 @@
                 return null;
             }
             courseOverGroundT = parseFloat(parts[1]);
-            if (parts[2] === 'T') {
-                courseOverGroundM = parseFloat(parts[3]);
-            }
+            // parts[2] is 'T' for True, parts[3] would be magnetic COG (not used)
             if (parts[4] === 'N') {
                 speedOverGround = parseFloat(parts[5]);
             } else if (parts[4] === 'K') {
@@ -1749,8 +2007,7 @@
                 addError("[Err] Invalid HDG frame - insufficient parts");
                 return null;
             }
-            courseOverGroundM = parseFloat(parts[1]);
-            magneticVariation = parseFloat(parts[4]);
+            // HDG contains magnetic course and variation (not used in current implementation)
             frameType = 'HDG';
         } else if (data.includes('HDT')) {
             if (parts.length < 2) {
@@ -1955,7 +2212,7 @@
      * Resets the no frame timer (called when a frame is received)
     */
     function resetNoFrameTimer() {
-        lastFrameReceived = Date.now();
+        // Reset frame received time on any valid frame
         if (noFrameTimer) {
             clearTimeout(noFrameTimer);
         }
@@ -2057,7 +2314,7 @@
             zIndexOffset: zIndexAisShips   // Lower z-index for other ships
         }).addTo(aisShipsLayer);
         
-        // console.log(`Adding/updating AIS ship: ${mmsi} at ${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}`);
+        // console.debug(`Adding/updating AIS ship: ${mmsi} at ${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}`);
         
         // Create tooltip content
         const tooltipContent = getAISTooltipContent(data, mmsi);
@@ -2274,7 +2531,7 @@
                     }
                     // Log for debugging if needed
                     if (mmsi !== myMMSI) {
-                        console.log(`Warning: VDO message with different MMSI ${mmsi} vs known ${myMMSI}`);
+                        console.debug(`Warning: VDO message with different MMSI ${mmsi} vs known ${myMMSI}`);
                     }
                     
                     // First check if coordinates are valid
@@ -2294,8 +2551,6 @@
                         myMMSI = mmsi;
                         saveVesselMMSI(mmsi);
                     }
-                    
-                    data = `AIS MMSI: ${mmsi} (Own vessel)\nLat: ${lat.toFixed(5)}\nLon: ${lon.toFixed(5)}\nCOG: ${cog.toFixed(1)}°\nSOG: ${sog.toFixed(1)} nds`;
                     
                     // Only update display if this is more recent data
                     if (Date.now() > lastDataUpdateTime) {
@@ -2355,7 +2610,7 @@
                         `${etaHour < 24 ? String(etaHour).padStart(2, '0') : '--'}:` +
                         `${etaMin < 60 ? String(etaMin).padStart(2, '0') : '--'}`;
 
-            console.log(`ETA: ${etaStr}`);
+            console.debug(`ETA: ${etaStr}`);
 
             // Destination (bits 302-421, 20x6 bits)
             let destBits = bitstring.slice(302, 422);
@@ -2424,7 +2679,7 @@
             }
             name = name.replace(/@+$/, '').trim();
 
-            console.log(`Virtual AtoN detected: ${name} in position (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
+            console.debug(`Virtual AtoN detected: ${name} in position (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
 
             // AtoN type (bits 38-42)
             const atonType = parseInt(bitstring.slice(38, 43), 2);
@@ -2577,7 +2832,10 @@
         reader.onload = (e) => {
             try {
                 const gpxContent = e.target?.result as string;
-                parseGpxContent(gpxContent, file.name);
+                // Save the raw GPX content to localStorage for reload
+                localStorage.setItem('windy-nmea-gpx-raw', gpxContent);
+                parseGpxMetadata(gpxContent, file.name);
+                parseGpxRoute(gpxContent, file.name);
             } catch (error) {
                 console.error('Error reading GPX file:', error);
                 addError("[Err] Failed to read GPX file");
@@ -2587,12 +2845,58 @@
     }
 
     /**
+     * Parses GPX metadata from the XML content
+     * @param gpxXml
+     * @param fileName
+     */
+    function parseGpxMetadata(gpxXml: string, fileName: string): void {
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(gpxXml, 'text/xml');
+
+        // Extract metadata information into a single object
+        const metadata = xmlDoc.getElementsByTagName('metadata')[0];
+        if (metadata) {
+            // Extract author name from <author><name>...</name></author> if present
+            let authorName = 'Unknown';
+            const authorElem = metadata.getElementsByTagName('author')[0];
+            if (authorElem) {
+                const authorNameElem = authorElem.getElementsByTagName('name')[0];
+                if (authorNameElem && authorNameElem.textContent) {
+                    authorName = authorNameElem.textContent.trim();
+                } else if (authorElem.textContent) {
+                    authorName = authorElem.textContent.trim();
+                }
+            }
+            routeMetadata = {
+                name: metadata.getElementsByTagName('name')[0]?.textContent?.trim() || 'Unknown Route',
+                filename: metadata.getElementsByTagName('filename')[0]?.textContent?.trim() || 'No Name Route',
+                desc: metadata.getElementsByTagName('desc')[0]?.textContent?.trim() || '',
+                author: authorName,
+                time: metadata.getElementsByTagName('time')[0]?.textContent?.trim() || '',
+                keywords: metadata.getElementsByTagName('keywords')[0]?.textContent?.trim() || '',
+            };
+            // Optionally, extract any other custom fields
+            // Example: loop through all children for extensibility
+            Array.from(metadata.children).forEach(child => {
+                if (!(child.tagName in routeMetadata)) {
+                    routeMetadata[child.tagName] = child.textContent;
+                }
+            });
+
+            // Store or display the metadata as needed
+            console.debug('Route Metadata:', routeMetadata);
+        } else {
+            routeMetadata = {};
+        }
+    }
+
+    /**
      * Parses GPX XML content and extracts waypoints with departure time extraction
      * @param {string} gpxXml - The GPX XML content
      * @param {string} fileName - The name of the GPX file
      * @returns {void}
     */
-    function parseGpxContent(gpxXml: string, fileName: string): void {
+    function parseGpxRoute(gpxXml: string, fileName: string): void {
         try {
             // Remove BOM if present and trim whitespace
             if (gpxXml.charCodeAt(0) === 0xFEFF) {
@@ -2625,7 +2929,7 @@
             }
 
             // Always use a new waypoints array for reactivity
-            let waypoints: Array<{lat: number, lon: number, name?: string, time?: Date, type?: string}> = [];
+            let waypoints: Array<{lat: number, lon: number, name?: string, time?: Date, passedTime?: Date, type?: string}> = [];
 
             // PRIORITY 1: Extract route points (rtept) from route blocks
             const routePoints = xmlDoc.getElementsByTagName('rtept');
@@ -2636,12 +2940,14 @@
                 if (validateCoordinates(lat, lon)) {
                     const nameElement = getFirstChildByTagName(rtept, 'name');
                     const timeElement = getFirstChildByTagName(rtept, 'time');
+                    const passedTimedElement = getFirstChildByTagName(rtept, 'timePassed');
                     const legType = getFirstChildByTagName(rtept, 'type');
                     waypoints.push({
                         lat,
                         lon,
                         name: nameElement?.textContent || `Route Point ${i + 1}`,
                         time: timeElement?.textContent ? new Date(timeElement.textContent) : undefined,
+                        passedTime: passedTimedElement?.textContent ? new Date(passedTimedElement.textContent) : undefined,
                         type: legType?.textContent || undefined
                     });
                 }
@@ -2707,17 +3013,10 @@
 
             // Reset waypoint indices only if no current position available
             if (!lastLatitude || !lastLongitude) {
-                closestWaypointIndex = 0;
                 nextWaypointIndex = 0;
             }
 
             calculateRouteDistance();
-            /*// Always clear old route/waypoints before drawing new
-            if (map) {
-                clearRouteDisplay();
-                routeLayer = createLayerGroup(map, zIndexRoute);
-                routeMarkers = createLayerGroup(map, zIndexWaypoint);
-            }*/
             displayRoute();
             displayRouteWaypoints();
 
@@ -2729,9 +3028,9 @@
             // Save route to localStorage
             saveGpxRoute();
             
-            console.log(`GPX route loaded: ${waypoints.length} waypoints from ${fileName}`);
+            console.debug(`GPX route loaded: ${waypoints.length} waypoints from ${fileName}`);
             if (routeStartTime) {
-                console.log(`Departure time: ${routeStartTime.toISOString()}`);
+                console.debug(`Departure time: ${routeStartTime.toISOString()}`);
             }
             
             // Clear any existing errors
@@ -2851,30 +3150,39 @@
         
         // Create route line
         let routeLatLngs: any[] = [];
+        console.debug(`DEBUG ROUTE DISPLAY: Creating route with ${gpxRoute.length} waypoints`);
         for (let i = 0; i < gpxRoute.length - 1; i++) {
             const wp1 = gpxRoute[i];
             const wp2 = gpxRoute[i + 1];
+            
+            // Debug waypoints 49-50 specifically
+            if (i === 49 || i === 50) {
+                console.debug(`DEBUG ROUTE DISPLAY: WP${i} = (${wp1.lat.toFixed(5)}, ${wp1.lon.toFixed(5)}) type=${wp1.type || 'RL'}`);
+            }
+            
             if (wp1.type === 'GC') {
-                // Interpolate great circle points
+                // Interpolate great circle points for GC legs
                 const dist = calculateGreatCircleDistance(wp1.lat, wp1.lon, wp2.lat, wp2.lon);
                 const gcPoints = interpolateGreatCircle(wp1.lat, wp1.lon, wp2.lat, wp2.lon, dist / 10);
                 routeLatLngs = routeLatLngs.concat(gcPoints);
-            } else if (wp1.type === 'RL' || !wp1.type) {
-                // Interpolate rhumb line points for RL
-                const dist = calculateRhumbLineDistance(wp1.lat, wp1.lon, wp2.lat, wp2.lon);
-                const numPoints = Math.max(2, Math.round(dist / 1)); // 1 NM per segment, at least 2 points
-                for (let j = 0; j < numPoints; j++) {
-                    const f = j / (numPoints - 1);
-                    const pt = interpolateRhumbLinePoint(wp1.lat, wp1.lon, wp2.lat, wp2.lon, f);
-                    routeLatLngs.push([pt.lat, pt.lon]);
-                }
             } else {
-                // Fallback: treat as RL
+                // For RL legs and default: use straight lines (matches ECDIS/chart plotter display)
                 routeLatLngs.push([wp1.lat, wp1.lon]);
+                
+                // Debug the coordinates being added to the route display
+                if (i === 49) {
+                    console.debug(`DEBUG ROUTE DISPLAY: Adding WP${i} to route display: [${wp1.lat.toFixed(5)}, ${wp1.lon.toFixed(5)}]`);
+                }
             }
         }
         // Always add the last waypoint
         routeLatLngs.push([gpxRoute[gpxRoute.length - 1].lat, gpxRoute[gpxRoute.length - 1].lon]);
+        
+        // Debug the final waypoint being added
+        const lastWP = gpxRoute[gpxRoute.length - 1];
+        if (gpxRoute.length - 1 === 50) {
+            console.debug(`DEBUG ROUTE DISPLAY: Adding final WP${gpxRoute.length - 1} to route display: [${lastWP.lat.toFixed(5)}, ${lastWP.lon.toFixed(5)}]`);
+        }
 
         L.polyline(routeLatLngs, {
             color: '#ff6600',
@@ -2887,10 +3195,6 @@
         if (showRouteWaypoints) {
             displayRouteWaypoints();
         }
-        
-        // Fit map to route bounds
-        const group = new L.featureGroup(routeLatLngs.map(ll => L.marker(ll)));
-        map.fitBounds(group.getBounds().pad(0.1));
     }
 
     /**
@@ -2950,9 +3254,10 @@
                 passedTime = 'Departed';
             } else if (isPassed && waypoint.passedTime instanceof Date && !isNaN(waypoint.passedTime.getTime())) {
                 const d = waypoint.passedTime;
-                passedTime = `Passed: ${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')} ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}:${String(d.getUTCSeconds()).padStart(2,'0')}`;
+                passedTime = `Passed: ${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')} ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')} UTC`;
             } else if (!isPassed) {
-                passedTime = `${waypointETAs.length > 0 && waypointETAs[myIndex] ? `ETA: ${waypointETAs[myIndex].eta.toISOString().split('.')[0] + 'Z'}` : ''}`
+                const d = waypointETAs[myIndex]
+                passedTime = `${waypointETAs.length > 0 && waypointETAs[myIndex] ? `ETA: ${d.eta.getUTCFullYear()}-${String(d.eta.getUTCMonth()+1).padStart(2,'0')}-${String(d.eta.getUTCDate()).padStart(2,'0')} ${String(d.eta.getUTCHours()).padStart(2,'0')}:${String(d.eta.getUTCMinutes()).padStart(2,'0')} UTC` : ''}`;
             }
             marker.bindTooltip(
                 `Waypoint ${index + 1} : ${waypoint.name}<br>
@@ -2987,7 +3292,6 @@
         isRouteLoaded = false;
         routeFileName = '';
         routeProgress = 0;
-        closestWaypointIndex = 0;
         nextWaypointIndex = 0;
         routeDistance = 0;
         estimatedTimeToCompletion = 0;
@@ -3003,7 +3307,7 @@
             fileInput.value = '';
         }
         
-        console.log('GPX route cleared');
+        console.debug('GPX route cleared');
         
         // Redraw markers to restore traditional projection arrows
         if (lastLatitude !== null && lastLongitude !== null) {
@@ -3045,26 +3349,31 @@
         pointLat: number, pointLon: number,
         segmentStartLat: number, segmentStartLon: number,
         segmentEndLat: number, segmentEndLon: number,
-        legType: string = 'GC'
+        legType: string
     ) {
         if (legType === 'RL') {
-            // Rhumb line: search for t in [0,1] that minimizes distance (geodetic)
+            // RL: search for t in [0,1] that minimizes distance using straight-line interpolation
             let minDist = Infinity;
             let bestT = 0;
             for (let t = 0; t <= 1.0001; t += 0.02) {
-                const pt = interpolateRhumbLinePoint(segmentStartLat, segmentStartLon, segmentEndLat, segmentEndLon, t);
-                const d = calculateRhumbLineDistance(pointLat, pointLon, pt.lat, pt.lon);
+                // Use straight-line interpolation to match route display
+                const ptLat = segmentStartLat + (segmentEndLat - segmentStartLat) * t;
+                const ptLon = segmentStartLon + (segmentEndLon - segmentStartLon) * t;
+                const d = calculateStraightLineDistance(pointLat, pointLon, ptLat, ptLon);
                 if (d < minDist) {
                     minDist = d;
                     bestT = t;
                 }
             }
+            // Refine search around best point
             for (let dt = -0.02; dt <= 0.02; dt += 0.002) {
                 let t = bestT + dt;
                 if (t < 0) t = 0;
                 if (t > 1) t = 1;
-                const pt = interpolateRhumbLinePoint(segmentStartLat, segmentStartLon, segmentEndLat, segmentEndLon, t);
-                const d = calculateRhumbLineDistance(pointLat, pointLon, pt.lat, pt.lon);
+                // Use straight-line interpolation to match route display
+                const ptLat = segmentStartLat + (segmentEndLat - segmentStartLat) * t;
+                const ptLon = segmentStartLon + (segmentEndLon - segmentStartLon) * t;
+                const d = calculateStraightLineDistance(pointLat, pointLon, ptLat, ptLon);
                 if (d < minDist) {
                     minDist = d;
                     bestT = t;
@@ -3100,6 +3409,88 @@
             return {
                 distance: minDist,
                 progress: bestT
+            };
+        }
+    }
+
+    /**
+     * Find the perpendicular projection (abeam point) of a vessel onto a route segment
+     * This is different from findClosestPointOnSegment which finds the minimum distance point
+     * This finds where a perpendicular line from the vessel intersects the route
+     */
+    function findPerpendicularProjection(
+        vesselLat: number, vesselLon: number,
+        segmentStartLat: number, segmentStartLon: number,
+        segmentEndLat: number, segmentEndLon: number,
+        legType: string
+    ) {
+        if (legType === 'RL') {
+            // For rhumb line (straight line on Mercator projection)
+            // Convert to Mercator coordinates for accurate perpendicular calculation
+            const vesselX = vesselLon * Math.PI / 180;
+            const vesselY = Math.log(Math.tan(Math.PI / 4 + vesselLat * Math.PI / 360));
+            
+            const startX = segmentStartLon * Math.PI / 180;
+            const startY = Math.log(Math.tan(Math.PI / 4 + segmentStartLat * Math.PI / 360));
+            
+            const endX = segmentEndLon * Math.PI / 180;
+            const endY = Math.log(Math.tan(Math.PI / 4 + segmentEndLat * Math.PI / 360));
+            
+            // Vector from start to end
+            const segmentDx = endX - startX;
+            const segmentDy = endY - startY;
+            
+            // Vector from start to vessel
+            const vesselDx = vesselX - startX;
+            const vesselDy = vesselY - startY;
+            
+            // Project vessel onto segment using dot product
+            const segmentLengthSq = segmentDx * segmentDx + segmentDy * segmentDy;
+            
+            if (segmentLengthSq === 0) {
+                // Degenerate segment (start and end are the same)
+                return {
+                    distance: calculateStraightLineDistance(vesselLat, vesselLon, segmentStartLat, segmentStartLon),
+                    progress: 0,
+                    projectionLat: segmentStartLat,
+                    projectionLon: segmentStartLon
+                };
+            }
+            
+            // Calculate the parameter t for the projection
+            const t = Math.max(0, Math.min(1, (vesselDx * segmentDx + vesselDy * segmentDy) / segmentLengthSq));
+            
+            // Calculate the projection point in Mercator coordinates
+            const projX = startX + t * segmentDx;
+            const projY = startY + t * segmentDy;
+            
+            // Convert back to lat/lon
+            const projLon = projX * 180 / Math.PI;
+            const projLat = (2 * Math.atan(Math.exp(projY)) - Math.PI / 2) * 180 / Math.PI;
+            
+            // Calculate distance from vessel to projection
+            const distance = calculateStraightLineDistance(vesselLat, vesselLon, projLat, projLon);
+            
+            return {
+                distance: distance,
+                progress: t,
+                projectionLat: projLat,
+                projectionLon: projLon
+            };
+        } else {
+            // For great circle, we need to use spherical geometry
+            // This is more complex - for now, fall back to closest point method
+            // TODO: Implement proper great circle perpendicular projection
+            const result = findClosestPointOnSegment(vesselLat, vesselLon, segmentStartLat, segmentStartLon, segmentEndLat, segmentEndLon, legType);
+            
+            // Get the projection coordinates
+            const pt = interpolateGreatCirclePoint(segmentStartLat, segmentStartLon, segmentEndLat, segmentEndLon, result.progress);
+            
+            return {
+                distance: result.distance,
+                progress: result.progress,
+                projectionLat: pt.lat,
+                projectionLon: pt.lon
             };
         }
     }
@@ -3144,7 +3535,7 @@
             return
         };
         
-        // Step 1: Find the first segment where the projection parameter t >= 1 (i.e., vessel is past the end of the segment)
+        // Step 1: Find the best perpendicular projection onto route segments
         // Navigation/progress logic (use only this for nextWaypointIndex)
         let bestSegmentIndex = 0;
         let bestProgress = 0;
@@ -3152,11 +3543,15 @@
         for (let i = 0; i < gpxRoute.length - 1; i++) {
             const segmentStart = gpxRoute[i];
             const segmentEnd = gpxRoute[i + 1];
-            const result = findClosestPointOnSegment(
+            const legType = segmentStart.type || 'RL'; // Leg type is on departure waypoint
+            
+            const result = findPerpendicularProjection(
                 lastLatitude!, lastLongitude!,
                 segmentStart.lat, segmentStart.lon,
-                segmentEnd.lat, segmentEnd.lon
+                segmentEnd.lat, segmentEnd.lon,
+                legType
             );
+            
             if (result.progress >= 0 && result.progress <= 1 && result.distance < minDistance) {
                 minDistance = result.distance;
                 bestSegmentIndex = i;
@@ -3168,6 +3563,7 @@
             bestProgress = 1;
         }
         nextWaypointIndex = bestSegmentIndex + 1;
+        // bestProgress represents the current segment progress (0-1) but is not stored globally
 
         // Step 2: Calculate route progress (for ETC/ETA)
         let distanceCovered = 0;
@@ -3194,10 +3590,7 @@
         // Step 3: The next waypoint is ALWAYS the end of the current segment
         nextWaypointIndex = Math.min(bestSegmentIndex + 1, gpxRoute.length - 1);
 
-        // Step 4: Update closestWaypointIndex for internal use
-        closestWaypointIndex = bestProgress > 0 ? bestSegmentIndex + 1 : bestSegmentIndex;
-
-        // Step 5: Calculate ETC/ETA
+        // Step 4: Calculate ETC/ETA
         const effectiveSpeed = testModeEnabled ? testSOG : mySpeedOverGround;
         if (effectiveSpeed > 0) {
             const remainingDistance = (routeDistance * (1 - routeProgress));
@@ -3217,14 +3610,60 @@
         if (showRouteWaypoints && routeMarkers) {
             displayRouteWaypoints();
         }
-
-        // Only set passedTime when actually passing a waypoint (not on reload)
-        if (nextWaypointIndex > prevNextWaypointIndex && prevNextWaypointIndex < gpxRoute.length) {
-            if (!gpxRoute[prevNextWaypointIndex].passedTime) {
-                gpxRoute[prevNextWaypointIndex].passedTime = new Date();
+        
+        // Initialise previous waypoint index after a reloading
+        if (prevNextWaypointIndex === 0) {
+            prevNextWaypointIndex = nextWaypointIndex;
+        }
+        
+        // Enhanced waypoint passing detection and logging
+        const currentWaypointIndex = nextWaypointIndex - 1; // The waypoint we just passed
+        
+        // Check if we've passed a new waypoint
+        if (currentWaypointIndex >= 0 && currentWaypointIndex < gpxRoute.length) {
+            // Check if this waypoint doesn't have a passedTime yet
+            if (!gpxRoute[currentWaypointIndex].passedTime && currentWaypointIndex >= prevNextWaypointIndex) {
+                console.debug(`DEBUG: Passing waypoint ${currentWaypointIndex + 1} (${gpxRoute[currentWaypointIndex].name || 'Unnamed'})`);
+                
+                // Set the passed time
+                gpxRoute[currentWaypointIndex].passedTime = new Date();
+                
+                // Save to localStorage immediately
+                saveGpxRoute();
+                
+                // Auto-download updated GPX file with passed times
+                downloadGpxWithPassedTimes();
+                
+                // Update previous waypoint index
+                prevNextWaypointIndex = nextWaypointIndex;
+                
+                console.debug(`Waypoint ${currentWaypointIndex + 1} passed at ${gpxRoute[currentWaypointIndex].passedTime.toISOString()}`);
+            } else if (gpxRoute[currentWaypointIndex].passedTime) {
+                console.debug(`DEBUG: Waypoint ${currentWaypointIndex + 1} already has passedTime: ${gpxRoute[currentWaypointIndex].passedTime}`);
             }
         }
-        prevNextWaypointIndex = nextWaypointIndex;
+        
+        // Alternative check: if nextWaypointIndex increased significantly, mark all intermediate waypoints as passed
+        if (nextWaypointIndex > prevNextWaypointIndex + 1) {
+            console.debug(`DEBUG: Multiple waypoints skipped, marking intermediate waypoints as passed`);
+            for (let i = prevNextWaypointIndex; i < nextWaypointIndex - 1; i++) {
+                if (i >= 0 && i < gpxRoute.length && !gpxRoute[i].passedTime) {
+                    gpxRoute[i].passedTime = new Date();
+                    console.debug(`Marked waypoint ${i + 1} as passed (skipped)`);
+                }
+            }
+            // Also mark the current waypoint
+            if (currentWaypointIndex >= 0 && currentWaypointIndex < gpxRoute.length && !gpxRoute[currentWaypointIndex].passedTime) {
+                gpxRoute[currentWaypointIndex].passedTime = new Date();
+                console.debug(`Marked current waypoint ${currentWaypointIndex + 1} as passed`);
+            }
+            
+            // Save and download after marking multiple waypoints
+            saveGpxRoute();
+            downloadGpxWithPassedTimes();
+            prevNextWaypointIndex = nextWaypointIndex;
+        }
+        
         /*
         // Mark passed time for waypoints
         for (let i = 0; i < nextWaypointIndex; i++) {
@@ -3264,192 +3703,161 @@
     }
 
     /**
-     * Projects vessel position along the loaded route with timing consideration and heading calculation
-     * @param {number} currentSOG Speed over ground of the vessel
-     * @param {number} duration Duration for the projection (in seconds)
-     * @returns {{lat: number, lon: number, heading: number} | null} Projected position as a Leaflet LatLng object
-    */
-    function computeRouteProjection(currentSOG: number, duration: number): {lat: number, lon: number, heading: number} | null {
-        if (!isRouteLoaded || gpxRoute.length < 2 || currentSOG <= 0) return null;
-
-        // Helper to snap to route (GC or RL)
-        function snapToRoute(lat: number, lon: number) {
-            let bestSegmentIndex = 0;
-            let minDistance = Infinity;
-            let snappedLat = lat;
-            let snappedLon = lon;
-            let snappedT = 0;
-            for (let i = 0; i < gpxRoute.length - 1; i++) {
-                const segStart = gpxRoute[i];
-                const segEnd = gpxRoute[i + 1];
-                const legType = segStart.type || 'GC';
-                const proj = findClosestPointOnSegment(lat, lon, segStart.lat, segStart.lon, segEnd.lat, segEnd.lon, legType);
-                if (proj.distance < minDistance) {
-                    minDistance = proj.distance;
-                    bestSegmentIndex = i;
-                    snappedT = Math.max(0, Math.min(1, proj.progress));
-                    if (legType === 'GC') {
-                        const snapped = interpolateGreatCirclePoint(segStart.lat, segStart.lon, segEnd.lat, segEnd.lon, snappedT);
-                        snappedLat = snapped.lat;
-                        snappedLon = snapped.lon;
-                    } else {
-                        // RL: interpolate along rhumb line
-                        const snapped = interpolateRhumbLinePoint(segStart.lat, segStart.lon, segEnd.lat, segEnd.lon, snappedT);
-                        snappedLat = snapped.lat;
-                        snappedLon = snapped.lon;
-                    }
-                }
-            }
-            return { snappedLat, snappedLon, bestSegmentIndex, snappedT };
-        }
-
-        if (routeStartTime) {
-            const targetTime = windyStore.get('timestamp');
-            const now = Date.now();
-
-            // Before departure: stay at route start
-            if (targetTime < routeStartTime.getTime()) {
-                return {
-                    lat: gpxRoute[0].lat,
-                    lon: gpxRoute[0].lon,
-                    heading: gpxRoute.length > 1 ? calculateBearing(gpxRoute[0].lat, gpxRoute[0].lon, gpxRoute[1].lat, gpxRoute[1].lon) : 0
-                };
-            }
-
-            // After departure: project from vessel's real position, using duration from now to timeline
-            let startLat = lastLatitude ?? gpxRoute[0].lat;
-            let startLon = lastLongitude ?? gpxRoute[0].lon;
-            let { snappedLat, snappedLon, bestSegmentIndex } = snapToRoute(startLat, startLon);
-            let currentLat = snappedLat;
-            let currentLon = snappedLon;
-            let currentIndex = bestSegmentIndex;
-
-            // Duration from now to timeline ---
-            const projectionDurationSeconds = (targetTime - now) / 1000; // seconds
-            let remainingDistance = currentSOG * (projectionDurationSeconds / 3600); // in NM
-
-            // Walk the route from the snapped point
-            while (remainingDistance > 0 && currentIndex < gpxRoute.length - 1) {
-                const nextWaypoint = gpxRoute[currentIndex + 1];
-                const legType = gpxRoute[currentIndex].type || 'GC';
-                const segmentDistance = calculateDistance(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon, legType);
-
-                if (segmentDistance <= remainingDistance) {
-                    remainingDistance -= segmentDistance;
-                    currentLat = nextWaypoint.lat;
-                    currentLon = nextWaypoint.lon;
-                    currentIndex++;
-                } else {
-                    const ratio = segmentDistance === 0 ? 0 : remainingDistance / segmentDistance;
-                    if (legType === 'GC') {
-                        const gc = interpolateGreatCirclePoint(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon, ratio);
-                        currentLat = gc.lat;
-                        currentLon = gc.lon;
-                    } else {
-                        currentLat += (nextWaypoint.lat - currentLat) * ratio;
-                        currentLon += (nextWaypoint.lon - currentLon) * ratio;
-                    }
-                    remainingDistance = 0;
-                }
-            }
-
-            // Calculate heading for the projected position
-            let heading = 0;
-            if (currentIndex < gpxRoute.length - 1) {
-                heading = calculateBearing(currentLat, currentLon, gpxRoute[currentIndex + 1].lat, gpxRoute[currentIndex + 1].lon);
-            } else if (currentIndex > 0) {
-                heading = calculateBearing(gpxRoute[currentIndex - 1].lat, gpxRoute[currentIndex - 1].lon, currentLat, currentLon);
-            }
-
-            return { lat: currentLat, lon: currentLon, heading };
-        }
-
-        // Fallback: project from current position for duration (in seconds)
-        let startLat = lastLatitude ?? gpxRoute[0].lat;
-        let startLon = lastLongitude ?? gpxRoute[0].lon;
-        let { snappedLat, snappedLon, bestSegmentIndex } = snapToRoute(startLat, startLon);
-        let currentLat = snappedLat;
-        let currentLon = snappedLon;
-        let currentIndex = bestSegmentIndex;
-
-        // duration is in seconds, convert to hours
-        const timeElapsedHours = duration / 3600;
-        let remainingDistance = currentSOG * timeElapsedHours; // in NM
-
-        // Walk the route from the snapped point
-        while (remainingDistance > 0 && currentIndex < gpxRoute.length - 1) {
-            const nextWaypoint = gpxRoute[currentIndex + 1];
-            const legType = gpxRoute[currentIndex].type || 'GC';
-            const segmentDistance = calculateDistance(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon, legType);
-
-            if (segmentDistance <= remainingDistance) {
-                remainingDistance -= segmentDistance;
-                currentLat = nextWaypoint.lat;
-                currentLon = nextWaypoint.lon;
-                currentIndex++;
-            } else {
-                const ratio = segmentDistance === 0 ? 0 : remainingDistance / segmentDistance;
-                if (legType === 'GC') {
-                    const gc = interpolateGreatCirclePoint(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon, ratio);
-                    currentLat = gc.lat;
-                    currentLon = gc.lon;
-                } else {
-                    const rh = interpolateRhumbLinePoint(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon, ratio);
-                    currentLat = rh.lat;
-                    currentLon = rh.lon;
-                }
-                remainingDistance = 0;
+     * Snap the given latitude and longitude to the nearest route segment
+     * @param lat
+     * @param lon
+     * @returns 
+     */
+    function snapToRoute(lat: number, lon: number) { // Helper to snap to route (GC or RL)
+        let bestSegmentIndex = 0; // Index of the best matching segment
+        let minDistance = Infinity; // Minimum distance to a segment
+        let snappedLat = lat; // Snapped latitude
+        let snappedLon = lon; // Snapped longitude
+        let snappedT = 0; // Progress along the segment [0,1]
+        for (let i = 0; i < gpxRoute.length - 1; i++) {
+            const segStart = gpxRoute[i];
+            const segEnd = gpxRoute[i + 1];
+            const legType = segStart.type || 'RL'; // Leg type is on departure waypoint
+            const proj = findPerpendicularProjection(lat, lon, segStart.lat, segStart.lon, segEnd.lat, segEnd.lon, legType);
+            if (proj.distance < minDistance) {
+                minDistance = proj.distance;
+                bestSegmentIndex = i;
+                snappedT = Math.max(0, Math.min(1, proj.progress));
+                snappedLat = proj.projectionLat;
+                snappedLon = proj.projectionLon;
             }
         }
-
-        // Calculate heading for the projected position
-        let heading = 0;
-        if (currentIndex < gpxRoute.length - 1) {
-            heading = calculateBearing(currentLat, currentLon, gpxRoute[currentIndex + 1].lat, gpxRoute[currentIndex + 1].lon);
-        } else if (currentIndex > 0) {
-            heading = calculateBearing(gpxRoute[currentIndex - 1].lat, gpxRoute[currentIndex - 1].lon, currentLat, currentLon);
-        }
-
-        return { lat: currentLat, lon: currentLon, heading };
+        return { snappedLat, snappedLon, bestSegmentIndex};
     }
 
     /**
-     * Calculate the projected position of the vessel based on route or heading/speed and Windy timestamp
-     * @param lat Latitude of the vessel
-     * @param lon Longitude of the vessel
-     * @param cog Course over ground of the vessel
-     * @param sog Speed over ground of the vessel
-     * @param duration Duration for the projection (in seconds)
-     * @returns Projected position as a Leaflet LatLng object
+     * Projects vessel position along the loaded route with timing consideration and heading calculation
+     * @param {number} currentSOG Speed over ground of the vessel
+     * @param {number} targetTime Target timestamp for projection (not duration!)
+     * @returns {{lat: number, lon: number, heading: number} | null} Projected position
     */
-    function computeProjection(lat: number, lon: number, cog: number, sog: number, duration?: number): any {
-        // Use cached route projection if available (only for route-based projection)
-        if (lastRouteProjection) {
-            return L.latLng(lastRouteProjection.lat, lastRouteProjection.lon);
+    function computeRouteProjection(currentSOG: number, targetTime: number): {lat: number, lon: number, heading: number} | null {
+        if (!isRouteLoaded || gpxRoute.length < 2 || currentSOG <= 0) return null;
+
+        // --- ROUTE PROJECTION LOGIC ---
+        // Timeline-based projection: use Windy timeline and routeStartTime
+        if (routeStartTime) {
+            const now = Date.now();
+
+            // If timeline is before planned departure, stay at route start
+            if (targetTime < routeStartTime.getTime()) {
+                const firstLegType = gpxRoute[0].type || 'RL'; // First leg type
+                return {
+                    lat: gpxRoute[0].lat,
+                    lon: gpxRoute[0].lon,
+                    heading: gpxRoute.length > 1 ? calculateBearingByLegType(gpxRoute[0].lat, gpxRoute[0].lon, gpxRoute[1].lat, gpxRoute[1].lon, firstLegType) : 0
+                };
+            }
+
+            // After departure: project from vessel's real position snapped into route using findPerpendicularProjection & time from now to timeline
+            
+            // For route projection, start from the vessel's SNAPPED position
+            // The vessel may be slightly off route so we need to snap to the actual leg.
+            // We project from the snapped position following the route heading from leg start to leg end.
+            
+            // Get vessel's actual position
+            let vesselLat = lastLatitude ?? gpxRoute[0].lat;
+            let vesselLon = lastLongitude ?? gpxRoute[0].lon;
+            
+            // Calculate how far to project (in NM) based on SOG and time from now to timeline
+            const projectionDurationSeconds = (targetTime - now) / 1000; // seconds
+            
+            // Special case: When timeline is at "Now" (projectionDurationSeconds ≈ 0), 
+            // return the vessel's actual current position, not a route projection
+            if (Math.abs(projectionDurationSeconds) < 30) { // Within 30 seconds of "now"
+                
+                // Calculate heading based on vessel's current position relative to route
+                let heading = 0;
+                if (currentSOG > 0.5 && gpxRoute.length > 1) {
+                    // Snap to route to find current segment and calculate appropriate heading
+                    const snapResult = snapToRoute(vesselLat, vesselLon);
+                    const segmentIndex = snapResult.bestSegmentIndex;
+                    const segmentStart = gpxRoute[segmentIndex];
+                    const segmentEnd = gpxRoute[segmentIndex + 1];
+                    const legType = segmentStart.type || 'RL';
+                    heading = calculateBearingByLegType(segmentStart.lat, segmentStart.lon, segmentEnd.lat, segmentEnd.lon, legType);
+                }
+                
+                return {
+                    lat: vesselLat,
+                    lon: vesselLon,
+                    heading: heading
+                };
+            }
+            
+            // calculate the snapped point:
+            // Find the intersection between abeam the vessel and the actual leg: it will be the snapped point and departure of our projected vessel's icon.
+            const snapResult = snapToRoute(vesselLat, vesselLon);
+            let snappedLat = snapResult.snappedLat;
+            let snappedLon = snapResult.snappedLon;
+            let currentSegmentIndex = snapResult.bestSegmentIndex;
+            
+            // No time limitation - allow unlimited projection for route following
+            let remainingDistance = currentSOG * (projectionDurationSeconds / 3600); // in NM
+            
+            // Start projection from snapped point (not from vessel's actual position)
+            // if first leg waypoint.type = RL, project following a straight line.
+            // if first leg waypoint.type = GC project following a great circle curve.
+            // if we reach the end of the segment, follow the route to the next leg.
+            // Use the walkRouteFromPosition function to follow route turns after leg end waypoint
+            
+            // Calculate how far we are from the start of the current segment
+            const segmentStart = gpxRoute[currentSegmentIndex];
+            const segmentEnd = gpxRoute[currentSegmentIndex + 1];
+            const legType = segmentStart.type || 'RL';
+            
+            // Calculate distance from segment start to our snapped position
+            const distanceFromSegmentStart = calculateDistance(
+                segmentStart.lat, segmentStart.lon, 
+                snappedLat, snappedLon, 
+                legType
+            );
+            
+            // Now use walkRouteFromPosition to properly follow the route including turns until we reach the distance sog * projection duration
+            // But start from the exact snapped position on the route
+            const routeProjectionResult = walkRouteFromPosition(
+                snappedLat, 
+                snappedLon, 
+                currentSegmentIndex, 
+                remainingDistance
+            );
+            
+            // return these lat, lon to display the vessel's projected icon and the weatherPopup. Calculation must be done one time.
+            return {
+                lat: routeProjectionResult.lat,
+                lon: routeProjectionResult.lon,
+                heading: routeProjectionResult.heading
+            };
         }
-        // For fallback (COG/SOG) projection, always recalculate, do not use cache
 
-        // Fallback: traditional COG/SOG projection if no cached value
-        const ts = getRoundedHourTimestamp(windyStore.get('timestamp'));
-        duration = duration ?? (Math.floor((ts - Date.now()) / 3600000) || 0); // in hours
-        if (duration > 360) duration = 0;
-        if (duration < 1) duration = 0;
+        return null; // No route start time available
+    }
 
-        if (duration === 0) {
+    /**
+     * Simple fallback projection for COG/SOG when no route is loaded
+     * Only used for direction arrows and non-route projections
+     */
+    function computeFallbackProjection(lat: number, lon: number, cog: number, sog: number, durationHours: number): any {
+        if (durationHours === 0 || sog <= 0) {
             return L.latLng(lat, lon);
         }
 
-        const distance = sog * duration; // in nautical miles
-        const R = 3440.065; // Earth radius in nautical miles
-        const δ = distance / R; // in radians
-        const θ = toRadians(cog);
-        const φ1 = toRadians(lat);
-        const λ1 = toRadians(lon);
+        // Calculate arrival point using straight-line projection
+        const distance = sog * durationHours; // in nautical miles
+        
+        // Convert distance and bearing to lat/lon using simple straight-line interpolation
+        const latDelta = (distance / 60) * Math.cos(toRadians(cog)); // North-South component
+        const lonDelta = (distance / 60) * Math.sin(toRadians(cog)) / Math.cos(toRadians(lat)); // East-West component adjusted for latitude
+        
+        const projectedLat = lat + latDelta;
+        const projectedLon = lon + lonDelta;
 
-        const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) + Math.cos(φ1) * Math.sin(δ) * Math.cos(θ));
-        const λ2 = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1), Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2));
-
-        return L.latLng(toDegrees(φ2), toDegrees(λ2));
+        return L.latLng(projectedLat, projectedLon);
     }
 
    /**
@@ -3565,7 +3973,7 @@
             
             } else if (overlay === 'swell1' || overlay === 'swell2' || overlay === 'swell3') {
                 // For swell overlays, direction conversion formula
-                console.log(`Swell ${overlay} data:`, values);
+                console.debug(`Swell ${overlay} data:`, values);
                 
                 const u = values[0];
                 const v = values[1];
@@ -3618,13 +4026,7 @@
         markerLayer.clearLayers();
         pathLatLngs.push(Position);
 
-        // Auto-save track history every 100 points to avoid excessive localStorage writes
-        if (pathLatLngs.length % 100 === 0) {
-            maintainTrackLimits();
-            saveTrackHistory();
-        }
-
-        // Save one point every 60 seconds to 24h short track
+        // Save track point with time-based cleanup (30 days retention)
         saveShortTrackPoint(lat, lon);
 
         // Use test values if test mode is enabled
@@ -3650,7 +4052,7 @@
         // Only show arrows when NOT following a route
         if (!routeProjectionActive) {
             // Heading direction arrow
-            const headingEnd = computeProjection(lat, lon, effectiveCOG, effectiveSOG, 24);
+            const headingEnd = computeFallbackProjection(lat, lon, effectiveCOG, effectiveSOG, 24);
             if (headingArrow) headingArrow.remove();
             headingArrow = L.polyline([Position, headingEnd], {
                 color: 'blue',
@@ -3659,7 +4061,7 @@
             }).addTo(markerLayer);
 
             // Future projection arrow (use effective values for test mode)
-            const cogEnd = computeProjection(lat, lon, effectiveCOG, effectiveSOG, projectionHours ?? undefined);
+            const cogEnd = computeFallbackProjection(lat, lon, effectiveCOG, effectiveSOG, projectionHours ?? 0);
             if (projectionArrow) projectionArrow.remove();
             projectionArrow = L.polyline([Position, cogEnd], {
                 color: testModeEnabled ? 'orange' : 'red', // Different color in test mode
@@ -3750,14 +4152,14 @@
                 projectedIconDiv.style.transformOrigin = '12px 12px';
                 projectedIconDiv.style.transform = `rotateZ(${projectedHeading}deg)`;
             }
-            updateButtonText();
-        } else {
-            // Remove forecast icon when timeline is in past or no projection needed
-            if (forecastIcon) {
-                forecastIcon.remove();
-                forecastIcon = null;
+            updateButtonText(windyStore.get('timestamp'));
+            } else {
+                // Remove forecast icon when timeline is in past or no projection needed
+                if (forecastIcon) {
+                    forecastIcon.remove();
+                    forecastIcon = null;
+                }
             }
-        }
 
         // Dynamic rotation of the main icon
         const iconDiv = ownShipMarker.getElement()?.querySelector('.rotatable') as HTMLElement;
@@ -3779,27 +4181,139 @@
     } // End addBoatMarker
 
     /**
+     * Common function to walk along the route from a given position
+     * @param startLat Starting latitude
+     * @param startLon Starting longitude
+     * @param startIndex Starting segment index
+     * @param remainingDistance Distance to travel in NM
+     * @returns Final position and heading
+     */
+    function walkRouteFromPosition(startLat: number, startLon: number, startIndex: number, remainingDistance: number): {lat: number, lon: number, heading: number, index: number} {
+        let currentLat = startLat;
+        let currentLon = startLon;
+        let currentIndex = startIndex;
+        
+        let iterations = 0;
+        while (remainingDistance > 0 && currentIndex < gpxRoute.length - 1) {
+            iterations++;
+            const nextWaypoint = gpxRoute[currentIndex + 1];
+            const legType = gpxRoute[currentIndex].type || 'RL'; // Leg type is on the departure waypoint
+            const segmentDistance = calculateDistance(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon, legType);
+            
+            if (segmentDistance <= remainingDistance) {
+                // Move to next waypoint
+                remainingDistance -= segmentDistance;
+                currentLat = nextWaypoint.lat;
+                currentLon = nextWaypoint.lon;
+                currentIndex++;
+            } else {
+                // Interpolate along current segment using EXACT waypoint coordinates to match route display
+                const ratio = segmentDistance === 0 ? 0 : remainingDistance / segmentDistance;
+                
+                // Always use exact waypoint coordinates for interpolation
+                const segmentStartWP = gpxRoute[currentIndex];
+                const segmentEndWP = gpxRoute[currentIndex + 1];
+                
+                if (legType === 'GC') {
+                    // GC: use proper great circle interpolation between exact waypoints
+                    const gc = interpolateGreatCirclePoint(segmentStartWP.lat, segmentStartWP.lon, segmentEndWP.lat, segmentEndWP.lon, ratio);
+                    currentLat = gc.lat;
+                    currentLon = gc.lon;
+                } else {
+                    // RL: For perfect route alignment, calculate where we are within the segment
+                    // and interpolate along the exact waypoint line, not from current position
+                    const segmentStartWP = gpxRoute[currentIndex];
+                    const totalSegmentDistance = calculateDistance(segmentStartWP.lat, segmentStartWP.lon, segmentEndWP.lat, segmentEndWP.lon, legType);
+                    const distanceFromStart = calculateDistance(segmentStartWP.lat, segmentStartWP.lon, currentLat, currentLon, legType);
+                    const progressAlongSegment = totalSegmentDistance === 0 ? 0 : distanceFromStart / totalSegmentDistance;
+                    const finalProgressAlongSegment = totalSegmentDistance === 0 ? 0 : (distanceFromStart + remainingDistance) / totalSegmentDistance;
+                    
+                    // Interpolate along the exact waypoint line using the final progress
+                    const newLat = segmentStartWP.lat + (segmentEndWP.lat - segmentStartWP.lat) * finalProgressAlongSegment;
+                    const newLon = segmentStartWP.lon + (segmentEndWP.lon - segmentStartWP.lon) * finalProgressAlongSegment;
+                    currentLat = newLat;
+                    currentLon = newLon;
+                }
+                
+                // INTERMEDIATE SNAP: Snap to route after interpolation to prevent cumulative errors
+                const snapResult = findPerpendicularProjection(
+                    currentLat, currentLon,
+                    segmentStartWP.lat, segmentStartWP.lon,
+                    segmentEndWP.lat, segmentEndWP.lon,
+                    legType
+                );
+                
+                // Always apply intermediate snap if we're reasonably close to prevent cumulative errors
+                if (snapResult.progress >= 0 && snapResult.progress <= 1 && snapResult.distance < 2.0) {
+                    currentLat = snapResult.projectionLat;
+                    currentLon = snapResult.projectionLon;
+                }
+                
+                remainingDistance = 0;
+            }
+        }
+        
+        // FINAL SNAP: Ensure the projected position is exactly on the route line
+        // Since we're already very close, snap the final position to the route using perpendicular projection
+        if (currentIndex < gpxRoute.length - 1) {
+            const segmentStart = gpxRoute[currentIndex];
+            const segmentEnd = gpxRoute[currentIndex + 1];
+            const legType = segmentStart.type || 'RL';
+            
+            const snapResult = findPerpendicularProjection(
+                currentLat, currentLon,
+                segmentStart.lat, segmentStart.lon,
+                segmentEnd.lat, segmentEnd.lon,
+                legType
+            );
+
+            // Only snap if we're within the segment bounds and close to the route
+            if (snapResult.progress >= 0 && snapResult.progress <= 1 && snapResult.distance < 1.0) {
+                currentLat = snapResult.projectionLat;
+                currentLon = snapResult.projectionLon;
+            }
+        }
+        
+        // Calculate heading for the projected position
+        let heading = 0;
+        if (currentIndex < gpxRoute.length - 1) {
+            const legType = gpxRoute[currentIndex].type || 'RL'; // Current leg type from departure waypoint
+            heading = calculateBearingByLegType(currentLat, currentLon, gpxRoute[currentIndex + 1].lat, gpxRoute[currentIndex + 1].lon, legType);
+        } else if (currentIndex > 0) {
+            const legType = gpxRoute[currentIndex - 1].type || 'RL'; // Previous leg type
+            heading = calculateBearingByLegType(gpxRoute[currentIndex - 1].lat, gpxRoute[currentIndex - 1].lon, currentLat, currentLon, legType);
+        }
+        
+        return { lat: currentLat, lon: currentLon, heading, index: currentIndex };
+    }
+
+    /**
      * Updates the projection for the timeline based on the given timestamp.
      * @param ts
      */
     function updateProjectionForTimeline(ts: number) {
-        //projectionHours = (getRoundedHourTimestamp(ts) - getRoundedHourTimestamp()) / (3600 * 1000); // in hours
         projectionHours = (ts - Date.now()) / (3600 * 1000); // in hours
-        updateButtonText();
+        
+        // Add threshold for "Now" - if within 6 minutes of current time, treat as "Now"
+        const nowThresholdHours = 6 / 60; // 6 minutes in hours
+        if (Math.abs(projectionHours) <= nowThresholdHours) {
+            projectionHours = 0;
+        }
+        
+        updateButtonText(ts);
 
         // Always use latest test values if test mode is enabled
         let effectiveSOG = testModeEnabled ? testSOG : mySpeedOverGround;
         let effectiveCOG = testModeEnabled ? testCOG : myCourseOverGroundT;
 
         if (isRouteLoaded && routeProjectionActive && gpxRoute.length > 0 && routeStartTime) {
-            // Use elapsed time from route start, not from now!
-            const durationSeconds = (ts - routeStartTime.getTime()) / 1000;
-            lastRouteProjection = computeRouteProjection(effectiveSOG, durationSeconds);
+            // Route-based projection: use timeline vs route start time
+            lastRouteProjection = computeRouteProjection(effectiveSOG, ts);
             lastFallbackProjection = null;
         } else {
-            // Fallback: COG/SOG projection from current position, always use latest testCOG/testSOG if test mode
+            // Fallback: COG/SOG projection from current position
             if (lastLatitude !== null && lastLongitude !== null && effectiveSOG > 0.5 && projectionHours > 0) {
-                const fallback = computeProjection(lastLatitude, lastLongitude, effectiveCOG, effectiveSOG, projectionHours);
+                const fallback = computeFallbackProjection(lastLatitude, lastLongitude, effectiveCOG, effectiveSOG, projectionHours);
                 lastFallbackProjection = {
                     lat: fallback.lat,
                     lon: fallback.lng,
@@ -3810,9 +4324,9 @@
             }
             lastRouteProjection = null;
         }
+        
         // Move the weather popup if it's open and timeline changes
         if (openedPopup && lastRouteProjection) {
-            // Use the projected position for the popup
             openedPopup.setLatLng([lastRouteProjection.lat, lastRouteProjection.lon]);
             showMyPopup(lastRouteProjection.lat, lastRouteProjection.lon, true);
         } else if (openedPopup && lastFallbackProjection) {
@@ -3839,13 +4353,23 @@
             
             const now = getRoundedHourTimestamp(Date.now());
             const ts = getRoundedHourTimestamp(windyStore.get('timestamp'));
-            // If timeline is at current time (±1h)
+            
+            // If timeline is at current time (±1h), show current position
             if (projectionHours !== null && projectionHours < 0.1) {
                 showMyPopup(lastLatitude, lastLongitude, false);
             } else if (projectionHours !== null && projectionHours >= 0.1) {
                 // Display on projected position if timeline in the future
-                const projected = computeProjection(lastLatitude, lastLongitude, effectiveCOG, effectiveSOG, projectionHours);
-                showMyPopup(projected.lat, projected.lng, true);
+                // Priority 1: Use route projection if available
+                if (lastRouteProjection) {
+                    showMyPopup(lastRouteProjection.lat, lastRouteProjection.lon, true);
+                } else if (lastFallbackProjection) {
+                    // Priority 2: Use fallback projection
+                    showMyPopup(lastFallbackProjection.lat, lastFallbackProjection.lon, true);
+                } else {
+                    // Priority 3: Calculate projection on demand
+                    const projected = computeFallbackProjection(lastLatitude, lastLongitude, effectiveCOG, effectiveSOG, projectionHours);
+                    showMyPopup(projected.lat, projected.lng, true);
+                }
             } else {
                 // If no projection possible, display on current position
                 showMyPopup(lastLatitude, lastLongitude, false);
@@ -3886,8 +4410,8 @@
      * Set the Windy timeline to the present hour/minute
      */
     function setTimelineNow() {
-        // Set timeline to current time (rounded to nearest 10 minutes for Windy)
-        const now = Date.now();
+        // Set timeline to current time (rounded to nearest 6 minutes for Windy)
+        const now = getRoundedHourTimestamp(Date.now());
         windyStore.set('timestamp', now);
     }
 
@@ -3942,10 +4466,7 @@
      * @returns Formatted date and time string in dd/mm/yyyy HH:MM format
     */
     function formatDateTime(date: Date): string {
-        const hours = date.getHours().toString().padStart(2, '0');
-        const minutes = date.getMinutes().toString().padStart(2, '0');
-        const secondes = date.getSeconds().toString().padStart(2, '0');
-        return `${formatDateDDMMYYYY(date)} ${hours}:${minutes}:${secondes}`;
+        return `${formatDateDDMMYYYY(date)} ${formatTime24Hour(date)}`;
     }
 
     /**
@@ -3976,60 +4497,123 @@
      * @returns Great Circle distance in nautical miles
      */
     function calculateGreatCircleDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-        // Haversine formula (already used in calculateDistance)
-        const R = 3440.065;
-        const toRad = (deg: number) => deg * Math.PI / 180;
-        const φ1 = toRad(lat1);
-        const φ2 = toRad(lat2);
-        const Δφ = φ2 - φ1;
-        const Δλ = toRad(lon2 - lon1);
-        const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+        // Haversine formula for great circle distance
+        // Using the same Earth radius as RL calculation for consistency
+        const R = 60 * 180 / Math.PI; // 3437.7468 nautical miles
+        
+        const φ1 = lat1 * Math.PI / 180;
+        const φ2 = lat2 * Math.PI / 180;
+        const Δφ = (lat2 - lat1) * Math.PI / 180;
+        const Δλ = (lon2 - lon1) * Math.PI / 180;
+        
+        const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + 
+                  Math.cos(φ1) * Math.cos(φ2) * 
+                  Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        
         return R * c;
     }
 
     /**
-     * Calculates the rhumb line distance between two points on the Earth.
+     * Calculate the initial bearing for a great circle route
      * @param lat1
      * @param lon1
      * @param lat2
      * @param lon2
-     * @returns Rhumb line distance in nautical miles
+     * @returns Initial bearing in degrees (0-359)
      */
-    function calculateRhumbLineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-        // Rhumb line distance formula
-        const R = 3440.065;
-        const toRad = (deg: number) => deg * Math.PI / 180;
-        const φ1 = toRad(lat1);
-        const φ2 = toRad(lat2);
-        let Δλ = toRad(lon2 - lon1);
-        // Handle crossing the antimeridian
-        if (Math.abs(Δλ) > Math.PI) {
-            Δλ = Δλ > 0 ? -(2 * Math.PI - Δλ) : (2 * Math.PI + Δλ);
-        }
-        const Δψ = Math.log(Math.tan(Math.PI / 4 + φ2 / 2) / Math.tan(Math.PI / 4 + φ1 / 2));
-        const q = Math.abs(Δψ) > 1e-12 ? (φ2 - φ1) / Δψ : Math.cos(φ1);
-        const dist = Math.sqrt((φ2 - φ1) ** 2 + (q * Δλ) ** 2);
-        return R * dist;
-    }
-
-    /**
-     * Calculate the bearing between two points
-     * @param lat1
-     * @param lon1
-     * @param lat2
-     * @param lon2
-     * @returns Bearing in degrees
-    */
-    function calculateBearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    function calculateGreatCircleBearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
         const φ1 = toRadians(lat1);
         const φ2 = toRadians(lat2);
         const Δλ = toRadians(lon2 - lon1);
+        
         const y = Math.sin(Δλ) * Math.cos(φ2);
         const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
-        let θ = Math.atan2(y, x);
-        θ = toDegrees(θ);
-        return (θ + 360) % 360;
+        
+        const bearing = toDegrees(Math.atan2(y, x));
+        return (bearing + 360) % 360; // Normalize to 0-359 degrees
+    }
+
+    /**
+     * Calculates the straight-line distance using simple approximation
+     * This matches the straight-line route display used for RL legs
+     * @param lat1
+     * @param lon1
+     * @param lat2
+     * @param lon2
+     * @returns Distance in nautical miles
+     */
+    function calculateStraightLineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+        // Professional navigation rhumb line distance - matches OpenCPN, MaxSea, etc.
+        // This is the standard formula used in marine navigation software
+        
+        // Convert to radians
+        const lat1rad = lat1 * Math.PI / 180;
+        const lat2rad = lat2 * Math.PI / 180;
+        const dlat = (lat2 - lat1) * Math.PI / 180;
+        let dlon = (lon2 - lon1) * Math.PI / 180;
+        
+        // Handle date line crossing
+        if (Math.abs(dlon) > Math.PI) {
+            dlon = dlon > 0 ? -(2 * Math.PI - dlon) : (2 * Math.PI + dlon);
+        }
+        
+        // Calculate using exact rhumb line formula
+        let distance;
+        if (Math.abs(dlat) < 1e-6) {
+            // E-W course
+            distance = Math.abs(dlon) * Math.cos(lat1rad);
+        } else {
+            // General case
+            const dphi = Math.log(Math.tan(lat2rad / 2 + Math.PI / 4) / Math.tan(lat1rad / 2 + Math.PI / 4));
+            const q = dlat / dphi;
+            distance = Math.sqrt(dlat * dlat + q * q * dlon * dlon);
+        }
+        
+        // Convert to nautical miles using the exact conversion factor
+        return distance * 60 * 180 / Math.PI; // This gives the same as R=3437.7468
+    }
+
+    /**
+     * Calculate the bearing between two points using simple straight-line calculation
+     * This matches the straight-line route display used for RL legs
+     * @param lat1
+     * @param lon1
+     * @param lat2
+     * @param lon2
+     * @returns Bearing in degrees (0-359)
+    */
+    function calculateStraightLineBearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
+        // Simple bearing calculation for straight lines
+        const latDiff = lat2 - lat1;
+        const lonDiff = (lon2 - lon1) * Math.cos(toRadians((lat1 + lat2) / 2)); // Adjust for latitude
+        
+        let bearing = toDegrees(Math.atan2(lonDiff, latDiff));
+        return (bearing + 360) % 360; // Normalize to 0-359 degrees
+    }
+
+    /**
+     * Calculate bearing based on leg type
+     * @param lat1
+     * @param lon1
+     * @param lat2
+     * @param lon2
+     * @param legType 'GC' for great circle, 'RL' for rhumb line (default)
+     * @returns Bearing in degrees (0-359)
+     */
+    function calculateBearingByLegType(lat1: number, lon1: number, lat2: number, lon2: number, legType?: string): number {
+        if (legType === 'GC') {
+            return calculateGreatCircleBearing(lat1, lon1, lat2, lon2);
+        } else {
+            // Default to 'RL' if not specified or explicitly 'RL'
+            return calculateStraightLineBearing(lat1, lon1, lat2, lon2);
+        }
+    }
+
+    function calculateRelativeBearing(vesselLat: number, vesselLon: number, vesselHeading: number, buoyLat: number, buoyLon: number): number {
+        const trueBearing = calculateStraightLineBearing(vesselLat, vesselLon, buoyLat, buoyLon);
+        const relativeBearing = trueBearing - vesselHeading;
+        return (relativeBearing + 360) % 360;
     }
 
     /**
@@ -4064,11 +4648,12 @@
     */
     onDestroy(() => 
         {
-            // Save data before closing
-            saveTrackHistory();
+            // Close any open leg editor modal
+            closeLegEditorModal();
             
             if (isRouteLoaded) {
                 saveGpxRoute();
+                saveEditedGpx();
             }
 
             if (socket) {
@@ -4119,6 +4704,15 @@
 </script>
 
 <style lang="less">
+    /* Remove border between the first and second row in the Leg Editor modal table */
+    .leg-editor-table tr:first-child th,
+    .leg-editor-table tr:first-child td {
+        border-bottom: none !important;
+    }
+    .leg-editor-table tr:nth-child(2) th,
+    .leg-editor-table tr:nth-child(2) td {
+        border-top: none !important;
+    }
     .gps-info {
         margin-top: 20px;
         background-color: #f0f0f0;
@@ -4249,6 +4843,15 @@
     a:visited {
         color: #b366ff;
     }
+
+    h2 {
+        text-align:center;
+        margin: 0, 0, 0, 0;
+        font-size: 24px;
+        font-weight: bold;
+        color: #333333;
+    }
+
     /* Styles for the footer */
     #footer {
         margin-top: 20px;
@@ -4290,6 +4893,168 @@
         font-size: 12px;
         border: 1px solid #444;
         word-break: break-all;
+    }
+    .modal-content {
+        background: #fff;
+        border-radius: 8px;
+        padding: 24px 20px 16px 20px;
+        min-width: 320px;
+        max-width: 90vw;
+        max-height: 90vh;
+        overflow: hidden;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+        position: relative;
+    }
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 999;
+    }
+    
+    /* Leg Editor Modal Styles - High specificity */
+    .leg-editor-overlay {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        background: rgba(0, 0, 0, 0.8) !important;
+        z-index: 999999 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        padding: 20px !important;
+        pointer-events: auto !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+    }
+    
+    .leg-editor-modal {
+        background: white !important;
+        color: black !important;
+        border-radius: 12px !important;
+        width: 95vw !important;
+        max-width: 1200px !important;
+        height: 85vh !important;
+        overflow: hidden !important;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important;
+        position: relative !important;
+        display: flex !important;
+        flex-direction: column !important;
+        pointer-events: auto !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        transform: none !important;
+    }
+    
+    .leg-editor-header {
+        padding: 20px 24px 16px 24px;
+        border-bottom: 2px solid #eee;
+        flex-shrink: 0;
+    }
+    
+    .leg-editor-close {
+        position: absolute;
+        top: 16px;
+        right: 20px;
+        background: none;
+        border: none;
+        font-size: 24px;
+        cursor: pointer;
+        color: #666;
+        z-index: 1;
+    }
+    
+    .leg-editor-close:hover {
+        color: #333;
+    }
+    
+    .leg-editor-title {
+        margin: 0;
+        color: #333;
+        font-size: 24px;
+    }
+    
+    .leg-editor-subtitle {
+        margin: 8px 0 0 0;
+        color: #666;
+        font-size: 14px;
+    }
+    
+    .leg-editor-table-header {
+        background: #f8f9fa;
+        border-bottom: 2px solid #dee2e6;
+        flex-shrink: 0;
+    }
+    
+    .leg-editor-table-body {
+        flex: 1;
+        overflow-y: auto;
+        background: white;
+    }
+    
+    .leg-editor-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    
+    .leg-editor-header-cell {
+        padding: 12px 8px;
+        text-align: center;
+        font-weight: bold;
+        border-right: 1px solid #dee2e6;
+        background: #e9ecef;
+    }
+    
+    .leg-editor-row {
+        border-bottom: 1px solid #dee2e6;
+    }
+    
+    .leg-editor-row:hover {
+        background: #f8f9fa;
+    }
+    
+    .leg-editor-row-completed {
+        background: #d4edda;
+        border-bottom: 1px solid #c3e6cb;
+    }
+    
+    .leg-editor-row-current {
+        background: #fff3cd;
+        border-bottom: 1px solid #ffeaa7;
+        font-weight: bold;
+    }
+    
+    .leg-editor-cell {
+        padding: 10px 8px;
+        border-right: 1px solid #dee2e6;
+        font-size: 14px;
+    }
+    
+    .leg-editor-footer {
+        padding: 16px 24px;
+        border-top: 2px solid #eee;
+        background: #f8f9fa;
+        flex-shrink: 0;
+    }
+    
+    .leg-editor-save-btn {
+        background: #007bff;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: bold;
+    }
+    
+    .leg-editor-save-btn:hover {
+        background: #0056b3;
     }
 </style>
 
