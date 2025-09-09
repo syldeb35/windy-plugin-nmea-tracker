@@ -430,7 +430,7 @@
     let markerLayer: any = null;
     let ownShipMarker: any = null;
     let aisShipsLayer: any = null; // Layer for AIS ships
-    let boatPath: any = null;
+    let boatPath: any[] = []; // Array of polylines for track segments
     let projectionArrow: any = null;
     let headingArrow: any = null;
     let forecastIcon: any = null;
@@ -442,9 +442,26 @@
     const TRACK_HISTORY_DAYS = 30; // Duration in days (30 days = ~2.1 MB storage for ocean passages)
     const TRACK_HISTORY_DURATION = TRACK_HISTORY_DAYS * 24 * 60 * 60 * 1000; // Convert to milliseconds
     
+    // 📝 CONFIGURATION: Track gap detection (prevents straight lines across land after plugin restart)
+    // Time gap threshold in minutes - if more than this time passes between track points, 
+    // a new track segment is created instead of connecting with a straight line
+    // Recommended: 30 minutes (sailing), 60 minutes (motoring), 15 minutes (racing)
+    const TRACK_GAP_THRESHOLD_MINUTES = 30; // Minutes before creating new track segment
+    
+    // 📝 CONFIGURATION: Track display update throttling (prevents excessive processing)
+    // Update interval in seconds - track display will update at most once per interval
+    // Recommended: 60 seconds (normal), 30 seconds (racing), 120 seconds (slow devices)
+    const TRACK_DISPLAY_UPDATE_INTERVAL_SECONDS = 60; // Seconds between track display updates
+    
     // --- Track history logic ---
     let shortTrackHistory: any[] = []; // TODO: Rename to trackHistory for clarity
     let lastShortTrackSaveTime: number = 0;
+    
+    // --- Track display throttling ---
+    let lastTrackDisplayUpdate: number = 0;
+    let lastTrackPointCount: number = 0;
+    const TRACK_DISPLAY_UPDATE_INTERVAL = TRACK_DISPLAY_UPDATE_INTERVAL_SECONDS * 1000; // Convert to milliseconds
+    
     let openedPopup: any = null;
     // Store AIS ships data globally so all functions can access it
     let aisShips: { [mmsi: string]: any } = {};
@@ -543,16 +560,10 @@
         
         // Load track history on plugin start
         loadShortTrackHistory();
-        let trackLatLngs = [];
-        if (shortTrackHistory.length > 0) {
-            trackLatLngs = shortTrackHistory.map(p => L.latLng(p.lat, p.lon));
-        }
-
-        pathLatLngs = trackLatLngs;
-        // Redraw the track on map
-        if (pathLatLngs.length > 1) {
-            boatPath = L.polyline(pathLatLngs, { color: 'blue', weight: 3 }).addTo(map);
-        }
+        
+        // Force initial track display update (ignore throttling on startup)
+        lastTrackDisplayUpdate = 0; // Reset to force update
+        updateTrackDisplay();
 
         // --- Restore GPX route and metadata from raw GPX file if available ---
         const savedRawGpx = localStorage.getItem('windy-nmea-gpx-raw');
@@ -1107,7 +1118,8 @@
             shortTrackHistory.push({ lat, lon, t: now });
             localStorage.setItem('windy-nmea-shorttrack', JSON.stringify(shortTrackHistory));
             lastShortTrackSaveTime = now;
-            console.debug(`Track point saved: ${shortTrackHistory.length} points (${TRACK_HISTORY_DAYS} days history)`);
+            const actualHistoryDays = shortTrackHistory.length / (24 * 60);
+            console.debug(`Track point saved: ${shortTrackHistory.length} points (${actualHistoryDays.toFixed(2)} days history)`);
         }
     }
 
@@ -1126,6 +1138,96 @@
             shortTrackHistory = [];
         }
         console.debug(`Track history loaded: ${shortTrackHistory.length} points (${TRACK_HISTORY_DAYS} days retention)`);
+    }
+
+    /**
+     * Creates track segments from track history, breaking at time gaps
+     * @param maxGapMinutes - Maximum time gap in minutes before creating a new segment
+     * @returns Array of track segments, each containing an array of LatLng points
+     */
+    function createTrackSegments(maxGapMinutes: number = 30): any[][] {
+        if (shortTrackHistory.length < 2) return [];
+        
+        const segments: any[][] = [];
+        let currentSegment: any[] = [];
+        const maxGapMs = maxGapMinutes * 60 * 1000; // Convert to milliseconds
+        
+        for (let i = 0; i < shortTrackHistory.length; i++) {
+            const point = shortTrackHistory[i];
+            const latLng = L.latLng(point.lat, point.lon);
+            
+            // Check if this is the first point or if there's a significant time gap
+            if (i === 0) {
+                // First point - start new segment
+                currentSegment = [latLng];
+            } else {
+                const timeDiff = point.t - shortTrackHistory[i - 1].t;
+                
+                if (timeDiff > maxGapMs) {
+                    // Time gap detected - finish current segment and start new one
+                    if (currentSegment.length > 1) {
+                        segments.push([...currentSegment]);
+                    }
+                    currentSegment = [latLng];
+                    console.debug(`Track gap detected: ${(timeDiff / (60 * 1000)).toFixed(1)} minutes between points`);
+                } else {
+                    // Continue current segment
+                    currentSegment.push(latLng);
+                }
+            }
+        }
+        
+        // Add the last segment if it has multiple points
+        if (currentSegment.length > 1) {
+            segments.push(currentSegment);
+        }
+        
+        return segments;
+    }
+
+    /**
+     * Updates the track display on the map with gap detection and throttling
+     * Only updates if enough time has passed or track data changed significantly
+     */
+    function updateTrackDisplay(): void {
+        const now = Date.now();
+        const timeSinceLastUpdate = now - lastTrackDisplayUpdate;
+        const trackPointCountChanged = shortTrackHistory.length !== lastTrackPointCount;
+        
+        // Only update if:
+        // 1. More than 1 minute has passed since last update, OR
+        // 2. Track point count changed significantly (new points added)
+        if (timeSinceLastUpdate < TRACK_DISPLAY_UPDATE_INTERVAL && !trackPointCountChanged) {
+            return; // Skip update - too frequent
+        }
+        
+        // Remove existing track polylines
+        boatPath.forEach(polyline => polyline.remove());
+        boatPath = [];
+        
+        // Create new track segments with gap detection
+        const trackSegments = createTrackSegments(TRACK_GAP_THRESHOLD_MINUTES);
+        
+        // Display each segment as a separate polyline
+        trackSegments.forEach((segment, index) => {
+            if (segment.length > 1) {
+                const polyline = L.polyline(segment, { 
+                    color: 'blue', 
+                    weight: 3,
+                    opacity: 0.7
+                }).addTo(map);
+                boatPath.push(polyline);
+            }
+        });
+        
+        // Update pathLatLngs for backward compatibility
+        pathLatLngs = trackSegments.flat();
+        
+        // Update throttling variables
+        lastTrackDisplayUpdate = now;
+        lastTrackPointCount = shortTrackHistory.length;
+        
+        console.debug(`Track display updated: ${trackSegments.length} segments from ${shortTrackHistory.length} points`);
     }
 
     /**
@@ -3610,7 +3712,8 @@
         if (showRouteWaypoints && routeMarkers) {
             displayRouteWaypoints();
         }
-        
+
+        // step 5: check if we just passed a waypoint
         // Initialise previous waypoint index after a reloading
         if (prevNextWaypointIndex === 0) {
             prevNextWaypointIndex = nextWaypointIndex;
@@ -3638,8 +3741,6 @@
                 prevNextWaypointIndex = nextWaypointIndex;
                 
                 console.debug(`Waypoint ${currentWaypointIndex + 1} passed at ${gpxRoute[currentWaypointIndex].passedTime.toISOString()}`);
-            } else if (gpxRoute[currentWaypointIndex].passedTime) {
-                console.debug(`DEBUG: Waypoint ${currentWaypointIndex + 1} already has passedTime: ${gpxRoute[currentWaypointIndex].passedTime}`);
             }
         }
         
@@ -4042,12 +4143,8 @@
             effectiveSOG = 6; // Default to 6 if no speed data
         }
 
-        // Trace of the path traveled
-        if (!boatPath) {
-            boatPath = L.polyline(pathLatLngs, { color: 'blue', weight: 3 }).addTo(map);
-        } else {
-            boatPath.setLatLngs(pathLatLngs);
-        }
+        // Trace of the path traveled - use segmented track display
+        updateTrackDisplay();
 
         // Only show arrows when NOT following a route
         if (!routeProjectionActive) {
@@ -4673,10 +4770,13 @@
             openedPopup?.remove();
             markerLayer.clearLayers();
             aisShipsLayer?.clearLayers(); // Clear AIS ships layer
-            boatPath?.remove();
+            
+            // Remove all track polylines
+            boatPath.forEach(polyline => polyline.remove());
+            boatPath = [];
+            
             projectionArrow?.remove();
             forecastIcon?.remove();
-            boatPath = null;
             projectionArrow = null;
             forecastIcon = null;
             pathLatLngs = [];
