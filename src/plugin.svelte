@@ -565,16 +565,25 @@
         lastTrackDisplayUpdate = 0; // Reset to force update
         updateTrackDisplay();
 
-        // --- Restore GPX route and metadata from raw GPX file if available ---
-        const savedRawGpx = localStorage.getItem('windy-nmea-gpx-raw');
-        if (savedRawGpx) {
-            // Use a placeholder filename if not available
-            parseGpxMetadata(savedRawGpx, 'Restored.gpx');
-            parseGpxRoute(savedRawGpx, 'Restored.gpx');
+        // --- Restore GPX route data ---
+        // Priority 1: Try to load from parsed route data (contains passedTime and other runtime data)
+        const routeLoaded = loadGpxRoute();
+        
+        // Priority 2: If no parsed route data, fall back to raw GPX file
+        if (!routeLoaded) {
+            const savedRawGpx = localStorage.getItem('windy-nmea-gpx-raw');
+            if (savedRawGpx) {
+                console.debug('No parsed route data found, restoring from raw GPX');
+                // Use a placeholder filename if not available
+                parseGpxMetadata(savedRawGpx, 'Restored.gpx');
+                parseGpxRoute(savedRawGpx, 'Restored.gpx');
+            }
+        } else {
+            console.debug('Restored route from parsed data (preserving passedTime)');
         }
 
-        // Load GPX route
-        if (loadGpxRoute()) {
+        // Initialize route display and calculations if route is loaded
+        if (isRouteLoaded) {
             calculateRouteDistance();
             // Initialize route on component load
             // updateRouteProgress();
@@ -1253,10 +1262,59 @@
                     showWaypoints: showRouteWaypoints
                 };
                 localStorage.setItem('windy-nmea-gpx-route', JSON.stringify(routeData));
+                
+                // Also update the raw GPX with current state including passedTime
+                updateRawGpxStorage();
+                
                 console.debug(`GPX route saved: ${routeFileName} with ${gpxRoute.length} waypoints`);
             }
         } catch (error) {
             console.warn('Failed to save GPX route to localStorage:', error);
+        }
+    }
+
+    /**
+     * Update the raw GPX storage with current route state including passedTime
+     */
+    function updateRawGpxStorage(): void {
+        try {
+            if (!isRouteLoaded || gpxRoute.length === 0) return;
+            
+            // Generate updated GPX XML with current state
+            let gpx = '';
+            gpx += `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n`;
+            gpx += `<gpx xmlns="http://www.topografix.com/GPX/1/1" xmlns:cmacgm="http://www.cmacgm.com" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" creator="NMEA Tracker" version="1.1" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">\n`;
+            gpx += `    <metadata>\n`;
+            gpx += `        <name>${routeMetadata.name || 'NMEA Tracker Route'}</name>\n`;
+            gpx += `        <filename>${routeMetadata.filename || 'nmea-route.gpx'}</filename>\n`;
+            gpx += `        <desc>${routeMetadata.desc || 'Route with navigation data'}</desc>\n`;
+            gpx += `        <author>\n            <name>${routeMetadata.author || 'NMEA Tracker'}</name>\n        </author>\n`;
+            gpx += `        <time>${routeMetadata.time || new Date().toISOString()}</time>\n`;
+            gpx += `        <keywords>${routeMetadata.keywords || 'navigation,nmea,tracking'}</keywords>\n`;
+            gpx += `    </metadata>\n`;
+            gpx += `    <rte>\n`;
+            
+            gpxRoute.forEach((wp, i) => {
+                gpx += `        <rtept lat="${wp.lat}" lon="${wp.lon}">\n`;
+                if (wp.time) gpx += `           <time>${wp.time.toISOString()}</time>\n`;
+                if (wp.name) gpx += `           <name>${wp.name}</name>\n`;
+                // Save passedTime as <timePassed> if present
+                if (wp.passedTime) {
+                    const passedTimeStr = wp.passedTime instanceof Date ? wp.passedTime.toISOString() : wp.passedTime;
+                    gpx += `           <timePassed>${passedTimeStr}</timePassed>\n`;
+                }
+                // Only add <type> for all but the last point (leg type is for the segment starting at this point)
+                if (i < gpxRoute.length - 1 && wp.type) gpx += `           <type>${wp.type}</type>\n`;
+                gpx += `        </rtept>\n`;
+            });
+            
+            gpx += `    </rte>\n</gpx>`;
+            
+            // Update raw GPX storage
+            localStorage.setItem('windy-nmea-gpx-raw', gpx);
+            console.debug('Raw GPX storage updated with current route state');
+        } catch (error) {
+            console.warn('Failed to update raw GPX storage:', error);
         }
     }
 
@@ -2891,7 +2949,9 @@
             deg = Math.floor(Math.abs(val) / 100);
             min = Math.abs(val) - deg * 100;
         }
-        return ('00' + deg).slice(-2) + '° ' + ('0' + ((Math.floor(min * 1000) / 1000).toFixed(2))).slice(-7) + "' " + hemisphere;
+        const minutesStr = (Math.floor(min * 1000) / 1000).toFixed(3);
+        const paddedMinutes = minutesStr.length < 6 ? ('0' + minutesStr).slice(-6) : minutesStr;
+        return ('00' + deg).slice(-2) + '° ' + paddedMinutes + "' " + hemisphere;
     }
 
     /**
@@ -2913,7 +2973,9 @@
             deg = Math.floor(Math.abs(val) / 100);
             min = Math.abs(val) - deg * 100;
         }
-        return ('000' + deg).slice(-3) + '° ' + ('0' + ((Math.floor(min * 1000) / 1000).toFixed(2))).slice(-7) + "' " + hemisphere;
+        const minutesStr = (Math.floor(min * 1000) / 1000).toFixed(3);
+        const paddedMinutes = minutesStr.length < 6 ? ('0' + minutesStr).slice(-6) : minutesStr;
+        return ('000' + deg).slice(-3) + '° ' + paddedMinutes + "' " + hemisphere;
     }
     
     /**
