@@ -90,7 +90,7 @@
         class="plugin__title plugin__title--chevron-back"
         on:click={() => bcast.emit('rqstOpen', 'menu')}
         type="button"
-        aria-label="Retour au menu"
+        aria-label="Back to menu"
     >
         {title}
     </button>
@@ -146,10 +146,10 @@
     {/if}
     {#if myMMSI}
     <p class="mmsi-state">
-      🆔 Vessel name: {vesselName} {isValidMMSI(myMMSI) ? '✅' : '❌'}
+      🆔 Vessel name: {vesselName} {isValidMMSI(myMMSI) ? '✅' : '❌ Invalid MMSI'}
     </p>
     <p class="mmsi-state">
-      🆔 MMSI: {myMMSI} {isValidMMSI(myMMSI) ? '✅' : '❌ Invalid format'}
+      🆔 MMSI: {myMMSI} {isValidMMSI(myMMSI) ? '✅' : '❌ Invalid MMSI'}
     </p>
     {/if}
     <hr />
@@ -1514,6 +1514,8 @@
         (window as any).modalCalculateStraightLineDistance = calculateStraightLineDistance;
         (window as any).modalFormatDateTime = formatDateTime;
         (window as any).modalSaveEditedGpx = saveEditedGpx;
+        (window as any).modalDisplayLatitude = displayLatitude;
+        (window as any).modalDisplayLongitude = displayLongitude;
 
         // Remove any existing modal
         const existingModal = document.getElementById('leg-editor-modal-external');
@@ -1665,8 +1667,18 @@
             tableRows += `
                 <tr style="${rowStyle}">
                     <td style="padding: 10px 8px; text-align: center; border-right: 1px solid #dee2e6; font-size: 14px; width: 40px;">${i}</td>
-                    <td style="padding: 10px 8px; text-align: left; border-right: 1px solid #dee2e6; font-size: 14px; width: 200px; overflow: hidden; text-overflow: ellipsis;">${wp.name || `WP ${i}`}</td>
-                    <td style="padding: 10px 8px; text-align: left; border-right: 1px solid #dee2e6; font-size: 14px; width: 200px; overflow: hidden; text-overflow: ellipsis;">${nextWp.name || `WP ${i + 1}`}</td>
+                    <td style="padding: 10px 8px; text-align: left; border-right: 1px solid #dee2e6; font-size: 14px; width: 200px; overflow: hidden; text-overflow: ellipsis;">
+                        <div style="font-weight: bold;">${wp.name || `WP ${i}`}</div>
+                        <div style="font-size: 11px; color: #6c757d; line-height: 1.2;">
+                            &phi;: ${(window as any).modalDisplayLatitude(wp.lat)} &nbsp;&nbsp;&nbsp; &lambda;: ${(window as any).modalDisplayLongitude(wp.lon)}
+                        </div>
+                    </td>
+                    <td style="padding: 10px 8px; text-align: left; border-right: 1px solid #dee2e6; font-size: 14px; width: 200px; overflow: hidden; text-overflow: ellipsis;">
+                        <div style="font-weight: bold;">${nextWp.name || `WP ${i + 1}`}</div>
+                        <div style="font-size: 11px; color: #6c757d; line-height: 1.2;">
+                            &phi;: ${(window as any).modalDisplayLatitude(nextWp.lat)} &nbsp;&nbsp;&nbsp; &lambda;: ${(window as any).modalDisplayLongitude(nextWp.lon)}
+                        </div>
+                    </td>
                     <td style="padding: 10px 8px; text-align: center; border-right: 1px solid #dee2e6; font-size: 14px; font-weight: bold; color: #495057; width: 100px;">${distance.toFixed(2)}</td>
                     <td style="padding: 10px 8px; text-align: center; border-right: 1px solid #dee2e6; width: 80px;">
                         <select onchange="updateLegType(${i}, this.value)" style="padding: 4px 8px; border: 1px solid #ced4da; border-radius: 4px; background: white; font-size: 14px;">
@@ -2783,6 +2795,12 @@
             destination = destination.replace(/@+$/, '').trim();
 
             if (isOwnVessel) {
+                // Store our own MMSI if not set or invalid
+                if (!myMMSI || !isValidMMSI(myMMSI)) {
+                    myMMSI = mmsi;
+                    saveVesselMMSI(mmsi);
+                }
+                
                 if (name && name !== '') {
                     vesselName = name;
                     saveVesselName(name); // Save AIS-received name too
