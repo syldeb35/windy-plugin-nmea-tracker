@@ -23,7 +23,7 @@
             <li>📡 <strong>Real-time tracking</strong> - See your vessel move live on the map</li>
             <li>🎯 <strong>Position details</strong> - View latitude, longitude, course, and speed</li>
             <li>🏷️ <strong>Vessel identification</strong> - Shows vessel name from AIS data</li>
-            <li>📈 <strong>Track history</strong> - Visual trail of your vessel's path</li>
+            <li>📈 <strong>Track history</strong> - 30 days visual trail of your vessel's path recorded</li>
             <li>🌤️ <strong>Weather at position</strong> - Get forecast for your current location or projected position</li>
             <li>🎮 <strong>Test mode</strong> - Simulate movement for testing</li>
             <li>🗺️ <strong>GPX Route Editor</strong> - Upload, edit, and follow sailing routes with a user-friendly editor</li>
@@ -170,15 +170,30 @@
             </div>
         </div>
         
-        <div class="plugin__buttons__centered">
+        <div class="plugin__buttons__grid">
+            <!-- Row 1: | empty | Center | Follow | empty | -->
+            <div></div> <!-- Empty cell -->
             <button on:click={centerShip} title="Center on the vessel present position">📍 Center</button>
             <button on:click={toggleFollowShip} title="Follow the projected vessel">
                 {followShip ? '🛑 Stop' : '▶️ Follow'}
             </button>
+            <div></div> <!-- Empty cell -->
+            
+            <!-- Row 2: | empty | Show windy prediction (2 cols) | empty | -->
+           
+            <button id="button" on:click={showWeatherPopup} title="Display the weather tooltip" class="weather-prediction-button">{@html buttonText}</button>
+            
+            
+            <!-- Row 3: | Rew | Fwd | Now | step | -->
+            <button class="timeline-nav-button" on:click={() => moveTimelineBackward(parseInt(timelineStepHours))} title="Move timeline backward {timelineStepHours} hours">⏪ Rew</button>
+            <button class="timeline-nav-button" on:click={() => moveTimelineForward(parseInt(timelineStepHours))} title="Move timeline forward {timelineStepHours} hours">Fwd ⏩</button>
             <button on:click={setTimelineNow} title="Set timeline to present time">⏰ Now</button>
-        </div>
-        <div class="plugin__buttons__centered">
-            <button id="button" on:click={showWeatherPopup} title="Display the weather tooltip">{@html buttonText}</button>
+            <select class="timeline-step-selector" id="timeline-step" bind:value={timelineStepHours} title="Timeline navigation step">
+                <option value="1">1h</option>
+                <option value="4">4h</option>
+                <option value="8">8h</option>
+                <option value="12">12h</option>
+            </select>
         </div>
     {/if}
     <!-- Test Mode Controls -->
@@ -423,6 +438,7 @@
     let speedOverGround: number = 0; // In knots
     let mySpeedOverGround: number = 0; // In knots
     let followShip = false; // do not follow ship by default
+    let timelineStepHours = "4"; // Timeline navigation step in hours (1, 4, 8, 12) - string to match select options
     let vesselName = loadVesselName(); // Load from localStorage or default
     let CurrentOverlay = 'Windy'; // Default overlay, can be changed later
     let lastDataUpdateTime: number = 0;
@@ -1418,8 +1434,8 @@
                             buttonText = `🌬️ Show ${myOverlay} prediction<br>(${hours}h after route start)`;
                         }
                     } else {
-                        hours = ((ts - Date.now()) / (3600 * 1000)).toFixed(1);
-                        buttonText = `🌬️ Show ${myOverlay} prediction<br>(${hours}h after current time)`;
+                        //hours = ((ts - Date.now()) / (3600 * 1000)).toFixed(1);
+                        buttonText = `🌬️ Show ${myOverlay} prediction  (${formatDateTime(new Date(ts))})`;
                     }
                 }
             }
@@ -3441,13 +3457,24 @@
                 const d = waypointETAs[myIndex]
                 passedTime = `${waypointETAs.length > 0 && waypointETAs[myIndex] ? `ETA: ${d.eta.getUTCFullYear()}-${String(d.eta.getUTCMonth()+1).padStart(2,'0')}-${String(d.eta.getUTCDate()).padStart(2,'0')} ${String(d.eta.getUTCHours()).padStart(2,'0')}:${String(d.eta.getUTCMinutes()).padStart(2,'0')} UTC` : ''}`;
             }
-            marker.bindTooltip(
-                `Waypoint ${index + 1} : ${waypoint.name}<br>
+            
+            // Build tooltip content with conditional click message
+            let tooltipContent = `Waypoint ${index + 1} : ${waypoint.name}<br>
                 ${displayLatitude(waypoint.lat)}<br>
                 ${displayLongitude(waypoint.lon)}<br>
-                ${passedTime}`,
-                { permanent: false, direction: 'top' }
-            );
+                ${passedTime}`;
+            
+            // Only show click message for future waypoints (not passed)
+            if (!isPassed) {
+                tooltipContent += `<br><small style="color: #888;">🕒 Click to advance timeline to ETA</small>`;
+            }
+            
+            marker.bindTooltip(tooltipContent, { permanent: false, direction: 'top' });
+
+            // Add click handler to set timeline to waypoint ETA
+            marker.on('click', () => {
+                setTimelineToWaypointETA(index);
+            });
         });
     }
 
@@ -4593,6 +4620,48 @@
     }
 
     /**
+     * Set the Windy timeline to a specific waypoint's ETA
+     * @param waypointIndex The index of the waypoint in the route
+     */
+    function setTimelineToWaypointETA(waypointIndex: number) {
+        // Find the waypoint's ETA in the waypointETAs array
+        const waypointETA = waypointETAs.find(eta => eta.index === waypointIndex);
+        
+        if (waypointETA && waypointETA.eta) {
+            // Convert ETA to timestamp and round to nearest Windy time interval
+            const etaTimestamp = getRoundedHourTimestamp(waypointETA.eta.getTime());
+            windyStore.set('timestamp', etaTimestamp);
+            console.debug(`Timeline set to waypoint ${waypointIndex + 1} ETA: ${waypointETA.eta.toISOString()}`);
+        } else {
+            console.warn(`No ETA found for waypoint ${waypointIndex + 1}`);
+        }
+    }
+
+    /**
+     * Move the Windy timeline backward by the specified step
+     * @param stepHours - Number of hours to move backward
+     */
+    function moveTimelineBackward(stepHours: number) {
+        const currentTimestamp = windyStore.get('timestamp');
+        const newTimestamp = currentTimestamp - (stepHours * 3600 * 1000); // Step hours in milliseconds
+        //const roundedTimestamp = getRoundedHourTimestamp(newTimestamp);
+        //windyStore.set('timestamp', roundedTimestamp);
+        windyStore.set('timestamp', newTimestamp);
+    }
+
+    /**
+     * Move the Windy timeline forward by the specified step
+     * @param stepHours - Number of hours to move forward
+     */
+    function moveTimelineForward(stepHours: number) {
+        const currentTimestamp = windyStore.get('timestamp');
+        const newTimestamp = currentTimestamp + (stepHours * 3600 * 1000); // Step hours in milliseconds
+        //const roundedTimestamp = getRoundedHourTimestamp(newTimestamp);
+        //windyStore.set('timestamp', roundedTimestamp);
+        windyStore.set('timestamp', newTimestamp);
+    }
+
+    /**
      * Capitalizes the first letter of each word in a string.
      * @param str
      * @returns Capitalized string
@@ -4914,12 +4983,101 @@
         font-size: 14px;
         width: 75%;
     }
+    
+    .timeline-nav-button {
+        font-size: 12px !important; /* Smaller font for timeline buttons */
+    }
+    
+    .timeline-step-selector {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        border-radius: 3px;
+        font-size: 12px;
+        justify-content: center;
+    }
+    
+    .timeline-step-selector label {
+        white-space: nowrap;
+        margin: 0;
+    }
+    
+    .timeline-step-selector select {
+        /* background: whitesmoke; */
+        /* color: black; */
+        border: 1px solid #555;
+        border-radius: 3px;
+        padding: 2px 5px;
+        min-width: 40px;
+    }
+    
+    .plugin__buttons__grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr 1fr;
+        gap: 8px;
+        margin: 10px 0;
+        align-items: center;
+    }
+    
+    .plugin__buttons__grid button {
+        width: 100%;
+        min-height: 35px;
+        padding: 8px 4px;
+        font-size: 12px;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    
+    /* Weather prediction button spans 2 columns */
+    .weather-prediction-button {
+        grid-column: span 4;
+        font-size: 12px !important;
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: unset !important;
+    }
+    
+    /* Timeline step selector styled to match buttons */
+    .timeline-step-selector {
+        width: 100%;
+        min-height: 35px;
+        padding: 8px 4px;
+        font-size: 12px;
+        text-align: center;
+        border-radius: 5px;
+        cursor: pointer;
+        box-sizing: border-box;
+        /* Inherit button colors from existing theme */
+        /*background: inherit;*/
+        background: whitesmoke;
+        /*color: inherit;*/
+        color: black;
+        border: 1px solid currentColor;
+    }
+    
+    .timeline-step-selector:hover {
+        opacity: 0.8;
+    }
+    
     .plugin__buttons__centered {
         display: flex;
         justify-content: center;
         text-align: center;
         align-items: center;
+        gap: 10px;
+        margin: 5px 0;
     }
+    
+    .plugin__buttons__row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 5px 0;
+        gap: 10px;
+    }
+    
     .rotatable {
         transform-origin: center center;
     }
