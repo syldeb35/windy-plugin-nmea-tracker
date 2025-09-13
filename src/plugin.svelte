@@ -439,6 +439,11 @@
     let mySpeedOverGround: number = 0; // In knots
     let followShip = false; // do not follow ship by default
     let timelineStepHours = "4"; // Timeline navigation step in hours (1, 4, 8, 12) - string to match select options
+    
+    // Follow ship throttling variables
+    let lastFollowUpdateTime: number = 0; // Last time map view was updated for position following
+    let lastTimelineFollowTime: number = 0; // Last time map view was updated for timeline changes
+    let lastProjectionPosition: {lat: number, lon: number} | null = null; // Last projection position for comparison
     let vesselName = loadVesselName(); // Load from localStorage or default
     let CurrentOverlay = 'Windy'; // Default overlay, can be changed later
     let lastDataUpdateTime: number = 0;
@@ -611,6 +616,14 @@
         atonLayer = createLayerGroup(map, zIndexAtoN); // AtoN markers
         markerLayer = createLayerGroup(map, zIndexOwnShip); // Top layer: Your ship
 
+        // Add zoom event listener to center on vessel after zoom changes
+        map.on('zoomend', () => {
+            if (followShip) {
+                // User manually changed zoom - immediately center on vessel position
+                handleFollowShip(false, true); // Force immediate update
+            }
+        });
+
         // Start cleanup timer for old AIS ships (every 5 minutes)
         setInterval(cleanupOldAISShips, 5 * 60 * 1000);
         
@@ -634,6 +647,9 @@
             // Update projection for the rounded timeline timestamp
             updateProjectionForTimeline(roundedTimestamp);
             updateButtonText(roundedTimestamp);
+            
+            // Handle follow ship for timeline changes (immediate update when projection changes)
+            handleFollowShip(true); // Timeline change
             
             // Update boat marker if no route is loaded
             if (!isRouteLoaded && lastLatitude !== null && lastLongitude !== null) {
@@ -1421,21 +1437,20 @@
         const myOverlay = getOverlayName();
         if (projectionHours !== null && projectionHours > 0) {
             if (!routeProjectionActive) {
-                buttonText = `🌬️ Show ${myOverlay} prediction (in ${projectionHours.toFixed(1)}h)`;
+                buttonText = `🌬️ Show ${myOverlay} prediction (in ${formatDuration(projectionHours)})`;
             } else {
-                let hours = '0';
+                let hours = 0;
                 if (routeStartTime) {
-                    if (routeStartTime.getMilliseconds() > Date.now()) {
-                        hours = ((ts - routeStartTime.getTime()) / (3600 * 1000)).toFixed(1);
-                        if (parseInt(hours) < 0) {
-                            hours = (-parseInt(hours)).toFixed(1);
-                            buttonText = `🌬️ Show ${myOverlay} prediction<br>(${hours}h before route start)`
+                    if (routeStartTime.getTime() > Date.now()) {
+                        hours = (ts - routeStartTime.getTime()) / (3600 * 1000);
+                        if (hours < 0) {
+                            buttonText = `🌬️ Show ${myOverlay} prediction<br>(${formatDuration(-hours)} before route start)`;
                         } else {
-                            buttonText = `🌬️ Show ${myOverlay} prediction<br>(${hours}h after route start)`;
+                            buttonText = `🌬️ Show ${myOverlay} prediction<br>(${formatDuration(hours)} after route start)`;
                         }
                     } else {
-                        //hours = ((ts - Date.now()) / (3600 * 1000)).toFixed(1);
-                        buttonText = `🌬️ Show ${myOverlay} prediction  (${formatDateTime(new Date(ts))})`;
+                        hours = (ts - Date.now()) / (3600 * 1000);
+                        buttonText = `🌬️ Show ${myOverlay} prediction (in ${formatDuration(hours)})`;
                     }
                 }
             }
@@ -1469,13 +1484,7 @@
         testCOG = normalizeCOG(rawValue);
         // Update the input field to reflect the normalized value
         target.value = testCOG.toString();
-        // Update the projection for the current testCOG & timeline
-        updateProjectionForTimeline(windyStore.get('timestamp'));
-        updateButtonText(windyStore.get('timestamp'));
-        if (!isRouteLoaded && lastLatitude !== null && lastLongitude !== null) {
-            const cog = testModeEnabled ? testCOG : myCourseOverGroundT;
-            addBoatMarker(lastLatitude, lastLongitude, cog);
-        }
+        // Store to localStorage
         localStorage.setItem('testCOG', target.value);
     }
 
@@ -1486,13 +1495,7 @@
     function handleSOGInput(event: Event) {
         const target = event.target as HTMLInputElement;
         testSOG = parseFloat(target.value) || 0;
-        // Update the projection for the current testSOG & timeline
-        updateProjectionForTimeline(windyStore.get('timestamp'));
-        updateButtonText(windyStore.get('timestamp'));
-        if (!isRouteLoaded && lastLatitude !== null && lastLongitude !== null) {
-            const cog = testModeEnabled ? testCOG : myCourseOverGroundT;
-            addBoatMarker(lastLatitude, lastLongitude, cog);
-        }
+        // Store to localStorage
         localStorage.setItem('testSOG', target.value);
     }
 
@@ -3885,7 +3888,8 @@
      * @returns 
      * */
     function computeWaypointsETAs() {
-        let sog = mySpeedOverGround > 0 ? mySpeedOverGround : testSOG; // SOG in knots, default value if 0
+        // Use test mode values if enabled, otherwise use actual vessel values
+        let sog = testModeEnabled ? testSOG : (mySpeedOverGround > 0 ? mySpeedOverGround : 6); // SOG in knots
         let etas = [];
         let totalDist = 0;
         let lastLat = lastLatitude ?? gpxRoute[nextWaypointIndex]?.lat ?? 0;
@@ -4213,6 +4217,183 @@
      * Handles clicks on icons to display weather at current or projected time.
      * Enhanced addBoatMarker with route-aware projection and heading calculation.
      */
+    /**
+     * Updates the main vessel marker at current position
+     * @param lat Current latitude
+     * @param lon Current longitude
+     * @param cog Current course over ground
+     */
+    function updateVesselMarker(lat: number, lon: number, cog: number) {
+        if (!map || !markerLayer) return;
+        
+        // Validate input parameters
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+            console.warn(`Invalid coordinates in updateVesselMarker: lat=${lat}, lon=${lon}`);
+            return;
+        }
+
+        // Ensure COG is valid
+        const validCOG = Number.isFinite(cog) ? cog : 0;
+        const Position = L.latLng(lat, lon);
+
+        // Remove existing vessel marker
+        if (ownShipMarker) {
+            markerLayer.removeLayer(ownShipMarker);
+            ownShipMarker = null;
+        }
+
+        // Create main vessel marker
+        const icon = createRotatingBoatIcon(trueHeading, 0.846008, boatIconSize);
+        ownShipMarker = L.marker(Position, { 
+            icon: icon,
+            zIndexOffset: zIndexOwnShip
+        }).addTo(markerLayer);
+        
+        ownShipMarker.bindTooltip(vesselName, { 
+            permanent: false, 
+            direction: 'top', 
+            className: 'boat-tooltip' 
+        });
+
+        // Click handler for weather at current time
+        ownShipMarker.on('click', () => {
+            if (openedPopup) {
+                openedPopup.remove();
+                openedPopup = null;
+                return;
+            }
+            windyStore.set('timestamp', getRoundedHourTimestamp());
+            showMyPopup(lat, lon, false);
+        });
+
+        // Apply rotation to vessel icon
+        const iconDiv = ownShipMarker.getElement()?.querySelector('.rotatable') as HTMLElement;
+        if (iconDiv) {
+            iconDiv.style.transformOrigin = '12px 12px';
+            iconDiv.style.transform = `rotateZ(${trueHeading}deg)`;
+        }
+    }
+
+    /**
+     * Updates the projection marker for future vessel position
+     * @param effectiveSOG Effective speed (test or real)
+     * @param effectiveCOG Effective course (test or real)
+     */
+    function updateProjectionMarker(effectiveSOG: number, effectiveCOG: number) {
+        if (!map || !markerLayer) return;
+
+        // Remove existing forecast icon
+        if (forecastIcon) {
+            forecastIcon.remove();
+            forecastIcon = null;
+        }
+
+        // Only show projection if speed > 0.5 knots AND timeline is in future
+        if (effectiveSOG > 0.5 && projectionHours !== null && projectionHours > 0) {
+            let projectedLat: number, projectedLon: number, projectedHeading: number;
+
+            // Use route projection if available, otherwise fallback projection
+            if (lastRouteProjection) {
+                projectedLat = lastRouteProjection.lat;
+                projectedLon = lastRouteProjection.lon;
+                projectedHeading = lastRouteProjection.heading;
+            } else if (lastFallbackProjection) {
+                projectedLat = lastFallbackProjection.lat;
+                projectedLon = lastFallbackProjection.lon;
+                projectedHeading = lastFallbackProjection.heading;
+            } else {
+                // No projection available - use current position
+                if (lastLatitude === null || lastLongitude === null) return;
+                projectedLat = lastLatitude;
+                projectedLon = lastLongitude;
+                projectedHeading = trueHeading;
+            }
+
+            // Create projection marker
+            const projectedIcon = createRotatingBoatIcon(projectedHeading, 0.846008, boatIconSize * 0.67);
+            forecastIcon = L.marker([projectedLat, projectedLon], {
+                icon: projectedIcon,
+                zIndexOffset: zIndexOwnShip
+            }).addTo(markerLayer);
+
+            // Tooltip for projection
+            const tooltipText = testModeEnabled ?
+                `Weather forecast in ${projectionHours.toFixed(1)} hours (TEST MODE: SOG=${testSOG}kt, COG=${testCOG}°)` :
+                `Weather forecast in ${projectionHours.toFixed(1)} hours`;
+            
+            forecastIcon.bindTooltip(tooltipText, { 
+                permanent: false, 
+                direction: 'top', 
+                className: 'forecast-tooltip' 
+            });
+
+            // Click handler for weather at projection time
+            forecastIcon.on('click', () => {
+                if (openedPopup) {
+                    openedPopup.remove();
+                    openedPopup = null;
+                    return;
+                }
+                showMyPopup(projectedLat, projectedLon, true);
+            });
+
+            // Apply rotation to projection icon
+            const projectedIconDiv = forecastIcon.getElement()?.querySelector('.rotatable') as HTMLElement;
+            if (projectedIconDiv) {
+                projectedIconDiv.style.transformOrigin = '12px 12px';
+                projectedIconDiv.style.transform = `rotateZ(${projectedHeading}deg)`;
+            }
+        }
+    }
+
+    /**
+     * Updates projection arrows (heading and COG) for non-route mode
+     * @param lat Current latitude
+     * @param lon Current longitude
+     * @param effectiveSOG Effective speed
+     * @param effectiveCOG Effective course
+     */
+    function updateProjectionArrows(lat: number, lon: number, effectiveSOG: number, effectiveCOG: number) {
+        if (!map || !markerLayer) return;
+
+        const Position = L.latLng(lat, lon);
+
+        // Remove existing arrows
+        if (headingArrow) {
+            headingArrow.remove();
+            headingArrow = null;
+        }
+        if (projectionArrow) {
+            projectionArrow.remove();
+            projectionArrow = null;
+        }
+
+        // Only show arrows when NOT following a route
+        if (!routeProjectionActive) {
+            // Heading direction arrow (24-hour projection)
+            const headingEnd = computeFallbackProjection(lat, lon, effectiveCOG, effectiveSOG, 24);
+            headingArrow = L.polyline([Position, headingEnd], {
+                color: 'blue',
+                weight: 2,
+                dashArray: '10, 10',
+            }).addTo(markerLayer);
+
+            // Future projection arrow (timeline-based projection)
+            const cogEnd = computeFallbackProjection(lat, lon, effectiveCOG, effectiveSOG, projectionHours ?? 0);
+            projectionArrow = L.polyline([Position, cogEnd], {
+                color: testModeEnabled ? 'orange' : 'red',
+                weight: 1,
+                dashArray: '5, 5',
+            }).addTo(markerLayer);
+        }
+    }
+
+    /**
+     * Main function to update vessel position and all related elements
+     * @param lat Current latitude
+     * @param lon Current longitude  
+     * @param cog Current course over ground
+     */
     function addBoatMarker(lat: number, lon: number, cog: number) {
         if (!map || !markerLayer) return;
         
@@ -4229,160 +4410,31 @@
 
         // Ensure COG is a valid number, default to 0 if not
         const validCOG = Number.isFinite(cog) ? cog : 0;
-
         const Position = L.latLng(lat, lon);
+        
+        // Clear marker layer and update track
         markerLayer.clearLayers();
         pathLatLngs.push(Position);
-
-        // Save track point with time-based cleanup (30 days retention)
         saveShortTrackPoint(lat, lon);
-
-        // Use test values if test mode is enabled
-        let effectiveSOG = mySpeedOverGround;
-        let effectiveCOG = validCOG;
-        
-        if (testModeEnabled) {
-            effectiveSOG = testSOG;
-            effectiveCOG = testCOG;
-        }
-
-        if (effectiveSOG === null || effectiveSOG === undefined || isNaN(effectiveSOG)) {
-            effectiveSOG = 6; // Default to 6 if no speed data
-        }
-
-        // Trace of the path traveled - use segmented track display
         updateTrackDisplay();
 
-        // Only show arrows when NOT following a route
-        if (!routeProjectionActive) {
-            // Heading direction arrow
-            const headingEnd = computeFallbackProjection(lat, lon, effectiveCOG, effectiveSOG, 24);
-            if (headingArrow) headingArrow.remove();
-            headingArrow = L.polyline([Position, headingEnd], {
-                color: 'blue',
-                weight: 2,
-                dashArray: '10, 10',
-            }).addTo(markerLayer);
-
-            // Future projection arrow (use effective values for test mode)
-            const cogEnd = computeFallbackProjection(lat, lon, effectiveCOG, effectiveSOG, projectionHours ?? 0);
-            if (projectionArrow) projectionArrow.remove();
-            projectionArrow = L.polyline([Position, cogEnd], {
-                color: testModeEnabled ? 'orange' : 'red', // Different color in test mode
-                weight: 1,
-                dashArray: '5, 5',
-            }).addTo(markerLayer);
-        } else {
-            // Remove arrows when following route
-            if (headingArrow) {
-                headingArrow.remove();
-                headingArrow = null;
-            }
-            if (projectionArrow) {
-                projectionArrow.remove();
-                projectionArrow = null;
-            }
-        }
-        if (ownShipMarker) {
-           markerLayer.removeLayer(ownShipMarker);
-            ownShipMarker = null;
-        }
-        // Main marker (current position)
-        const icon = createRotatingBoatIcon(trueHeading, 0.846008, boatIconSize);
-        ownShipMarker = L.marker(Position, { 
-            icon: icon,
-            zIndexOffset: zIndexOwnShip
-        }).addTo(markerLayer);
-        ownShipMarker.bindTooltip(vesselName, { permanent: false, direction: 'top', className: 'boat-tooltip' });
-
-        // Click on vessel: weather at current time
-        ownShipMarker.on('click', () => {
-            if (openedPopup) {
-                openedPopup.remove();
-                openedPopup = null;
-                return;
-            }
-            // Round to the nearest full hour (in ms)
-            windyStore.set('timestamp', getRoundedHourTimestamp());
-            showMyPopup(lat, lon, false);
-        });
-
-        // Future projection icon (if speed > 0.5 knots AND timeline is in future)
-        // --- Projected icon (future position) ---
-        if (effectiveSOG > 0.5 && projectionHours !== null && projectionHours > 0) {
-            let projectedLat: number, projectedLon: number, projectedHeading: number;
-
-            if (lastRouteProjection) {
-                projectedLat = lastRouteProjection.lat;
-                projectedLon = lastRouteProjection.lon;
-                projectedHeading = lastRouteProjection.heading;
-            } else if (lastFallbackProjection) {
-                projectedLat = lastFallbackProjection.lat;
-                projectedLon = lastFallbackProjection.lon;
-                projectedHeading = lastFallbackProjection.heading;
-            } else {
-                // No projection available
-                projectedLat = lat;
-                projectedLon = lon;
-                projectedHeading = trueHeading;
-            }
-
-            // Display forecast icon at projected position with correct heading
-            if (forecastIcon) forecastIcon.remove();
-            const projectedIcon = createRotatingBoatIcon(projectedHeading, 0.846008, boatIconSize * 0.67);
-            forecastIcon = L.marker([projectedLat, projectedLon], {
-                icon: projectedIcon,
-                zIndexOffset: zIndexOwnShip
-            }).addTo(markerLayer);
-
-            const tooltipText = testModeEnabled ?
-                `Weather forecast in ${projectionHours.toFixed(1)} hours (TEST MODE: SOG=${testSOG}kt, COG=${testCOG}°)` :
-                `Weather forecast in ${projectionHours.toFixed(1)} hours`;
-            forecastIcon.bindTooltip(tooltipText, { permanent: false, direction: 'top', className: 'forecast-tooltip' });
-
-            // Click on projection: weather at projection time
-            forecastIcon.on('click', () => {
-                if (openedPopup) {
-                    openedPopup.remove();
-                    openedPopup = null;
-                    return;
-                }
-                showMyPopup(projectedLat, projectedLon, true);
-            });
-
-            // Dynamic rotation of the projected icon
-            const projectedIconDiv = forecastIcon.getElement()?.querySelector('.rotatable') as HTMLElement;
-            if (projectedIconDiv) {
-                projectedIconDiv.style.transformOrigin = '12px 12px';
-                projectedIconDiv.style.transform = `rotateZ(${projectedHeading}deg)`;
-            }
-            updateButtonText(windyStore.get('timestamp'));
-            } else {
-                // Remove forecast icon when timeline is in past or no projection needed
-                if (forecastIcon) {
-                    forecastIcon.remove();
-                    forecastIcon = null;
-                }
-            }
-
-        // Dynamic rotation of the main icon
-        const iconDiv = ownShipMarker.getElement()?.querySelector('.rotatable') as HTMLElement;
-        if (iconDiv) {
-            iconDiv.style.transformOrigin = '12px 12px';
-            iconDiv.style.transform = `rotateZ(${trueHeading}deg)`;
-        }
+        // Calculate effective values (test mode or real)
+        let effectiveSOG = testModeEnabled ? testSOG : mySpeedOverGround;
+        let effectiveCOG = testModeEnabled ? testCOG : validCOG;
         
-        // Automatic vessel tracking
-       if (followShip) {
-            if (lastRouteProjection) {
-                map.setView([lastRouteProjection.lat, lastRouteProjection.lon]);
-            } else if (lastFallbackProjection) {
-                map.setView([lastFallbackProjection.lat, lastFallbackProjection.lon]);
-            } else {
-                map.setView(Position); // fallback to actual position if no projection
-            }
+        if (effectiveSOG === null || effectiveSOG === undefined || isNaN(effectiveSOG)) {
+            effectiveSOG = 6; // Default speed
         }
-    } // End addBoatMarker
+
+        // Update all vessel-related markers and projections
+        updateVesselMarker(lat, lon, validCOG);
+        updateProjectionArrows(lat, lon, effectiveSOG, effectiveCOG);
+        updateProjectionMarker(effectiveSOG, effectiveCOG);
+        
+        // Update button text and handle camera following with throttling
+        updateButtonText(windyStore.get('timestamp'));
+        handleFollowShip(false); // Position update, not timeline change
+    }
 
     /**
      * Common function to walk along the route from a given position
@@ -4707,6 +4759,18 @@
     }
 
     /**
+     * Formats duration in hours as HH:MM
+     * @param hours - Duration in hours (can be decimal)
+     * @returns Formatted string in HH:MM format
+     */
+    function formatDuration(hours: number): string {
+        const totalMinutes = Math.round(Math.abs(hours) * 60);
+        const h = Math.floor(totalMinutes / 60);
+        const m = totalMinutes % 60;
+        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+    }
+
+    /**
      * Formats date and time together
      * @param date Date object to format
      * @returns Formatted date and time string in dd/mm/yyyy HH:MM format
@@ -4872,10 +4936,64 @@
     }
 
     /**
+     * Handles follow ship logic with throttling
+     * @param isTimelineChange - True if this is triggered by timeline change, false for position updates
+     * @param forceUpdate - Force update regardless of throttling
+     */
+    function handleFollowShip(isTimelineChange: boolean = false, forceUpdate: boolean = false) {
+        if (!followShip) return;
+        
+        const now = Date.now();
+        let shouldUpdate = forceUpdate;
+        
+        // Determine target position
+        let targetLat: number, targetLon: number;
+        if (lastRouteProjection) {
+            targetLat = lastRouteProjection.lat;
+            targetLon = lastRouteProjection.lon;
+        } else if (lastFallbackProjection) {
+            targetLat = lastFallbackProjection.lat;
+            targetLon = lastFallbackProjection.lon;
+        } else if (lastLatitude !== null && lastLongitude !== null) {
+            targetLat = lastLatitude;
+            targetLon = lastLongitude;
+        } else {
+            return; // No valid position available
+        }
+        
+        if (isTimelineChange) {
+            // Timeline changes: update if projection position changed
+            if (!lastProjectionPosition || 
+                Math.abs(targetLat - lastProjectionPosition.lat) > 0.0001 || 
+                Math.abs(targetLon - lastProjectionPosition.lon) > 0.0001) {
+                shouldUpdate = true;
+                lastTimelineFollowTime = now;
+                lastProjectionPosition = { lat: targetLat, lon: targetLon };
+            }
+        } else {
+            // Position updates: throttle to once per minute (60000ms)
+            if (now - lastFollowUpdateTime >= 60000) {
+                shouldUpdate = true;
+                lastFollowUpdateTime = now;
+            }
+        }
+        
+        if (shouldUpdate) {
+            // Center on vessel position, keep current zoom level
+            map.setView([targetLat, targetLon]);
+        }
+    }
+
+    /**
      * Toggles the follow ship mode
     */
     function toggleFollowShip() {
         followShip = !followShip;
+        
+        if (followShip) {
+            // Force immediate update when follow mode is enabled
+            handleFollowShip(false, true); // Force update regardless of throttling
+        }
     }
 
     /**
@@ -4886,6 +5004,34 @@
             // Redessiner le marqueur avec la nouvelle taille - validate COG first
             const validCOG = Number.isFinite(myCourseOverGroundT) ? myCourseOverGroundT : 0;
             addBoatMarker(lastLatitude, lastLongitude, validCOG);
+        }
+    }
+    
+    // Reactive statement to handle test mode changes
+    $: {
+        if (testModeEnabled !== undefined || testSOG !== undefined || testCOG !== undefined) {
+            // Update ETAs when test mode or test values change
+            if (isRouteLoaded) {
+                etc_etaCalculation();
+                waypointETAs = computeWaypointsETAs();
+                
+                // Refresh waypoint display to show updated ETAs
+                if (showRouteWaypoints && routeMarkers) {
+                    displayRouteWaypoints();
+                }
+            }
+            
+            // Update vessel marker and projections when test mode changes
+            if (lastLatitude !== null && lastLongitude !== null) {
+                const validCOG = testModeEnabled ? testCOG : (Number.isFinite(myCourseOverGroundT) ? myCourseOverGroundT : 0);
+                addBoatMarker(lastLatitude, lastLongitude, validCOG);
+            }
+            
+            // Update timeline projection if applicable
+            if (projectionHours !== null && projectionHours !== 0) {
+                const currentTimestamp = windyStore.get('timestamp');
+                updateProjectionForTimeline(currentTimestamp);
+            }
         }
     }
     
@@ -4935,6 +5081,12 @@
             
             // Unsubscribe from Windy overlay changes
             if (unsubscribeOverlay) unsubscribeOverlay();
+            
+            // Remove map event listeners
+            if (map) {
+                map.off('zoomend');
+            }
+            
             // Arrêter le timer de nettoyage des fragments
             if (fragmentCleanupTimer) {
                 clearInterval(fragmentCleanupTimer);
