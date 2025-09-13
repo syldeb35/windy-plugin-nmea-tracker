@@ -4450,7 +4450,8 @@
         let currentIndex = startIndex;
         
         let iterations = 0;
-        while (remainingDistance > 0 && currentIndex < gpxRoute.length - 1) {
+        const maxIterations = Math.max(1000, gpxRoute.length * 10); // Safety limit for very long projections
+        while (remainingDistance > 0 && currentIndex < gpxRoute.length - 1 && iterations < maxIterations) {
             iterations++;
             const nextWaypoint = gpxRoute[currentIndex + 1];
             const legType = gpxRoute[currentIndex].type || 'RL'; // Leg type is on the departure waypoint
@@ -4476,19 +4477,23 @@
                     currentLat = gc.lat;
                     currentLon = gc.lon;
                 } else {
-                    // RL: For perfect route alignment, calculate where we are within the segment
-                    // and interpolate along the exact waypoint line, not from current position
-                    const segmentStartWP = gpxRoute[currentIndex];
+                    // RL: Use proper rhumb line interpolation instead of simple linear interpolation
+                    // This is crucial for long distance projections to prevent gaps
+                    
+                    // Get the exact waypoint coordinates and calculate rhumb line bearing and distance
                     const totalSegmentDistance = calculateDistance(segmentStartWP.lat, segmentStartWP.lon, segmentEndWP.lat, segmentEndWP.lon, legType);
                     const distanceFromStart = calculateDistance(segmentStartWP.lat, segmentStartWP.lon, currentLat, currentLon, legType);
-                    const progressAlongSegment = totalSegmentDistance === 0 ? 0 : distanceFromStart / totalSegmentDistance;
-                    const finalProgressAlongSegment = totalSegmentDistance === 0 ? 0 : (distanceFromStart + remainingDistance) / totalSegmentDistance;
                     
-                    // Interpolate along the exact waypoint line using the final progress
-                    const newLat = segmentStartWP.lat + (segmentEndWP.lat - segmentStartWP.lat) * finalProgressAlongSegment;
-                    const newLon = segmentStartWP.lon + (segmentEndWP.lon - segmentStartWP.lon) * finalProgressAlongSegment;
-                    currentLat = newLat;
-                    currentLon = newLon;
+                    // Calculate the bearing of this rhumb line segment
+                    const rhumbBearing = calculateStraightLineBearing(segmentStartWP.lat, segmentStartWP.lon, segmentEndWP.lat, segmentEndWP.lon);
+                    
+                    // Calculate the total distance we need to travel along this segment
+                    const finalDistance = distanceFromStart + remainingDistance;
+                    
+                    // Use dead reckoning along the rhumb line bearing for accurate positioning
+                    const newPosition = deadReckoningFromPoint(segmentStartWP.lat, segmentStartWP.lon, rhumbBearing, finalDistance);
+                    currentLat = newPosition.lat;
+                    currentLon = newPosition.lon;
                 }
                 
                 // INTERMEDIATE SNAP: Snap to route after interpolation to prevent cumulative errors
@@ -4499,8 +4504,10 @@
                     legType
                 );
                 
-                // Always apply intermediate snap if we're reasonably close to prevent cumulative errors
-                if (snapResult.progress >= 0 && snapResult.progress <= 1 && snapResult.distance < 2.0) {
+                // For long projections, be more aggressive with snapping to prevent gaps
+                // Use larger distance threshold based on remaining distance to project
+                const snapThreshold = Math.min(5.0, Math.max(2.0, remainingDistance / 100)); // 2-5 NM threshold
+                if (snapResult.progress >= 0 && snapResult.progress <= 1 && snapResult.distance < snapThreshold) {
                     currentLat = snapResult.projectionLat;
                     currentLon = snapResult.projectionLon;
                 }
@@ -4523,8 +4530,10 @@
                 legType
             );
 
-            // Only snap if we're within the segment bounds and close to the route
-            if (snapResult.progress >= 0 && snapResult.progress <= 1 && snapResult.distance < 1.0) {
+            // Only snap if we're within the segment bounds and reasonably close to the route
+            // For very long projections, use a more generous distance threshold
+            const finalSnapThreshold = Math.max(3.0, iterations > 500 ? 10.0 : 3.0); // More generous for long projections
+            if (snapResult.progress >= 0 && snapResult.progress <= 1 && snapResult.distance < finalSnapThreshold) {
                 currentLat = snapResult.projectionLat;
                 currentLon = snapResult.projectionLon;
             }
@@ -4885,6 +4894,43 @@
     }
 
     /**
+     * Calculate new position from a starting point using dead reckoning along a rhumb line
+     * @param startLat Starting latitude in degrees
+     * @param startLon Starting longitude in degrees
+     * @param bearing True bearing in degrees (0-359)
+     * @param distanceNM Distance to travel in nautical miles
+     * @returns New position {lat, lon}
+     */
+    function deadReckoningFromPoint(startLat: number, startLon: number, bearing: number, distanceNM: number): {lat: number, lon: number} {
+        // Convert to radians
+        const lat1 = toRadians(startLat);
+        const lon1 = toRadians(startLon);
+        const bearingRad = toRadians(bearing);
+        
+        // Earth radius in nautical miles
+        const R = 3437.7468;
+        
+        // Angular distance
+        const d = distanceNM / R;
+        
+        // Calculate destination latitude
+        const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(bearingRad));
+        
+        // Calculate destination longitude using rhumb line formula
+        const dPhi = Math.log(Math.tan(lat2 / 2 + Math.PI / 4) / Math.tan(lat1 / 2 + Math.PI / 4));
+        const q = Math.abs(dPhi) > 10e-12 ? (lat2 - lat1) / dPhi : Math.cos(lat1);
+        const dLon = d * Math.sin(bearingRad) / q;
+        
+        // Handle date line crossing
+        let lon2 = (lon1 + dLon + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
+        
+        return {
+            lat: toDegrees(lat2),
+            lon: toDegrees(lon2)
+        };
+    }
+
+    /**
      * Calculate the bearing between two points using simple straight-line calculation
      * This matches the straight-line route display used for RL legs
      * @param lat1
@@ -5021,16 +5067,16 @@
                 }
             }
             
-            // Update vessel marker and projections when test mode changes
-            if (lastLatitude !== null && lastLongitude !== null) {
-                const validCOG = testModeEnabled ? testCOG : (Number.isFinite(myCourseOverGroundT) ? myCourseOverGroundT : 0);
-                addBoatMarker(lastLatitude, lastLongitude, validCOG);
-            }
-            
-            // Update timeline projection if applicable
+            // Update timeline projection first to recalculate with new test values
             if (projectionHours !== null && projectionHours !== 0) {
                 const currentTimestamp = windyStore.get('timestamp');
                 updateProjectionForTimeline(currentTimestamp);
+            }
+            
+            // Update vessel marker and projections when test mode changes (after projection recalculation)
+            if (lastLatitude !== null && lastLongitude !== null) {
+                const validCOG = testModeEnabled ? testCOG : (Number.isFinite(myCourseOverGroundT) ? myCourseOverGroundT : 0);
+                addBoatMarker(lastLatitude, lastLongitude, validCOG);
             }
         }
     }
