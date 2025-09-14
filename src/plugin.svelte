@@ -486,6 +486,7 @@
     let openedPopup: any = null;
     // Store AIS ships data globally so all functions can access it
     let aisShips: { [mmsi: string]: any } = {};
+    let emergencyDevices: { [mmsi: string]: any } = {}; // Store for emergency devices (SART, SAR aircraft)
     // Boat icon size control
     let boatIconSize: number = 1.0; // Default size multiplier (0.5 to 2.0)
 
@@ -530,6 +531,7 @@
     let gpxRoute: Array<{lat: number, lon: number, name?: string, time?: Date, passedTime?: Date, type?: string}> = []; // Route waypoints
     let routeLayer: any = null; // Layer for displaying the route
     let atonLayer: any = null; // Layer for displaying AtoN markers
+    let emergencyLayer: any = null; // Layer for displaying emergency devices (SART, SAR aircraft)
     let routeMarkers: any = null; // Layer for route waypoints
     let isRouteLoaded: boolean = false; // Flag to track if route is loaded
     let routeProgress: number = 0; // Current progress along route (0-1)
@@ -614,6 +616,7 @@
         // Initialize layers with proper z-index ordering        
         aisShipsLayer = createLayerGroup(map, zIndexAisShips); // Bottom layer: Other AIS ships
         atonLayer = createLayerGroup(map, zIndexAtoN); // AtoN markers
+        emergencyLayer = createLayerGroup(map, zIndexOwnShip + 100); // Emergency devices (SART, SAR) - high priority
         markerLayer = createLayerGroup(map, zIndexOwnShip); // Top layer: Your ship
 
         // Add zoom event listener to center on vessel after zoom changes
@@ -626,6 +629,9 @@
 
         // Start cleanup timer for old AIS ships (every 5 minutes)
         setInterval(cleanupOldAISShips, 5 * 60 * 1000);
+        
+        // Start cleanup timer for old emergency devices (every 10 minutes)
+        setInterval(cleanupOldEmergencyDevices, 10 * 60 * 1000);
         
         // Start the no frame detection timer
         startNoFrameTimer();
@@ -1160,7 +1166,7 @@
             localStorage.setItem('windy-nmea-shorttrack', JSON.stringify(shortTrackHistory));
             lastShortTrackSaveTime = now;
             const actualHistoryDays = shortTrackHistory.length / (24 * 60);
-            console.debug(`Track point saved: ${shortTrackHistory.length} points (${actualHistoryDays.toFixed(2)} days history)`);
+            // console.debug(`Track point saved: ${shortTrackHistory.length} points (${actualHistoryDays.toFixed(2)} days history)`);
         }
     }
 
@@ -1178,7 +1184,7 @@
         } catch (e) {
             shortTrackHistory = [];
         }
-        console.debug(`Track history loaded: ${shortTrackHistory.length} points (${TRACK_HISTORY_DAYS} days retention)`);
+        // console.debug(`Track history loaded: ${shortTrackHistory.length} points (${TRACK_HISTORY_DAYS} days retention)`);
     }
 
     /**
@@ -1210,7 +1216,7 @@
                         segments.push([...currentSegment]);
                     }
                     currentSegment = [latLng];
-                    console.debug(`Track gap detected: ${(timeDiff / (60 * 1000)).toFixed(1)} minutes between points`);
+                    // console.debug(`Track gap detected: ${(timeDiff / (60 * 1000)).toFixed(1)} minutes between points`);
                 } else {
                     // Continue current segment
                     currentSegment.push(latLng);
@@ -1268,7 +1274,7 @@
         lastTrackDisplayUpdate = now;
         lastTrackPointCount = shortTrackHistory.length;
         
-        console.debug(`Track display updated: ${trackSegments.length} segments from ${shortTrackHistory.length} points`);
+        // console.debug(`Track display updated: ${trackSegments.length} segments from ${shortTrackHistory.length} points`);
     }
 
     /**
@@ -1945,7 +1951,7 @@
                     
                     if (hasAllFragments) {
                         const fullPayload = aisFragments[fragKey].payloads.join('');
-                        console.debug(`AIS message assembled from ${total} fragments: ${fragKey}`);
+                        // console.debug(`AIS message assembled from ${total} fragments: ${fragKey}`);
                         delete aisFragments[fragKey];
                         decodeAISMessage(fullPayload, isOwnVessel);
                         return true;
@@ -2562,6 +2568,298 @@
     }
 
     /**
+     * Create SART (Search and Rescue Transponder) icon
+     * @param size Icon size multiplier
+     * @returns Leaflet DivIcon for SART device
+     */
+    function createSARTIcon(size: number = 24): any {
+        const iconHtml = `
+            <div style="
+                width: ${size}px; 
+                height: ${size}px; 
+                background: #ff0000; 
+                border: 3px solid #fff; 
+                border-radius: 50%; 
+                display: flex; 
+                align-items: center; 
+                justify-content: center;
+                box-shadow: 0 0 10px rgba(255, 0, 0, 0.8);
+                animation: sart-pulse 2s infinite;
+            ">
+                <span style="color: white; font-weight: bold; font-size: ${size * 0.5}px;">⚠</span>
+            </div>
+            <style>
+                @keyframes sart-pulse {
+                    0% { box-shadow: 0 0 5px rgba(255, 0, 0, 0.8); }
+                    50% { box-shadow: 0 0 20px rgba(255, 0, 0, 1); }
+                    100% { box-shadow: 0 0 5px rgba(255, 0, 0, 0.8); }
+                }
+            </style>
+        `;
+        
+        return L.divIcon({
+            html: iconHtml,
+            className: 'sart-emergency-marker',
+            iconSize: [size, size],
+            iconAnchor: [size/2, size/2]
+        });
+    }
+
+    /**
+     * Create SAR Aircraft icon with heading
+     * @param heading Aircraft heading in degrees
+     * @param size Icon size multiplier
+     * @returns Leaflet DivIcon for SAR aircraft
+     */
+    function createSARAircraftIcon(heading: number = 0, size: number = 28): any {
+        const iconHtml = `
+            <div style="
+                width: ${size}px; 
+                height: ${size}px; 
+                transform: rotate(${heading}deg);
+                display: flex; 
+                align-items: center; 
+                justify-content: center;
+            ">
+                <svg width="${size}" height="${size}" viewBox="0 0 24 24" style="filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.5));">
+                    <!-- Aircraft body -->
+                    <path d="M12 2 L12 18 L10 16 L14 16 Z" fill="#ff6600" stroke="#fff" stroke-width="1"/>
+                    <!-- Wings -->
+                    <path d="M6 8 L18 8 L16 12 L8 12 Z" fill="#ff6600" stroke="#fff" stroke-width="1"/>
+                    <!-- Tail -->
+                    <path d="M10 18 L14 18 L13 22 L11 22 Z" fill="#ff6600" stroke="#fff" stroke-width="1"/>
+                    <!-- SAR Cross -->
+                    <circle cx="12" cy="10" r="3" fill="white" stroke="#ff0000" stroke-width="1"/>
+                    <path d="M12 8 L12 12 M10 10 L14 10" stroke="#ff0000" stroke-width="2"/>
+                </svg>
+            </div>
+        `;
+        
+        return L.divIcon({
+            html: iconHtml,
+            className: 'sar-aircraft-marker',
+            iconSize: [size, size],
+            iconAnchor: [size/2, size/2]
+        });
+    }
+
+    /**
+     * Create AtoN (Aid to Navigation) icon based on type following IALA maritime standards
+     * @param atonType AtoN type code (0-31)
+     * @param size Icon size
+     * @returns Leaflet DivIcon for specific AtoN type
+     */
+    function createAtoNIcon(atonType: number, size: number = 24): any {
+        let iconHtml = '';
+        let bgColor = '#666666'; // Default gray
+        let symbol = '⛯'; // Default symbol
+        let topMark = ''; // Additional top mark for cardinal buoys
+        
+        switch(atonType) {
+            case 0: // Default, Type of AtoN not specified
+                bgColor = '#808080';
+                symbol = '⛯';
+                break;
+                
+            case 1: // Reference point
+                bgColor = '#FFD700';
+                symbol = '📍';
+                break;
+                
+            case 2: // RACON
+                bgColor = '#FF6600';
+                symbol = '📡';
+                break;
+                
+            case 3: // Fixed structures off-shore (oil platforms, wind farms)
+                bgColor = '#8B4513';
+                symbol = '🏭';
+                break;
+                
+            case 4: // Emergency Wreck Marking Buoy
+                bgColor = '#FF0000';
+                symbol = '⚠';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 10px;">⚠</div>';
+                break;
+                
+            case 5: // Fixed Light, without sectors
+                bgColor = '#FFFF00';
+                symbol = '💡';
+                break;
+                
+            case 6: // Fixed Light, with sectors
+                bgColor = '#FFFF00';
+                symbol = '🔆';
+                break;
+                
+            case 7: // Fixed Leading Light Front
+                bgColor = '#FFFF00';
+                symbol = '🔅';
+                break;
+                
+            case 8: // Fixed Leading Light Rear
+                bgColor = '#FFFF00';
+                symbol = '🔆';
+                break;
+                
+            // Cardinal Beacons (Fixed)
+            case 9: // Cardinal N
+                bgColor = '#000000';
+                symbol = '▲';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #000;">▲</div>';
+                break;
+            case 10: // Cardinal E
+                bgColor = '#000000';
+                symbol = '◆';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #000;">◆◇</div>';
+                break;
+            case 11: // Cardinal S
+                bgColor = '#000000';
+                symbol = '▼';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #000;">▼</div>';
+                break;
+            case 12: // Cardinal W
+                bgColor = '#000000';
+                symbol = '◆';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #000;">◇◆</div>';
+                break;
+                
+            // Port/Starboard Beacons (Fixed)
+            case 13: // Port hand
+                bgColor = '#FF0000';
+                symbol = '●';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 8px;">■</div>';
+                break;
+            case 14: // Starboard hand
+                bgColor = '#00FF00';
+                symbol = '●';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #00FF00; font-size: 8px;">▲</div>';
+                break;
+                
+            case 15: // Preferred Channel port hand
+                bgColor = '#FF0000';
+                symbol = '●';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #00FF00; font-size: 6px;">▲</div>';
+                break;
+            case 16: // Preferred Channel starboard hand
+                bgColor = '#00FF00';
+                symbol = '●';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 6px;">■</div>';
+                break;
+                
+            case 17: // Isolated danger
+                bgColor = '#FF0000';
+                symbol = '⚫';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 6px;">●●</div>';
+                break;
+            case 18: // Safe water
+                bgColor = '#FF0000';
+                symbol = '⚪';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 8px;">●</div>';
+                break;
+            case 19: // Special mark
+                bgColor = '#FFFF00';
+                symbol = '◆';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FFFF00; font-size: 8px;">✖</div>';
+                break;
+                
+            // Floating Cardinal Marks
+            case 20: // Cardinal Mark N
+                bgColor = '#000000';
+                symbol = '🔺';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #000;">▲▲</div>';
+                break;
+            case 21: // Cardinal Mark E
+                bgColor = '#000000';
+                symbol = '🔸';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #000;">◆◇</div>';
+                break;
+            case 22: // Cardinal Mark S
+                bgColor = '#000000';
+                symbol = '🔻';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #000;">▼▼</div>';
+                break;
+            case 23: // Cardinal Mark W
+                bgColor = '#000000';
+                symbol = '🔸';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #000;">◇◆</div>';
+                break;
+                
+            // Floating Port/Starboard Marks
+            case 24: // Port hand Mark
+                bgColor = '#FF0000';
+                symbol = '🔴';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 8px;">■</div>';
+                break;
+            case 25: // Starboard hand Mark
+                bgColor = '#00FF00';
+                symbol = '🟢';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #00FF00; font-size: 8px;">▲</div>';
+                break;
+                
+            case 26: // Preferred Channel Port hand
+                bgColor = '#FF0000';
+                symbol = '🔴';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #00FF00; font-size: 6px;">▲</div>';
+                break;
+            case 27: // Preferred Channel Starboard hand
+                bgColor = '#00FF00';
+                symbol = '🟢';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 6px;">■</div>';
+                break;
+                
+            case 28: // Isolated danger
+                bgColor = '#FF0000';
+                symbol = '⚫';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 6px;">●●</div>';
+                break;
+            case 29: // Safe Water
+                bgColor = '#FF0000';
+                symbol = '⚪';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 8px;">●</div>';
+                break;
+            case 30: // Special Mark
+                bgColor = '#FFFF00';
+                symbol = '🟡';
+                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FFFF00; font-size: 8px;">✖</div>';
+                break;
+            case 31: // Light Vessel/LANBY/Rigs
+                bgColor = '#FF6600';
+                symbol = '🚢';
+                break;
+                
+            default:
+                bgColor = '#808080';
+                symbol = '⛯';
+        }
+        
+        iconHtml = `
+            <div style="
+                width: ${size}px; 
+                height: ${size}px; 
+                background: ${bgColor}; 
+                border: 2px solid #fff; 
+                border-radius: 50%; 
+                display: flex; 
+                align-items: center; 
+                justify-content: center;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+                position: relative;
+            ">
+                <span style="color: white; font-size: ${size * 0.6}px; text-shadow: 1px 1px 2px rgba(0,0,0,0.8);">${symbol}</span>
+                ${topMark}
+            </div>
+        `;
+        
+        return L.divIcon({
+            html: iconHtml,
+            className: 'aton-marker',
+            iconSize: [size, size],
+            iconAnchor: [size/2, size/2]
+        });
+    }
+
+    /**
      * Get AIS status text from status code
      * @param status
      */
@@ -2650,6 +2948,30 @@
                     aisShipsLayer.removeLayer(ship.marker);
                 }
                 delete aisShips[mmsi];
+            }
+        });
+    }
+
+    /**
+     * Clean up old emergency devices (older than 30 minutes for SAR aircraft, 2 hours for SART)
+     */
+    function cleanupOldEmergencyDevices() {
+        const sarAircraftMaxAge = 30 * 60 * 1000; // 30 minutes for SAR aircraft
+        const sartMaxAge = 2 * 60 * 60 * 1000; // 2 hours for SART devices
+        
+        Object.keys(emergencyDevices).forEach(mmsi => {
+            const device = emergencyDevices[mmsi];
+            const age = Date.now() - device.lastUpdate;
+            
+            // Use different timeouts based on device type
+            const maxAge = device.type === 'SAR_AIRCRAFT' ? sarAircraftMaxAge : sartMaxAge;
+            
+            if (age > maxAge) {
+                if (device.marker) {
+                    emergencyLayer.removeLayer(device.marker);
+                }
+                delete emergencyDevices[mmsi];
+                console.log(`Cleaned up old emergency device: ${device.type} MMSI ${mmsi}`);
             }
         });
     }
@@ -2801,7 +3123,7 @@
                         `${etaHour < 24 ? String(etaHour).padStart(2, '0') : '--'}:` +
                         `${etaMin < 60 ? String(etaMin).padStart(2, '0') : '--'}`;
 
-            console.debug(`ETA: ${etaStr}`);
+            //console.debug(`ETA: ${etaStr}`);
 
             // Destination (bits 302-421, 20x6 bits)
             let destBits = bitstring.slice(302, 422);
@@ -2884,12 +3206,7 @@
 
             // Add marker to atonLayer
             if (atonLayer) {
-                const atonIcon = L.divIcon({
-                    html: '⛯',
-                    className: 'aton-marker',
-                    iconSize: [20, 20],
-                    iconAnchor: [10, 10]
-                });
+                const atonIcon = createAtoNIcon(atonType, 24);
                 const marker = L.marker([lat, lon], { icon: atonIcon, zIndexOffset: zIndexWaypoint }).addTo(atonLayer);
                 marker.bindTooltip(
                     `<strong>AtoN</strong><br>
@@ -2897,8 +3214,164 @@
                     Type: ${atonTypeName}<br>
                     Lat: ${lat.toFixed(5)}<br>
                     Lon: ${lon.toFixed(5)}`,
-                    { permanent: false, direction: 'top' }
+                    { permanent: false, direction: 'top', className: 'aton-tooltip' }
                 );
+            }
+        }
+
+        if (msgType === 14) {
+            // Safety-Related Broadcast Message (SART)
+            console.debug(`SART Safety message detected from MMSI ${mmsi}`);
+            
+            // Safety text (bits 40-191, max 968 bits, but typically much shorter)
+            // Each character is 6 bits, up to ~25 characters for message type 14
+            const textBits = bitstring.slice(40, 191); // Extract available text bits
+            let safetyText = '';
+            for (let i = 0; i < textBits.length; i += 6) {
+                if (i + 6 <= textBits.length) {
+                    const charCode = parseInt(textBits.slice(i, i + 6), 2);
+                    if (charCode === 0) break; // Null terminator
+                    safetyText += aisAscii(charCode);
+                }
+            }
+            safetyText = safetyText.replace(/@+$/, '').trim();
+
+            // SART devices don't always include position in message 14
+            // Position usually comes from associated message 1/2/3 with status 14
+            let lat = null, lon = null;
+            
+            // Try to get position from existing ship data if this MMSI is known
+            if (aisShips[mmsi] && aisShips[mmsi].data && aisShips[mmsi].data.lat !== undefined) {
+                lat = aisShips[mmsi].data.lat;
+                lon = aisShips[mmsi].data.lon;
+            }
+
+            // Create or update emergency device entry
+            if (!emergencyDevices[mmsi]) {
+                emergencyDevices[mmsi] = {
+                    marker: null,
+                    type: 'SART',
+                    data: {},
+                    lastUpdate: Date.now()
+                };
+            }
+
+            emergencyDevices[mmsi].data.safetyText = safetyText;
+            emergencyDevices[mmsi].data.mmsi = mmsi;
+            emergencyDevices[mmsi].lastUpdate = Date.now();
+
+            // Add SART marker if we have position
+            if (lat !== null && lon !== null && emergencyLayer) {
+                // Remove existing marker
+                if (emergencyDevices[mmsi].marker) {
+                    emergencyLayer.removeLayer(emergencyDevices[mmsi].marker);
+                }
+
+                const sartIcon = createSARTIcon(28);
+                const marker = L.marker([lat, lon], { 
+                    icon: sartIcon, 
+                    zIndexOffset: zIndexOwnShip + 200 // Very high priority
+                }).addTo(emergencyLayer);
+
+                const tooltipContent = `
+                    <strong style="color: #ff0000;">🚨 SART EMERGENCY 🚨</strong><br>
+                    <strong>MMSI:</strong> ${mmsi}<br>
+                    <strong>Safety Message:</strong> ${safetyText || 'SART Active'}<br>
+                    <strong>Position:</strong> ${lat.toFixed(5)}, ${lon.toFixed(5)}<br>
+                    <strong>Time:</strong> ${new Date().toLocaleTimeString()}
+                `;
+
+                marker.bindTooltip(tooltipContent, { 
+                    permanent: false, 
+                    direction: 'top',
+                    className: 'emergency-tooltip'
+                });
+
+                emergencyDevices[mmsi].marker = marker;
+                
+                 // console.debug(`SART device displayed: ${mmsi} - "${safetyText}"`);
+            }
+        }
+
+        if (msgType === 9) {
+            // SAR Aircraft Position Report
+            console.debug(`SAR Aircraft detected: MMSI ${mmsi}`);
+            
+            // Position (bits 61-88 longitude, 89-115 latitude)
+            const lonRaw = parseInt(bitstring.slice(61, 89), 2);
+            const latRaw = parseInt(bitstring.slice(89, 116), 2);
+            
+            // Two's complement correction
+            let lon = (lonRaw & 0x8000000) ? (lonRaw - 0x10000000) : lonRaw;
+            let lat = (latRaw & 0x4000000) ? (latRaw - 0x8000000) : latRaw;
+            
+            // Convert to decimal degrees
+            lat = lat / 600000.0;
+            lon = lon / 600000.0;
+            
+            // Course Over Ground (bits 116-127)
+            const cog = parseInt(bitstring.slice(116, 128), 2) / 10.0;
+            
+            // Speed Over Ground (bits 50-59)
+            const sog = parseInt(bitstring.slice(50, 60), 2) / 10.0;
+            
+            // Altitude (bits 38-49) in meters
+            const altitudeRaw = parseInt(bitstring.slice(38, 50), 2);
+            const altitude = altitudeRaw === 4095 ? 'N/A' : `${altitudeRaw}m`;
+
+            if (lat !== 91 && lon !== 181) { // Valid coordinates
+                // Create or update SAR aircraft
+                if (!emergencyDevices[mmsi]) {
+                    emergencyDevices[mmsi] = {
+                        marker: null,
+                        type: 'SAR_AIRCRAFT',
+                        data: {},
+                        lastUpdate: Date.now()
+                    };
+                }
+
+                emergencyDevices[mmsi].data = {
+                    mmsi: mmsi,
+                    lat: lat,
+                    lon: lon,
+                    cog: cog,
+                    sog: sog,
+                    altitude: altitude
+                };
+                emergencyDevices[mmsi].lastUpdate = Date.now();
+
+                if (emergencyLayer) {
+                    // Remove existing marker
+                    if (emergencyDevices[mmsi].marker) {
+                        emergencyLayer.removeLayer(emergencyDevices[mmsi].marker);
+                    }
+
+                    const aircraftIcon = createSARAircraftIcon(cog, 32);
+                    const marker = L.marker([lat, lon], { 
+                        icon: aircraftIcon, 
+                        zIndexOffset: zIndexOwnShip + 150 // High priority
+                    }).addTo(emergencyLayer);
+
+                    const tooltipContent = `
+                        <strong style="color: #ff6600;">✈️ SAR AIRCRAFT</strong><br>
+                        <strong>MMSI:</strong> ${mmsi}<br>
+                        <strong>Course:</strong> ${cog.toFixed(1)}°<br>
+                        <strong>Speed:</strong> ${sog.toFixed(1)} knots<br>
+                        <strong>Altitude:</strong> ${altitude}<br>
+                        <strong>Position:</strong> ${lat.toFixed(5)}, ${lon.toFixed(5)}<br>
+                        <strong>Time:</strong> ${new Date().toLocaleTimeString()}
+                    `;
+
+                    marker.bindTooltip(tooltipContent, { 
+                        permanent: false, 
+                        direction: 'top',
+                        className: 'emergency-tooltip'
+                    });
+
+                    emergencyDevices[mmsi].marker = marker;
+                    
+                    // console.debug(`SAR Aircraft displayed: ${mmsi} at ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+                }
             }
         }
     }
@@ -5111,6 +5584,7 @@
             openedPopup?.remove();
             markerLayer.clearLayers();
             aisShipsLayer?.clearLayers(); // Clear AIS ships layer
+            emergencyLayer?.clearLayers(); // Clear emergency devices layer
             
             // Remove all track polylines
             boatPath.forEach(polyline => polyline.remove());
@@ -5591,6 +6065,66 @@
     
     .leg-editor-save-btn:hover {
         background: #0056b3;
+    }
+    
+    /* Emergency Device Styles */
+    .emergency-tooltip {
+        background: rgba(255, 0, 0, 0.95) !important;
+        color: white !important;
+        border: 2px solid #fff !important;
+        border-radius: 5px !important;
+        padding: 8px !important;
+        font-weight: bold !important;
+        box-shadow: 0 0 15px rgba(255, 0, 0, 0.8) !important;
+    }
+    
+    .sart-emergency-marker {
+        background: transparent !important;
+        border: none !important;
+    }
+    
+    .sar-aircraft-marker {
+        background: transparent !important;
+        border: none !important;
+    }
+    
+    /* SART pulse animation */
+    @keyframes sart-pulse {
+        0% { 
+            transform: scale(1);
+            box-shadow: 0 0 5px rgba(255, 0, 0, 0.8);
+        }
+        50% { 
+            transform: scale(1.1);
+            box-shadow: 0 0 20px rgba(255, 0, 0, 1);
+        }
+        100% { 
+            transform: scale(1);
+            box-shadow: 0 0 5px rgba(255, 0, 0, 0.8);
+        }
+    }
+    
+    /* AtoN (Aid to Navigation) Styles */
+    .aton-marker {
+        background: transparent !important;
+        border: none !important;
+    }
+    
+    .aton-marker div {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        user-select: none;
+        pointer-events: none;
+    }
+    
+    /* Specific AtoN tooltip styling */
+    .leaflet-tooltip.aton-tooltip {
+        background: rgba(70, 130, 180, 0.95) !important;
+        color: white !important;
+        border: 2px solid #fff !important;
+        border-radius: 5px !important;
+        padding: 6px !important;
+        font-weight: bold !important;
+        font-size: 12px !important;
     }
 </style>
 
