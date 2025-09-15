@@ -713,16 +713,21 @@
             const timeSinceLastWake = Date.now() - lastWakeTime;
             const timeSinceLastReconnect = Date.now() - lastReconnectAttempt;
             
+            // Check actual connection state (both our flag and socket.io's state)
+            const actuallyConnected = isConnected && socket && socket.connected;
+            
             // Only reconnect if:
             // 1. More than 10 seconds since last wake detection AND
-            // 2. Socket is not currently connected OR has been inactive for a significant time AND
+            // 2. Socket is actually disconnected (either our flag is false OR socket.io shows disconnected) AND
             // 3. Haven't attempted reconnection in the last 30 seconds (throttling)
             if (timeSinceLastWake > 10000 && 
-                (!isConnected || timeSinceLastWake > 30000) && 
+                !actuallyConnected && 
                 timeSinceLastReconnect > 30000) {
-                console.debug('Detected wake from sleep or long inactivity, reconnecting socket...');
+                console.debug('Detected wake from sleep or inactivity with disconnected socket, reconnecting...');
                 lastReconnectAttempt = Date.now();
                 createSocketConnection();
+            } else if (timeSinceLastWake > 10000 && actuallyConnected) {
+                console.debug('Wake detected but socket is still connected, no reconnection needed');
             }
             lastWakeTime = Date.now();
         }
