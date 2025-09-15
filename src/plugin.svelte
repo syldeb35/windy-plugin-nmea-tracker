@@ -386,6 +386,7 @@
     import io from './socket.io.min.js';
     import { createRotatingBoatIcon } from './boatIcon';
     import config from './pluginConfig';
+    import { getCardinalMarkSVG } from './AtoN';
 
     /**
      * Constants declaration
@@ -566,6 +567,7 @@
 
     let helpVisible = false;
     let lastWakeTime = Date.now();
+    let lastReconnectAttempt = 0; // Track last manual reconnection attempt
 
     let userOS: string = 'Uknown';
 
@@ -580,6 +582,9 @@
 
         document.addEventListener('visibilitychange', handleVisibilityChange);
         window.addEventListener('focus', handleVisibilityChange);
+        
+        // Initialize wake time after event listeners to prevent immediate triggers
+        lastWakeTime = Date.now();
         
         // Load track history on plugin start
         loadShortTrackHistory();
@@ -705,8 +710,18 @@
     function handleVisibilityChange() {
         if (!document.hidden) {
             // Tab is visible again (could be after sleep)
-            if (Date.now() - lastWakeTime > 10000) { // 10s threshold for sleep
+            const timeSinceLastWake = Date.now() - lastWakeTime;
+            const timeSinceLastReconnect = Date.now() - lastReconnectAttempt;
+            
+            // Only reconnect if:
+            // 1. More than 10 seconds since last wake detection AND
+            // 2. Socket is not currently connected OR has been inactive for a significant time AND
+            // 3. Haven't attempted reconnection in the last 30 seconds (throttling)
+            if (timeSinceLastWake > 10000 && 
+                (!isConnected || timeSinceLastWake > 30000) && 
+                timeSinceLastReconnect > 30000) {
                 console.debug('Detected wake from sleep or long inactivity, reconnecting socket...');
+                lastReconnectAttempt = Date.now();
                 createSocketConnection();
             }
             lastWakeTime = Date.now();
@@ -1297,14 +1312,15 @@
                     fileName: routeFileName,
                     startTime: routeStartTime ? routeStartTime.toISOString() : null,
                     distance: routeDistance,
-                    showWaypoints: showRouteWaypoints
+                    showWaypoints: showRouteWaypoints,
+                    metadata: routeMetadata
                 };
                 localStorage.setItem('windy-nmea-gpx-route', JSON.stringify(routeData));
                 
                 // Also update the raw GPX with current state including passedTime
                 updateRawGpxStorage();
                 
-                console.debug(`GPX route saved: ${routeFileName} with ${gpxRoute.length} waypoints`);
+                console.debug(`GPX route saved: ${routeFileName} with ${gpxRoute.length} waypoints and metadata:`, routeMetadata);
             }
         } catch (error) {
             console.warn('Failed to save GPX route to localStorage:', error);
@@ -1378,6 +1394,14 @@
                 routeDistance = routeData.distance || 0;
                 showRouteWaypoints = routeData.showWaypoints !== undefined ? routeData.showWaypoints : true;
 
+                // Restore route metadata if available
+                if (routeData.metadata) {
+                    routeMetadata = { ...routeData.metadata };
+                } else {
+                    // Initialize empty metadata if not saved
+                    routeMetadata = {};
+                }
+
                 // Set route as loaded and active
                 isRouteLoaded = true;
                 routeProjectionActive = true;
@@ -1390,7 +1414,7 @@
                     updateRouteProgress();
                 }
 
-                console.debug(`GPX route loaded: ${routeFileName} with ${gpxRoute.length} waypoints`);
+                console.debug(`GPX route loaded: ${routeFileName} with ${gpxRoute.length} waypoints and metadata:`, routeMetadata);
                 return true;
             }
         } catch (error) {
@@ -2470,8 +2494,8 @@
      */
     function getAISTooltipContent(data: any, mmsi: string): string {
         return `
-            <strong>MMSI: ${mmsi}</strong><br>
-            Name: ${data.name || 'Unknown'}<br>
+            <strong>Name: ${data.name || 'Unknown'}</strong><br>
+            MMSI: ${mmsi}<br>
             Course: ${data.cog?.toFixed(1) || 'N/A'}°<br>
             Speed: ${data.sog?.toFixed(1) || 'N/A'} knots<br>
             Heading: ${data.heading !== undefined && data.heading !== 511 ? data.heading + '°' : 'N/A'}<br>
@@ -2679,7 +2703,7 @@
             case 4: // Emergency Wreck Marking Buoy
                 bgColor = '#FF0000';
                 symbol = '⚠';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 10px;">⚠</div>';
+                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 10px;">⚠</div>';
                 break;
                 
             case 5: // Fixed Light, without sectors
@@ -2704,124 +2728,148 @@
                 
             // Cardinal Beacons (Fixed)
             case 9: // Cardinal N
-                bgColor = '#000000';
-                symbol = '▲';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #000;">▲</div>';
-                break;
+                // Use SVG from AtoN module
+                return L.divIcon({
+                    html: getCardinalMarkSVG('North', size),
+                    className: 'aton-marker cardinal-north',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
             case 10: // Cardinal E
-                bgColor = '#000000';
-                symbol = '◆';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #000;">◆◇</div>';
-                break;
+                // Use SVG from AtoN module
+                return L.divIcon({
+                    html: getCardinalMarkSVG('East', size),
+                    className: 'aton-marker cardinal-east',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
             case 11: // Cardinal S
-                bgColor = '#000000';
-                symbol = '▼';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #000;">▼</div>';
-                break;
+                // Use SVG from AtoN module
+                return L.divIcon({
+                    html: getCardinalMarkSVG('South', size),
+                    className: 'aton-marker cardinal-south',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
             case 12: // Cardinal W
-                bgColor = '#000000';
-                symbol = '◆';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #000;">◇◆</div>';
-                break;
+                // Use SVG from AtoN module
+                return L.divIcon({
+                    html: getCardinalMarkSVG('West', size),
+                    className: 'aton-marker cardinal-west',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
                 
             // Port/Starboard Beacons (Fixed)
             case 13: // Port hand
                 bgColor = '#FF0000';
                 symbol = '●';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 8px;">■</div>';
+                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 8px;">■</div>';
                 break;
             case 14: // Starboard hand
                 bgColor = '#00FF00';
                 symbol = '●';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #00FF00; font-size: 8px;">▲</div>';
+                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #00FF00; font-size: 8px;">▲</div>';
                 break;
                 
             case 15: // Preferred Channel port hand
                 bgColor = '#FF0000';
                 symbol = '●';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #00FF00; font-size: 6px;">▲</div>';
+                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #00FF00; font-size: 6px;">▲</div>';
                 break;
             case 16: // Preferred Channel starboard hand
                 bgColor = '#00FF00';
                 symbol = '●';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 6px;">■</div>';
+                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 6px;">■</div>';
                 break;
                 
             case 17: // Isolated danger
                 bgColor = '#FF0000';
                 symbol = '⚫';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 6px;">●●</div>';
+                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 6px;">●●</div>';
                 break;
             case 18: // Safe water
                 bgColor = '#FF0000';
                 symbol = '⚪';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 8px;">●</div>';
+                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 8px;">●</div>';
                 break;
             case 19: // Special mark
                 bgColor = '#FFFF00';
                 symbol = '◆';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FFFF00; font-size: 8px;">✖</div>';
+                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #FFFF00; font-size: 8px;">✖</div>';
                 break;
                 
             // Floating Cardinal Marks
             case 20: // Cardinal Mark N
-                bgColor = '#000000';
-                symbol = '🔺';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #000;">▲▲</div>';
-                break;
+                // Use SVG from AtoN module (floating)
+                return L.divIcon({
+                    html: getCardinalMarkSVG('North', size),
+                    className: 'aton-marker cardinal-north-float',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
             case 21: // Cardinal Mark E
-                bgColor = '#000000';
-                symbol = '🔸';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #000;">◆◇</div>';
-                break;
+                // Use SVG from AtoN module (floating)
+                return L.divIcon({
+                    html: getCardinalMarkSVG('East', size),
+                    className: 'aton-marker cardinal-east-float',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
             case 22: // Cardinal Mark S
-                bgColor = '#000000';
-                symbol = '🔻';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #000;">▼▼</div>';
-                break;
+                // Use SVG from AtoN module (floating)
+                return L.divIcon({
+                    html: getCardinalMarkSVG('South', size),
+                    className: 'aton-marker cardinal-south-float',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
             case 23: // Cardinal Mark W
-                bgColor = '#000000';
-                symbol = '🔸';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #000;">◇◆</div>';
-                break;
+                // Use SVG from AtoN module (floating)
+                return L.divIcon({
+                    html: getCardinalMarkSVG('West', size),
+                    className: 'aton-marker cardinal-west-float',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
                 
             // Floating Port/Starboard Marks
             case 24: // Port hand Mark
                 bgColor = '#FF0000';
                 symbol = '🔴';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 8px;">■</div>';
+                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 8px;">■</div>';
                 break;
             case 25: // Starboard hand Mark
                 bgColor = '#00FF00';
                 symbol = '🟢';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #00FF00; font-size: 8px;">▲</div>';
+                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #00FF00; font-size: 8px;">▲</div>';
                 break;
                 
             case 26: // Preferred Channel Port hand
                 bgColor = '#FF0000';
                 symbol = '🔴';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #00FF00; font-size: 6px;">▲</div>';
+                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #00FF00; font-size: 6px;">▲</div>';
                 break;
             case 27: // Preferred Channel Starboard hand
                 bgColor = '#00FF00';
                 symbol = '🟢';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 6px;">■</div>';
+                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 6px;">■</div>';
                 break;
                 
             case 28: // Isolated danger
                 bgColor = '#FF0000';
                 symbol = '⚫';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 6px;">●●</div>';
+                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 6px;">●●</div>';
                 break;
             case 29: // Safe Water
                 bgColor = '#FF0000';
                 symbol = '⚪';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 8px;">●</div>';
+                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 8px;">●</div>';
                 break;
             case 30: // Special Mark
                 bgColor = '#FFFF00';
                 symbol = '🟡';
-                topMark = '<div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); color: #FFFF00; font-size: 8px;">✖</div>';
+                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #FFFF00; font-size: 8px;">✖</div>';
                 break;
             case 31: // Light Vessel/LANBY/Rigs
                 bgColor = '#FF6600';
@@ -3198,7 +3246,7 @@
             }
             name = name.replace(/@+$/, '').trim();
 
-            console.debug(`Virtual AtoN detected: ${name} in position (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
+            console.debug(`%c Virtual AtoN detected: ${name} in position (${lat.toFixed(5)}, ${lon.toFixed(5)})`, 'background: #222; color: #bada55');
 
             // AtoN type (bits 38-42)
             const atonType = parseInt(bitstring.slice(38, 43), 2);
@@ -3206,14 +3254,14 @@
 
             // Add marker to atonLayer
             if (atonLayer) {
-                const atonIcon = createAtoNIcon(atonType, 24);
+                const atonIcon = createAtoNIcon(atonType, 12);
                 const marker = L.marker([lat, lon], { icon: atonIcon, zIndexOffset: zIndexWaypoint }).addTo(atonLayer);
                 marker.bindTooltip(
                     `<strong>AtoN</strong><br>
                     Name: ${name}<br>
                     Type: ${atonTypeName}<br>
-                    Lat: ${lat.toFixed(5)}<br>
-                    Lon: ${lon.toFixed(5)}`,
+                    Lat: ${displayLatitude(lat)}<br>
+                    Lon: ${displayLongitude(lon)}`,
                     { permanent: false, direction: 'top', className: 'aton-tooltip' }
                 );
             }
@@ -3277,7 +3325,7 @@
                     <strong style="color: #ff0000;">🚨 SART EMERGENCY 🚨</strong><br>
                     <strong>MMSI:</strong> ${mmsi}<br>
                     <strong>Safety Message:</strong> ${safetyText || 'SART Active'}<br>
-                    <strong>Position:</strong> ${lat.toFixed(5)}, ${lon.toFixed(5)}<br>
+                    <strong>Position:</strong> ${displayLatitude(lat)}, ${displayLongitude(lon)}<br>
                     <strong>Time:</strong> ${new Date().toLocaleTimeString()}
                 `;
 
@@ -3295,7 +3343,7 @@
 
         if (msgType === 9) {
             // SAR Aircraft Position Report
-            console.debug(`SAR Aircraft detected: MMSI ${mmsi}`);
+            console.debug(`%c SAR Aircraft detected: MMSI ${mmsi}`, 'background: #222; color: #bada55');
             
             // Position (bits 61-88 longitude, 89-115 latitude)
             const lonRaw = parseInt(bitstring.slice(61, 89), 2);
@@ -3312,8 +3360,8 @@
             // Course Over Ground (bits 116-127)
             const cog = parseInt(bitstring.slice(116, 128), 2) / 10.0;
             
-            // Speed Over Ground (bits 50-59)
-            const sog = parseInt(bitstring.slice(50, 60), 2) / 10.0;
+            // Speed Over Ground (bits 50-59) - for aircraft: 1 knot per bit (not 0.1 like ships)
+            const sog = parseInt(bitstring.slice(50, 60), 2); // No division by 10 for aircraft!
             
             // Altitude (bits 38-49) in meters
             const altitudeRaw = parseInt(bitstring.slice(38, 50), 2);
@@ -3358,7 +3406,7 @@
                         <strong>Course:</strong> ${cog.toFixed(1)}°<br>
                         <strong>Speed:</strong> ${sog.toFixed(1)} knots<br>
                         <strong>Altitude:</strong> ${altitude}<br>
-                        <strong>Position:</strong> ${lat.toFixed(5)}, ${lon.toFixed(5)}<br>
+                        <strong>Position:</strong> ${displayLatitude(lat)}, ${displayLongitude(lon)}<br>
                         <strong>Time:</strong> ${new Date().toLocaleTimeString()}
                     `;
 
@@ -3371,6 +3419,182 @@
                     emergencyDevices[mmsi].marker = marker;
                     
                     // console.debug(`SAR Aircraft displayed: ${mmsi} at ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+                }
+            }
+        }
+
+        if (msgType === 6) {
+            // Binary Addressed Message
+            console.debug(`AIS Binary Addressed Message (Type 6) from MMSI ${mmsi}`);
+            
+            // Sequence Number (bits 38-39, 2 bits)
+            const seqNum = parseInt(bitstring.slice(38, 40), 2);
+            
+            // Destination MMSI (bits 40-69, 30 bits)
+            const destMMSI = parseInt(bitstring.slice(40, 70), 2).toString();
+            
+            // Retransmit flag (bit 70)
+            const retransmit = parseInt(bitstring.slice(70, 71), 2);
+            
+            // Application Identifier (DAC/FID) (bits 72-87, 16 bits)
+            const dac = parseInt(bitstring.slice(72, 82), 2); // Designated Area Code (10 bits)
+            const fid = parseInt(bitstring.slice(82, 88), 2); // Function Identifier (6 bits)
+            
+            // Binary data payload (bits 88+, variable length)
+            const binaryData = bitstring.slice(88);
+            
+            console.debug(`Type 6 - Seq: ${seqNum}, Dest: ${destMMSI}, DAC: ${dac}, FID: ${fid}, Retransmit: ${retransmit}, Data length: ${binaryData.length} bits`);
+            
+            // Handle specific DAC/FID combinations
+            if (dac === 1) { // International applications
+                switch (fid) {
+                    case 0: // Text using 6-bit ASCII
+                        let text = '';
+                        for (let i = 0; i < binaryData.length; i += 6) {
+                            if (i + 6 <= binaryData.length) {
+                                const charCode = parseInt(binaryData.slice(i, i + 6), 2);
+                                if (charCode === 0) break;
+                                text += aisAscii(charCode);
+                            }
+                        }
+                        console.debug(`Type 6 Text Message to ${destMMSI}: "${text.trim()}"`);
+                        break;
+                    case 1: // Application Acknowledgement
+                        console.debug(`Type 6 Application ACK to ${destMMSI}`);
+                        break;
+                    case 2: // Interrogation for a DAC/FID
+                        console.debug(`Type 6 Interrogation to ${destMMSI}`);
+                        break;
+                    case 3: // Capability Interrogation
+                        console.debug(`Type 6 Capability Interrogation to ${destMMSI}`);
+                        break;
+                    default:
+                        console.debug(`Type 6 Unknown FID ${fid} to ${destMMSI}`);
+                }
+            } else {
+                console.debug(`Type 6 Regional DAC ${dac}, FID ${fid} to ${destMMSI}`);
+            }
+        }
+
+        if (msgType === 8) {
+            // Binary Broadcast Message
+            console.debug(`AIS Binary Broadcast Message (Type 8) from MMSI ${mmsi}`);
+            console.debug(`Type 8 - Full bitstring length: ${bitstring.length} bits`);
+            
+            // Application Identifier (DAC/FID) (bits 40-55, 16 bits)
+            const dac = parseInt(bitstring.slice(40, 50), 2); // Designated Area Code (10 bits)
+            const fid = parseInt(bitstring.slice(50, 56), 2); // Function Identifier (6 bits)
+            
+            // Binary data payload (bits 56+, variable length)
+            const binaryData = bitstring.slice(56);
+            
+            console.debug(`Type 8 - DAC: ${dac}, FID: ${fid}, Data length: ${binaryData.length} bits`);
+            
+            // Add debug logging for text-based messages
+            if (dac === 1 && (fid === 0 || fid === 29)) {
+                console.debug(`Type 8 Binary data (first 60 bits): ${binaryData.slice(0, Math.min(60, binaryData.length))}`);
+            }
+            
+            // Handle specific DAC/FID combinations
+            if (dac === 1) { // International applications
+                switch (fid) {
+                    case 0: // Text using 6-bit ASCII
+                        let text = '';
+                        console.debug(`Type 8 FID 0 - Processing ${binaryData.length} bits of text data`);
+                        for (let i = 0; i < binaryData.length; i += 6) {
+                            if (i + 6 <= binaryData.length) {
+                                const charCode = parseInt(binaryData.slice(i, i + 6), 2);
+                                console.debug(`Type 8 FID 0 - Char ${i/6}: code ${charCode} = '${aisAscii(charCode)}'`);
+                                if (charCode === 0) break;
+                                text += aisAscii(charCode);
+                            }
+                        }
+                        console.debug(`Type 8 Broadcast Text: "${text.trim()}" (length: ${text.length})`);
+                        break;
+                    case 11: // Meteorological and Hydrographic Data
+                        console.debug(`Type 8 Met/Hydro Data from ${mmsi}`);
+                        // Could decode detailed weather data here
+                        break;
+                    case 13: // Fairway Closed
+                        console.debug(`Type 8 Fairway Closed notification from ${mmsi}`);
+                        break;
+                    case 15: // Extended Ship Static and Voyage Related Data
+                        console.debug(`Type 8 Extended Ship Data from ${mmsi}`);
+                        break;
+                    case 16: // Number of Persons on board
+                        if (binaryData.length >= 13) {
+                            const persons = parseInt(binaryData.slice(0, 13), 2);
+                            console.debug(`Type 8 Persons on board ${mmsi}: ${persons === 8191 ? 'N/A' : persons}`);
+                        }
+                        break;
+                    case 17: // VTS-generated/synthetic targets
+                        console.debug(`Type 8 VTS Synthetic Target from ${mmsi}`);
+                        break;
+                    case 19: // Marine Traffic Signals
+                        console.debug(`Type 8 Marine Traffic Signals from ${mmsi}`);
+                        break;
+                    case 21: // Weather observation report from ship
+                        console.debug(`Type 8 Weather Report from ${mmsi}`);
+                        break;
+                    case 22: // Area Notice (broadcast)
+                        console.debug(`Type 8 Area Notice from ${mmsi}`);
+                        break;
+                    case 24: // Extended Ship Static and Voyage Related Data
+                        console.debug(`Type 8 Extended Ship Static Data from ${mmsi}`);
+                        break;
+                    case 25: // Dangerous Cargo Indication
+                        console.debug(`Type 8 Dangerous Cargo from ${mmsi}`);
+                        break;
+                    case 27: // Route Information (broadcast)
+                        console.debug(`Type 8 Route Information from ${mmsi}`);
+                        break;
+                    case 29: // Text Description (broadcast)
+                        // For FID 29, the binary data structure is:
+                        // - Link ID (10 bits) - bits 0-9
+                        // - Text (variable length, 6-bit ASCII) - bits 10+
+                        console.debug(`Type 8 FID 29 - Processing ${binaryData.length} bits of text description data`);
+                        if (binaryData.length >= 10) {
+                            const linkId = parseInt(binaryData.slice(0, 10), 2);
+                            let description = '';
+                            
+                            console.debug(`Type 8 FID 29 - Link ID: ${linkId}, Text data starts at bit 10 (${binaryData.length - 10} bits available)`);
+                            
+                            // Start reading text from bit 10 onwards
+                            for (let i = 10; i < binaryData.length; i += 6) {
+                                if (i + 6 <= binaryData.length) {
+                                    const charCode = parseInt(binaryData.slice(i, i + 6), 2);
+                                    console.debug(`Type 8 FID 29 - Char ${(i-10)/6}: code ${charCode} = '${aisAscii(charCode)}'`);
+                                    if (charCode === 0) break;
+                                    description += aisAscii(charCode);
+                                }
+                            }
+                            console.debug(`Type 8 Text Description (Link ID: ${linkId}): "${description.trim()}" (length: ${description.length})`);
+                        } else {
+                            console.debug(`Type 8 Text Description: Insufficient data (${binaryData.length} bits, need at least 10)`);
+                        }
+                        break;
+                    case 31: // Meteorological/Hydrological Data
+                        console.debug(`Type 8 Met/Hydro Data (FID 31) from ${mmsi}`);
+                        break;
+                    default:
+                        console.debug(`Type 8 Unknown International FID ${fid} from ${mmsi}`);
+                }
+            } else {
+                console.debug(`Type 8 Regional DAC ${dac}, FID ${fid} from ${mmsi}`);
+                
+                // Handle some common regional applications
+                if (dac === 316 && fid === 1) { // US/Canada - Text message
+                    let text = '';
+                    for (let i = 0; i < binaryData.length; i += 6) {
+                        if (i + 6 <= binaryData.length) {
+                            const charCode = parseInt(binaryData.slice(i, i + 6), 2);
+                            if (charCode === 0) break;
+                            text += aisAscii(charCode);
+                        }
+                    }
+                    console.debug(`Type 8 US/Canada Text: "${text.trim()}"`);
+                } else if (dac === 200) { // European inland waterways
+                    console.debug(`Type 8 European Inland Waterways message from ${mmsi}`);
                 }
             }
         }
