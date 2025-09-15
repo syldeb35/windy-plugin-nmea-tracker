@@ -1113,12 +1113,17 @@
     }
 
     /**
-     * Save vessel name to localStorage
+     * Save vessel name to localStorage (only if changed)
     */
     function saveVesselName(name: string): void {
         try {
-            localStorage.setItem('windy-nmea-vessel-name', name);
-            console.debug('Vessel name saved:', name);
+            // Check if the name has actually changed
+            const currentStoredName = localStorage.getItem('windy-nmea-vessel-name');
+            if (currentStoredName !== name) {
+                localStorage.setItem('windy-nmea-vessel-name', name);
+                console.debug('Vessel name saved:', name);
+            }
+            // No log message if name hasn't changed to avoid spam
         } catch (error) {
             console.warn('Failed to save vessel name to localStorage:', error);
         }
@@ -3191,8 +3196,11 @@
                 }
                 
                 if (name && name !== '') {
-                    vesselName = name;
-                    saveVesselName(name); // Save AIS-received name too
+                    // Only update and save if the name has actually changed
+                    if (vesselName !== name) {
+                        vesselName = name;
+                        saveVesselName(name); // Save AIS-received name too
+                    }
                 }
             } else {
                 // External vessel - update or create ship data
