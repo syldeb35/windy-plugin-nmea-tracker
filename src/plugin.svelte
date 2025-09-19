@@ -53,7 +53,8 @@
                 <div style="font-size: 12px; color: #666; line-height: 1.4;">
                     <div style="margin-bottom: 5px;">🔝 <strong>Top Layer:</strong> Your Ship (always visible on top)</div>
                     <div style="margin-bottom: 5px;">📍 <strong>Middle Layer:</strong> Route Waypoints & Lines</div>
-                    <div style="margin-bottom: 5px;">🚢 <strong>Bottom Layer:</strong> Other AIS Ships</div>
+                    <div style="margin-bottom: 5px;">� <strong>Base Layer:</strong> AIS Base Stations (orange antenna icons)</div>
+                    <div style="margin-bottom: 5px;">�🚢 <strong>Bottom Layer:</strong> Other AIS Ships</div>
                 </div>
             </div>
             <p style="font-size: 11px; color: #888; margin: 5px 0;">
@@ -387,6 +388,7 @@
     import { createRotatingBoatIcon } from './boatIcon';
     import config from './pluginConfig';
     import { getCardinalMarkSVG } from './AtoN';
+    import { getSpecialMarkSVG } from './AtoN';
 
     /**
      * Constants declaration
@@ -446,6 +448,7 @@
     let lastTimelineFollowTime: number = 0; // Last time map view was updated for timeline changes
     let lastProjectionPosition: {lat: number, lon: number} | null = null; // Last projection position for comparison
     let vesselName = loadVesselName(); // Load from localStorage or default
+    let vesselCallSign = loadVesselCallSign(); // Load from localStorage or default
     let CurrentOverlay = 'Windy'; // Default overlay, can be changed later
     let lastDataUpdateTime: number = 0;
     let socket: any = null;
@@ -488,6 +491,7 @@
     // Store AIS ships data globally so all functions can access it
     let aisShips: { [mmsi: string]: any } = {};
     let emergencyDevices: { [mmsi: string]: any } = {}; // Store for emergency devices (SART, SAR aircraft)
+    let baseStations: { [mmsi: string]: any } = {}; // Store for AIS base stations
     // Boat icon size control
     let boatIconSize: number = 1.0; // Default size multiplier (0.5 to 2.0)
 
@@ -533,6 +537,7 @@
     let routeLayer: any = null; // Layer for displaying the route
     let atonLayer: any = null; // Layer for displaying AtoN markers
     let emergencyLayer: any = null; // Layer for displaying emergency devices (SART, SAR aircraft)
+    let baseStationLayer: any = null; // Layer for displaying AIS base stations
     let routeMarkers: any = null; // Layer for route waypoints
     let isRouteLoaded: boolean = false; // Flag to track if route is loaded
     let routeProgress: number = 0; // Current progress along route (0-1)
@@ -563,6 +568,7 @@
     let zIndexWaypoint: number = 800; // Waypoint markers
     let zIndexRoute: number = 600; // Route markers
     let zIndexAisShips: number = 400; // AIS ships markers
+    let zIndexBaseStations: number = 200; // AIS base stations
     let zIndexAtoN: number = 100; // AtoN markers
 
     let helpVisible = false;
@@ -588,6 +594,13 @@
         
         // Load track history on plugin start
         loadShortTrackHistory();
+        
+        // Save AtoN data before page unload
+        if (typeof window !== 'undefined') {
+            window.addEventListener('beforeunload', () => {
+                saveAtoNData(atonMarkers);
+            });
+        }
         
         // Force initial track display update (ignore throttling on startup)
         lastTrackDisplayUpdate = 0; // Reset to force update
@@ -620,9 +633,13 @@
 
         // Initialize layers with proper z-index ordering        
         aisShipsLayer = createLayerGroup(map, zIndexAisShips); // Bottom layer: Other AIS ships
+        baseStationLayer = createLayerGroup(map, zIndexBaseStations); // AIS base stations
         atonLayer = createLayerGroup(map, zIndexAtoN); // AtoN markers
         emergencyLayer = createLayerGroup(map, zIndexOwnShip + 100); // Emergency devices (SART, SAR) - high priority
         markerLayer = createLayerGroup(map, zIndexOwnShip); // Top layer: Your ship
+
+        // Restore AtoN markers from previous session (after atonLayer is created)
+        restoreAtoNMarkers();
 
         // Add zoom event listener to center on vessel after zoom changes
         map.on('zoomend', () => {
@@ -630,6 +647,9 @@
                 // User manually changed zoom - immediately center on vessel position
                 handleFollowShip(false, true); // Force immediate update
             }
+            
+            // Update AtoN icon sizes based on new zoom level
+            updateAtoNIconSizes();
         });
 
         // Start cleanup timer for old AIS ships (every 5 minutes)
@@ -637,6 +657,12 @@
         
         // Start cleanup timer for old emergency devices (every 10 minutes)
         setInterval(cleanupOldEmergencyDevices, 10 * 60 * 1000);
+        
+        // Start cleanup timer for old base stations (every 30 minutes)
+        setInterval(cleanupOldBaseStations, 30 * 60 * 1000);
+        
+        // Start cleanup timer for old AtoN markers (every 30 minutes)
+        setInterval(cleanupOldAtoNMarkers, 30 * 60 * 1000);
         
         // Start the no frame detection timer
         startNoFrameTimer();
@@ -650,7 +676,7 @@
         // Subscribe to Windy timeline changes
         const unsub = store.on('timestamp', (ts: number) => {
             // This code will be executed on every timeline change
-            console.debug('Windy timeline changed, new timestamp:', ts);
+            // console.debug('Windy timeline changed, new timestamp:', ts);  // Commented out to reduce console noise
             
             // Use the rounded timestamp consistently for all timeline-based operations
             const roundedTimestamp = getRoundedHourTimestamp(ts);
@@ -727,7 +753,7 @@
                 lastReconnectAttempt = Date.now();
                 createSocketConnection();
             } else if (timeSinceLastWake > 10000 && actuallyConnected) {
-                console.debug('Wake detected but socket is still connected, no reconnection needed');
+                // console.debug('Wake detected but socket is still connected, no reconnection needed');  // Commented out to reduce console noise
             }
             lastWakeTime = Date.now();
         }
@@ -1135,6 +1161,34 @@
     }
     
     /**
+     * Load vessel call sign from localStorage
+    */
+    function loadVesselCallSign(): string {
+        try {
+            const saved = localStorage.getItem('windy-nmea-vessel-callsign');
+            return saved || '';
+        } catch (error) {
+            console.warn('Failed to load vessel call sign from localStorage:', error);
+            return '';
+        }
+    }
+
+    /**
+     * Save vessel call sign to localStorage
+    */
+    function saveVesselCallSign(callSign: string): void {
+        try {
+            const currentStored = localStorage.getItem('windy-nmea-vessel-callsign');
+            if (currentStored !== callSign) {
+                localStorage.setItem('windy-nmea-vessel-callsign', callSign);
+                console.debug('Vessel call sign saved:', callSign);
+            }
+        } catch (error) {
+            console.warn('Failed to save vessel call sign to localStorage:', error);
+        }
+    }
+    
+    /**
      * Load vessel MMSI from localStorage
     */
     function loadVesselMMSI(): string {
@@ -1156,6 +1210,106 @@
             console.debug('Vessel MMSI saved:', mmsi);
         } catch (error) {
             console.warn('Failed to save vessel name to localStorage:', error);
+        }
+    }
+
+    /**
+     * Load AtoN data from localStorage
+     */
+    function loadAtoNData(): Record<string, any> {
+        try {
+            const saved = localStorage.getItem('windy-nmea-aton-data');
+            if (saved) {
+                const atonData = JSON.parse(saved);
+                console.debug('Loaded AtoN data from localStorage:', Object.keys(atonData).length, 'markers');
+                return atonData;
+            }
+        } catch (error) {
+            console.warn('Failed to load AtoN data from localStorage:', error);
+        }
+        return {};
+    }
+
+    /**
+     * Save AtoN data to localStorage
+     */
+    function saveAtoNData(atonData: Record<string, any>): void {
+        try {
+            // Only save the data portion, not the Leaflet markers
+            const dataToSave: Record<string, any> = {};
+            Object.keys(atonData).forEach(mmsi => {
+                if (atonData[mmsi] && atonData[mmsi].data) {
+                    dataToSave[mmsi] = atonData[mmsi].data;
+                }
+            });
+            
+            localStorage.setItem('windy-nmea-aton-data', JSON.stringify(dataToSave));
+            console.debug('AtoN data saved to localStorage:', Object.keys(dataToSave).length, 'markers');
+        } catch (error) {
+            console.warn('Failed to save AtoN data to localStorage:', error);
+        }
+    }
+
+    /**
+     * Restore AtoN markers from saved data
+     */
+    function restoreAtoNMarkers(): void {
+        if (!atonLayer) {
+            console.warn('Cannot restore AtoN markers: atonLayer not initialized');
+            return;
+        }
+        
+        const savedAtoNData = loadAtoNData();
+        let restoredCount = 0;
+        
+        Object.keys(savedAtoNData).forEach(mmsi => {
+            const atonData = savedAtoNData[mmsi];
+            if (atonData && atonData.lat !== undefined && atonData.lon !== undefined) {
+                try {
+                    // Calculate icon size based on current zoom level
+                    const currentZoom = map.getZoom();
+                    const iconSize = calculateAtoNIconSize(currentZoom);
+                    
+                    const atonIcon = createAtoNIcon(atonData.atonType, iconSize);
+                    const marker = L.marker([atonData.lat, atonData.lon], { 
+                        icon: atonIcon, 
+                        zIndexOffset: zIndexWaypoint 
+                    }).addTo(atonLayer);
+                    
+                    const tooltipContent = `
+                        <strong>AtoN</strong><br>
+                        Name: ${atonData.name}<br>
+                        Type: ${atonData.atonTypeName}<br>
+                        Lat: ${displayLatitude(atonData.lat)}<br>
+                        Lon: ${displayLongitude(atonData.lon)}
+                    `;
+                    
+                    marker.bindTooltip(tooltipContent, { 
+                        permanent: false, 
+                        direction: 'top', 
+                        className: 'aton-tooltip' 
+                    });
+                    
+                    // Store AtoN marker data for zoom-based resizing
+                    atonMarkers[mmsi] = {
+                        marker: marker,
+                        data: atonData
+                    };
+                    
+                    restoredCount++;
+                    console.debug('Restored AtoN marker:', atonData.name, 'at', atonData.lat, atonData.lon);
+                } catch (error) {
+                    console.warn('Failed to restore AtoN marker for MMSI', mmsi, ':', error);
+                }
+            } else {
+                console.warn('Invalid AtoN data for MMSI', mmsi, '- missing coordinates:', atonData);
+            }
+        });
+        
+        if (restoredCount > 0) {
+            console.log(`Successfully restored ${restoredCount} AtoN markers from previous session`);
+        } else if (Object.keys(savedAtoNData).length > 0) {
+            console.warn(`Failed to restore any AtoN markers from ${Object.keys(savedAtoNData).length} saved entries`);
         }
     }
 
@@ -2099,7 +2253,7 @@
             }
         }
         if (distance > maxJump) {
-            console.warn(`Position jump detected: ${distance.toFixed(3)}km > ${maxJump.toFixed(3)}km limit. SOG: ${sog || 'unknown'} knots. Rejecting position.`);
+            //console.warn(`Position jump detected: ${distance.toFixed(3)}km > ${maxJump.toFixed(3)}km limit. SOG: ${sog || 'unknown'} knots. Rejecting position.`);
             return false;
         }
         return true;
@@ -2451,16 +2605,191 @@
     }
 
     /**
+     * Determine vessel size category based on length
+     * @param {number} length - Vessel length in meters
+     * @returns {string} Size category
+     */
+    function getVesselSizeCategory(length: number): string {
+        if (!length || length <= 0) return 'unknown';
+        if (length < 50) return 'small';      // <50m
+        if (length < 100) return 'medium';    // 50-100m
+        if (length < 200) return 'large';     // 100-200m
+        if (length < 300) return 'xlarge';    // 200-300m
+        return 'xxlarge';                     // 300m+
+    }
+
+    /**
+     * Calculate proportional icon size based on vessel length
+     * @param {number} length - Vessel length in meters
+     * @param {number} baseSize - Base icon size
+     * @returns {number} Calculated icon size
+     */
+    function getProportionalIconSize(length: number, baseSize: number = 24): number {
+        if (!length || length <= 0) return baseSize;
+        
+        // Size mapping similar to Marine Traffic
+        if (length < 50) return Math.max(16, baseSize * 0.7);      // Small vessels
+        if (length < 100) return baseSize;                         // Medium vessels (base size)
+        if (length < 200) return Math.max(32, baseSize * 1.3);     // Large vessels
+        if (length < 300) return Math.max(40, baseSize * 1.6);     // XLarge vessels
+        return Math.max(48, baseSize * 2);                         // XXLarge vessels (300m+)
+    }
+
+    /**
+     * Create Marine Traffic-style vessel icon based on length and type
+     * @param {number} heading - Vessel heading in degrees
+     * @param {string} color - Icon color
+     * @param {number} length - Vessel length in meters
+     * @param {number} beam - Vessel beam in meters
+     * @param {boolean} classB - Whether this is a Class B vessel
+     * @param {number} baseSize - Base icon size
+     * @returns {any} Leaflet icon
+     */
+    function createMarineTrafficIcon(heading: number, color: string, length: number = 0, beam: number = 0, classB: boolean = false, baseSize: number = 24): any {
+        const validHeading = Number.isFinite(heading) ? heading : 0;
+        const category = getVesselSizeCategory(length);
+        const iconSize = getProportionalIconSize(length, baseSize);
+        
+        // Calculate vessel dimensions for display (proportional to length)
+        const vesselLength = Math.max(iconSize * 0.8, 12);
+        const vesselWidth = Math.max(vesselLength * 0.25, 4);
+        
+        const classLabel = classB ? 'B' : 'A';
+        const labelSize = Math.max(8, iconSize * 0.4);
+        
+        const iconHtml = `
+            <div class="marine-traffic-icon" style="
+                width: ${iconSize}px; 
+                height: ${iconSize}px; 
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            ">
+                <svg width="${iconSize}" height="${iconSize}" viewBox="0 0 ${iconSize} ${iconSize}" style="
+                    transform: rotate(${validHeading}deg);
+                    transform-origin: center center;
+                ">
+                    <!-- Vessel hull outline -->
+                    <path d="M${iconSize/2},2 
+                             L${iconSize/2 + vesselWidth/2},${iconSize-4}
+                             L${iconSize/2 - vesselWidth/2},${iconSize-4}
+                             Z" 
+                          fill="${color}" 
+                          stroke="#000" 
+                          stroke-width="0.5"/>
+                    
+                    <!-- Vessel class label -->
+                    <text x="${iconSize/2}" y="${iconSize/2 + labelSize/3}" 
+                          text-anchor="middle" 
+                          font-size="${labelSize}" 
+                          fill="#fff" 
+                          stroke="#000"
+                          stroke-width="0.3"
+                          font-weight="bold" 
+                          font-family="Arial, sans-serif">${classLabel}</text>
+                </svg>
+            </div>
+        `;
+        
+        return L.divIcon({
+            html: iconHtml,
+            className: 'marine-traffic-marker',
+            iconSize: [iconSize, iconSize],
+            iconAnchor: [iconSize/2, iconSize/2]
+        });
+    }
+
+    /**
+     * Creates a simple "A" icon for Class A vessels
+     * @param {number} heading - The heading of the ship
+     * @param {string} color - The base color for the ship
+     * @param {number} shipType - The type of the ship (not used in this simple version)
+     * @param {number} size - The size of the icon
+     * @returns {any} The created ship icon
+     */
+    function createDetailedShipIcon(heading: number, color: string, shipType: number, size: number = 24): any {
+        // Ensure heading is valid (0-359 degrees)
+        const validHeading = isNaN(heading) || heading === 511 ? 0 : ((heading % 360) + 360) % 360;
+        
+        const iconHtml = `
+            <div class="ais-ship-icon-simple" style="
+                width: ${size}px; 
+                height: ${size}px; 
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            ">
+                <svg width="${size}" height="${size}" viewBox="0 0 24 24" style="
+                    transform: rotate(${validHeading}deg);
+                    transform-origin: center center;
+                ">
+                    <!-- Simple "A" letter for Class A -->
+                    <text x="12" y="16" 
+                          text-anchor="middle" 
+                          font-size="16" 
+                          fill="${color}" 
+                          stroke="#000"
+                          stroke-width="0.5"
+                          font-weight="normal" 
+                          font-family="Arial, sans-serif">A</text>
+                </svg>
+            </div>
+        `;
+        
+        return L.divIcon({
+            html: iconHtml,
+            className: 'ais-ship-marker-simple',
+            iconSize: [size, size],
+            iconAnchor: [size/2, size/2]
+        });
+    }
+
+    /**
      * Creates an AIS ship icon
      * @param {number} heading - The heading of the ship
      * @param {number} shipType - The type of the ship
+     * @param {boolean} classB - Whether this is a Class B transponder (default: false for Class A)
+     * @param {number} length - Vessel length in meters (optional)
+     * @param {number} beam - Vessel beam in meters (optional)
      * @returns {any} The created ship icon
     */
-    function createAISShipIcon(heading: number, shipType: number = 0): any {
+    function createAISShipIcon(heading: number, shipType: number = 0, classB: boolean = false, length: number = 0, beam: number = 0): any {
         let color = '#ff6600'; // Default orange
-        let size = 16;
+        let size = 28;
         
-        // Color based on ship type (AIS ship and cargo type)
+        // If vessel dimensions are available, use Marine Traffic style
+        if (length > 0) {
+            // Determine color by ship type first
+            if (shipType >= 30 && shipType <= 39) color = '#FF00ff'; // Fishing vessels - purple
+            else if (shipType >= 40 && shipType <= 49) color = '#ff6600'; // HSC - orange  
+            else if (shipType >= 60 && shipType <= 69) color = '#00ff00'; // Passenger ships - green
+            else if (shipType >= 70 && shipType <= 79) color = '#0066ff'; // Cargo ships - blue
+            else if (shipType >= 80 && shipType <= 89) color = '#ff0000'; // Tankers - red
+            else if (classB) color = '#ff69b4'; // Hot pink for Class B ships
+            else color = '#ff6600'; // Default orange for Class A
+            
+            return createMarineTrafficIcon(heading, color, length, beam, classB, size);
+        }
+        
+        // Class B ships get pink/magenta color as base, but can be overridden by specific ship types
+        if (classB) {
+            color = '#ff69b4'; // Hot pink for Class B ships
+        }
+        
+        // Special handling for sailing boats
+        if (shipType === 36) { // Sailing vessel
+            //console.debug(`Creating sailing vessel icon for MMSI with ship type ${shipType} (Class B: ${classB})`);
+            return createSailingBoatIcon(heading, classB, size * 1.3);
+        }
+        
+        // For pleasure craft (type 37), we'll use a slightly different sailing icon
+        // as many pleasure craft are sailing boats
+        if (shipType === 37) { // Pleasure craft (often sailing boats)
+            //console.debug(`Creating pleasure craft sailing icon for MMSI with ship type ${shipType} (Class B: ${classB})`);
+            return createSailingBoatIcon(heading, classB, size * 1.3, true); // true flag for pleasure craft
+        }
+        
+        // Color based on ship type (AIS ship and cargo type) - these override the Class B color
         if (shipType >= 30 && shipType <= 39) color = '#FF00ff'; // Fishing vessels - purple
         if (shipType >= 40 && shipType <= 49) color = '#ffff00'; // High speed craft - yellow
         if (shipType >= 50 && shipType <= 59) color = '#C0C0C0'; // Special Craft - Gray
@@ -2468,6 +2797,12 @@
         if (shipType >= 70 && shipType <= 79) color = '#00ff00'; // Cargo ships - green
         if (shipType >= 80 && shipType <= 89) color = '#ff0000'; // Tanker ships - red
         
+        // Use detailed icons for Class A vessels (unless it's a sailing boat which is handled above)
+        if (!classB) {
+            return createDetailedShipIcon(heading, color, shipType, size);
+        }
+        
+        // For Class B vessels (non-sailing), use the simpler original icon
         // Ensure heading is valid (0-359 degrees)
         const validHeading = isNaN(heading) || heading === 511 ? 0 : ((heading % 360) + 360) % 360;
         
@@ -2485,6 +2820,7 @@
                 ">
                     <path d="M12 2 L8 6 L6 12 L8 18 L16 18 L18 12 L16 6 Z" fill="${color}" stroke="#000" stroke-width="0.8"/>
                     <circle cx="12" cy="12" r="1" fill="#fff"/>
+                    <text x="12" y="20" text-anchor="middle" font-size="6" fill="#000" font-weight="bold">B</text>
                 </svg>
             </div>
         `;
@@ -2498,15 +2834,86 @@
     }
 
     /**
+     * Creates a special sailing boat icon for better identification
+     * @param {number} heading - The heading of the sailing boat
+     * @param {boolean} classB - Whether this is a Class B transponder
+     * @param {number} size - The size of the icon
+     * @param {boolean} pleasureCraft - Whether this is a pleasure craft (type 37) vs sailing vessel (type 36)
+     * @returns {any} The created sailing boat icon
+     */
+    function createSailingBoatIcon(heading: number, classB: boolean = false, size: number = 16, pleasureCraft: boolean = false): any {
+        // Sailing boats get a distinctive color scheme
+        const hullColor = classB ? '#ff69b4' : (pleasureCraft ? '#9966cc' : '#0066cc'); // Pink for Class B, purple for pleasure craft, blue for sailing vessels
+        const sailColor = '#ffffff'; // White sails
+        
+        // Ensure heading is valid (0-359 degrees)
+        const validHeading = isNaN(heading) || heading === 511 ? 0 : ((heading % 360) + 360) % 360;
+        
+        const iconHtml = `
+            <div class="sailing-boat-icon" style="
+                width: ${size}px; 
+                height: ${size}px; 
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            ">
+                <svg width="${size}" height="${size}" viewBox="0 0 24 24" style="
+                    transform: rotate(${validHeading}deg);
+                    transform-origin: center center;
+                ">
+                    <!-- Main sail (larger and more prominent) -->
+                    <path d="M12 2 L19 12 L12 12 Z" fill="${sailColor}" stroke="#333" stroke-width="0.6"/>
+                    <!-- Jib sail (forward sail) -->
+                    <path d="M12 3 L5 10 L12 10 Z" fill="${sailColor}" stroke="#333" stroke-width="0.6"/>
+                    <!-- Sail details/wind lines -->
+                    <line x1="13" y1="5" x2="17" y2="9" stroke="#ddd" stroke-width="0.3"/>
+                    <line x1="14" y1="7" x2="17" y2="10" stroke="#ddd" stroke-width="0.3"/>
+                    <!-- Mast (more prominent) -->
+                    <line x1="12" y1="2" x2="12" y2="20" stroke="#654321" stroke-width="1.2"/>
+                    <!-- Boom (horizontal beam) -->
+                    <line x1="10" y1="12" x2="19" y2="12" stroke="#654321" stroke-width="0.8"/>
+                    <!-- Hull (sailing boat shape) -->
+                    <path d="M7 17 L17 17 L16 21 L8 21 Z" fill="${hullColor}" stroke="#000" stroke-width="0.8"/>
+                    <!-- Keel indicator -->
+                    <line x1="12" y1="21" x2="12" y2="22" stroke="${hullColor}" stroke-width="1"/>
+                    <!-- Center dot for position -->
+                    <circle cx="12" cy="14" r="0.8" fill="#fff" stroke="#000" stroke-width="0.3"/>
+                    ${classB ? '<text x="12" y="23.5" text-anchor="middle" font-size="4.5" fill="#000" font-weight="bold">S</text>' : 
+                      (pleasureCraft ? '<text x="12" y="23.5" text-anchor="middle" font-size="3.5" fill="#000" font-weight="bold">PC</text>' : 
+                       '<text x="12" y="23.5" text-anchor="middle" font-size="3" fill="#000" font-weight="bold">SAIL</text>')}
+                </svg>
+            </div>
+        `;
+        
+        return L.divIcon({
+            html: iconHtml,
+            className: 'sailing-boat-marker',
+            iconSize: [size, size],
+            iconAnchor: [size/2, size/2]
+        });
+    }
+
+    /**
      * Get the tooltip content for an AIS ship
      * @param data
      * @param mmsi
      */
     function getAISTooltipContent(data: any, mmsi: string): string {
+        const shipKey = mmsi.toString();
+        const isClassB = data.classB || aisShips[shipKey]?.classB || false;
+        const classInfo = isClassB ? ' (Class B)' : ' (Class A)';
+        
+        // Build call sign line if available
+        const callSignLine = data.callSign ? `Call Sign: ${data.callSign}<br>` : '';
+        
+        // Build dimensions line if available
+        const dimensionsLine = (data.length > 0 || data.beam > 0) ? 
+            `Dimensions: ${data.length || 'N/A'}m x ${data.beam || 'N/A'}m (L x B)<br>` : '';
+        
         return `
             <strong>Name: ${data.name || 'Unknown'}</strong><br>
-            MMSI: ${mmsi}<br>
-            Course: ${data.cog?.toFixed(1) || 'N/A'}°<br>
+            ${callSignLine}MMSI: ${mmsi}${classInfo}<br>
+            ${dimensionsLine}Course: ${data.cog?.toFixed(1) || 'N/A'}°<br>
             Speed: ${data.sog?.toFixed(1) || 'N/A'} knots<br>
             Heading: ${data.heading !== undefined && data.heading !== 511 ? data.heading + '°' : 'N/A'}<br>
             Type: ${getShipTypeName(data.shipType || 0)}<br>
@@ -2539,13 +2946,19 @@
         // Create new marker with corrected heading
         // Get ship type from existing data if available (for ships that already sent static data)
         const consolidatedShipType = data.shipType || aisShips[shipKey]?.shipType || 0;
-        const icon = createAISShipIcon(displayHeading, consolidatedShipType);
+        const isClassB = data.classB || aisShips[shipKey]?.classB || false;
+        
+        // Get vessel dimensions from data or existing stored data
+        const vesselLength = data.length || aisShips[shipKey]?.data?.length || 0;
+        const vesselBeam = data.beam || aisShips[shipKey]?.data?.beam || 0;
+        
+        const icon = createAISShipIcon(displayHeading, consolidatedShipType, isClassB, vesselLength, vesselBeam);
         const marker = L.marker(position, { 
             icon: icon,
             zIndexOffset: zIndexAisShips   // Lower z-index for other ships
         }).addTo(aisShipsLayer);
         
-        // console.debug(`Adding/updating AIS ship: ${mmsi} at ${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}`);
+        //console.debug(`Adding/updating AIS ship: ${mmsi} at ${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}`);
         
         // Create tooltip content
         const tooltipContent = getAISTooltipContent(data, mmsi);
@@ -2559,16 +2972,22 @@
         // Store ship data with consolidated structure
         const existingData = aisShips[shipKey]?.data || {};
         const name = data.name || aisShips[shipKey]?.name || 'Unknown';
-        const shipType = data.shipType || aisShips[shipKey]?.shipType || 0;
+        const shipType = data.shipType !== undefined ? data.shipType : (aisShips[shipKey]?.shipType || 0);
+        const classB = data.classB || aisShips[shipKey]?.classB || false;
         
         aisShips[shipKey] = {
             ...aisShips[shipKey],
             marker: marker,
-            data: { ...existingData, ...data },
+            data: { ...existingData, ...data, shipType: shipType },
             name: name,
             shipType: shipType,
+            classB: classB,
             lastUpdate: Date.now()
         };
+        
+        // Update tooltip with latest consolidated data including ship type
+        const updatedTooltipContent = getAISTooltipContent(aisShips[shipKey].data, mmsi);
+        marker.setTooltipContent(updatedTooltipContent);
         
         // Update tooltip with latest name if it changed
         if (aisShips[shipKey].name !== 'Unknown') {
@@ -2584,16 +3003,27 @@
     */
     function getShipTypeName(shipType: number): string {
         if (shipType >= 20 && shipType <= 29) return 'Wing in Ground';
-        if (shipType >= 30 && shipType <= 39) return 'Fishing';
+        if (shipType === 30) return 'Fishing';
         if (shipType === 31) return 'Towing';
         if (shipType === 32) return 'Towing > 200m';
-        if (shipType === 33) return 'Dredging';
+        if (shipType === 33) return 'Dredger';
         if (shipType === 34) return 'Offshore Support';
         if (shipType === 35) return 'Military';
         if (shipType === 36) return 'Sailing';
         if (shipType === 37) return 'Pleasure Craft';
-        if (shipType >= 40 && shipType <= 49) return 'High Speed';
-        if (shipType >= 50 && shipType <= 59) return 'Special Craft';
+        if (shipType === 38) return 'Reserved';
+        if (shipType === 39) return 'Reserved';
+        if (shipType >= 40 && shipType <= 49) return 'High Speed Craft';
+        if (shipType === 50) return 'Pilot Vessel';
+        if (shipType === 51) return 'Search and Rescue';
+        if (shipType === 52) return 'Tug';
+        if (shipType === 53) return 'Port Tender';
+        if (shipType === 54) return 'Anti-pollution';
+        if (shipType === 55) return 'Law Enforcement';
+        if (shipType === 56) return 'Medical Transport';
+        if (shipType === 57) return 'Salvage';
+        if (shipType === 58) return 'Diving Support';
+        if (shipType === 59) return 'Military Ops';
         if (shipType >= 60 && shipType <= 69) return 'Passenger';
         if (shipType >= 70 && shipType <= 79) return 'Cargo';
         if (shipType >= 80 && shipType <= 89) return 'Tanker';
@@ -2678,6 +3108,111 @@
     }
 
     /**
+     * Calculate AtoN icon size based on map zoom level
+     * @param zoom Current map zoom level (typically 3-16)
+     * @returns Icon size in pixels
+     */
+    function calculateAtoNIconSize(zoom: number): number {
+        // Scale from 12px at zoom 3 to 64px at zoom 16
+        // Linear interpolation: size = minSize + (zoom - minZoom) * (maxSize - minSize) / (maxZoom - minZoom)
+        const minZoom = 3;
+        const maxZoom = 16;
+        const minSize = 12;
+        const maxSize = 64;
+        
+        // Clamp zoom level to valid range
+        const clampedZoom = Math.max(minZoom, Math.min(maxZoom, zoom));
+        
+        // Calculate size with linear interpolation
+        const size = minSize + (clampedZoom - minZoom) * (maxSize - minSize) / (maxZoom - minZoom);
+        
+        return Math.round(size);
+    }
+
+    /**
+     * Update all AtoN markers with new icon sizes based on current zoom level
+     */
+    function updateAtoNIconSizes() {
+        if (!map || !atonLayer) return;
+        
+        const currentZoom = map.getZoom();
+        const newSize = calculateAtoNIconSize(currentZoom);
+        
+        //console.debug(`Updating AtoN icon sizes for zoom ${currentZoom} -> size ${newSize}px`);
+        
+        // We'll store AtoN data and recreate markers with new sizes
+        // This is simpler than trying to update existing markers
+        Object.keys(atonMarkers || {}).forEach(mmsi => {
+            const atonData = atonMarkers[mmsi];
+            if (atonData && atonData.marker && atonData.data) {
+                // Remove old marker
+                atonLayer.removeLayer(atonData.marker);
+                
+                // Create new marker with updated size
+                const newIcon = createAtoNIcon(atonData.data.atonType, newSize);
+                const newMarker = L.marker([atonData.data.lat, atonData.data.lon], { 
+                    icon: newIcon, 
+                    zIndexOffset: zIndexWaypoint 
+                }).addTo(atonLayer);
+                
+                // Restore tooltip
+                const tooltipContent = `
+                    <strong>AtoN</strong><br>
+                    Name: ${atonData.data.name}<br>
+                    Type: ${atonData.data.atonTypeName}<br>
+                    Lat: ${displayLatitude(atonData.data.lat)}<br>
+                    Lon: ${displayLongitude(atonData.data.lon)}
+                `;
+                newMarker.bindTooltip(tooltipContent, { 
+                    permanent: false, 
+                    direction: 'top', 
+                    className: 'aton-tooltip' 
+                });
+                
+                // Update stored marker reference
+                atonData.marker = newMarker;
+            }
+        });
+    }
+
+    // Storage for AtoN markers to enable zoom-based resizing
+    let atonMarkers: Record<string, any> = {};
+
+    /**
+     * Create AIS Base Station icon
+     * @param size Icon size multiplier
+     * @returns Leaflet DivIcon for AIS base station
+     */
+    function createBaseStationIcon(size: number = 24): any {
+        const iconHtml = `
+            <div style="
+                width: ${size}px;
+                height: ${size}px;
+                <-- background: radial-gradient(circle, #ff6600 30%, #ffffff 30%, #ffffff 40%, #ff6600 40%); -->
+                border: 2px solid #cc5500;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: ${size * 0.5}px;
+                font-weight: bold;
+                color: #ffffff;
+                text-shadow: 1px 1px 1px rgba(0,0,0,0.8);
+                box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            ">
+                📡
+            </div>
+        `;
+        
+        return L.divIcon({
+            html: iconHtml,
+            className: 'base-station-marker',
+            iconSize: [size, size],
+            iconAnchor: [size/2, size/2]
+        });
+    }
+
+    /**
      * Create AtoN (Aid to Navigation) icon based on type following IALA maritime standards
      * @param atonType AtoN type code (0-31)
      * @param size Icon size
@@ -2717,14 +3252,22 @@
                 break;
                 
             case 5: // Fixed Light, without sectors
-                bgColor = '#FFFF00';
-                symbol = '💡';
-                break;
+                // Use SVG from AtoN module
+                return L.divIcon({
+                    html: getSpecialMarkSVG('FixedLight', size*2),
+                    className: 'aton-marker',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
                 
             case 6: // Fixed Light, with sectors
-                bgColor = '#FFFF00';
-                symbol = '🔆';
-                break;
+                // Use SVG from AtoN module
+                return L.divIcon({
+                    html: getSpecialMarkSVG('FixedLight', size*2),
+                    className: 'aton-marker',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
                 
             case 7: // Fixed Leading Light Front
                 bgColor = '#FFFF00';
@@ -2741,7 +3284,7 @@
                 // Use SVG from AtoN module
                 return L.divIcon({
                     html: getCardinalMarkSVG('North', size),
-                    className: 'aton-marker cardinal-north',
+                    className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size/2]
                 });
@@ -2749,7 +3292,7 @@
                 // Use SVG from AtoN module
                 return L.divIcon({
                     html: getCardinalMarkSVG('East', size),
-                    className: 'aton-marker cardinal-east',
+                    className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size/2]
                 });
@@ -2757,7 +3300,7 @@
                 // Use SVG from AtoN module
                 return L.divIcon({
                     html: getCardinalMarkSVG('South', size),
-                    className: 'aton-marker cardinal-south',
+                    className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size/2]
                 });
@@ -2765,28 +3308,35 @@
                 // Use SVG from AtoN module
                 return L.divIcon({
                     html: getCardinalMarkSVG('West', size),
-                    className: 'aton-marker cardinal-west',
+                    className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size/2]
                 });
                 
             // Port/Starboard Beacons (Fixed)
             case 13: // Port hand
-                bgColor = '#FF0000';
-                symbol = '●';
-                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 8px;">■</div>';
-                break;
+                // Use SVG from AtoN module
+                return L.divIcon({
+                    html: getSpecialMarkSVG('Port', size),
+                    className: 'aton-marker',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
             case 14: // Starboard hand
-                bgColor = '#00FF00';
-                symbol = '●';
-                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #00FF00; font-size: 8px;">▲</div>';
-                break;
+                // Use SVG from AtoN module
+                return L.divIcon({
+                    html: getSpecialMarkSVG('Starboard', size),
+                    className: 'aton-marker',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
                 
             case 15: // Preferred Channel port hand
                 bgColor = '#FF0000';
                 symbol = '●';
                 topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #00FF00; font-size: 6px;">▲</div>';
                 break;
+
             case 16: // Preferred Channel starboard hand
                 bgColor = '#00FF00';
                 symbol = '●';
@@ -2794,66 +3344,87 @@
                 break;
                 
             case 17: // Isolated danger
-                bgColor = '#FF0000';
-                symbol = '⚫';
-                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 6px;">●●</div>';
-                break;
+                // Use SVG from AtoN module
+                return L.divIcon({
+                    html: getSpecialMarkSVG('IsolatedDanger', size),
+                    className: 'aton-marker',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
+
             case 18: // Safe water
-                bgColor = '#FF0000';
-                symbol = '⚪';
-                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 8px;">●</div>';
-                break;
+                // Use SVG from AtoN module
+                return L.divIcon({
+                    html: getSpecialMarkSVG('SafeWater', size),
+                    className: 'aton-marker',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
+
             case 19: // Special mark
-                bgColor = '#FFFF00';
-                symbol = '◆';
-                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #FFFF00; font-size: 8px;">✖</div>';
-                break;
+                // Use SVG from AtoN module
+                return L.divIcon({
+                    html: getSpecialMarkSVG('Special', size),
+                    className: 'aton-marker',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
                 
             // Floating Cardinal Marks
             case 20: // Cardinal Mark N
                 // Use SVG from AtoN module (floating)
                 return L.divIcon({
                     html: getCardinalMarkSVG('North', size),
-                    className: 'aton-marker cardinal-north-float',
+                    className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size/2]
                 });
+
             case 21: // Cardinal Mark E
                 // Use SVG from AtoN module (floating)
                 return L.divIcon({
                     html: getCardinalMarkSVG('East', size),
-                    className: 'aton-marker cardinal-east-float',
+                    className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size/2]
                 });
+
             case 22: // Cardinal Mark S
                 // Use SVG from AtoN module (floating)
                 return L.divIcon({
                     html: getCardinalMarkSVG('South', size),
-                    className: 'aton-marker cardinal-south-float',
+                    className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size/2]
                 });
+
             case 23: // Cardinal Mark W
                 // Use SVG from AtoN module (floating)
                 return L.divIcon({
                     html: getCardinalMarkSVG('West', size),
-                    className: 'aton-marker cardinal-west-float',
+                    className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size/2]
                 });
                 
             // Floating Port/Starboard Marks
             case 24: // Port hand Mark
-                bgColor = '#FF0000';
-                symbol = '🔴';
-                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 8px;">■</div>';
-                break;
+                // Use SVG from AtoN module
+                return L.divIcon({
+                    html: getSpecialMarkSVG('Port', size),
+                    className: 'aton-marker',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
+
             case 25: // Starboard hand Mark
-                bgColor = '#00FF00';
-                symbol = '🟢';
-                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #00FF00; font-size: 8px;">▲</div>';
-                break;
+                // Use SVG from AtoN module
+                return L.divIcon({
+                    html: getSpecialMarkSVG('Starboard', size),
+                    className: 'aton-marker',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
                 
             case 26: // Preferred Channel Port hand
                 bgColor = '#FF0000';
@@ -2867,30 +3438,48 @@
                 break;
                 
             case 28: // Isolated danger
-                bgColor = '#FF0000';
-                symbol = '⚫';
-                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 6px;">●●</div>';
-                break;
+                // Use SVG from AtoN module
+                return L.divIcon({
+                    html: getSpecialMarkSVG('IsolatedDanger', size),
+                    className: 'aton-marker',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
+
             case 29: // Safe Water
-                bgColor = '#FF0000';
-                symbol = '⚪';
-                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #FF0000; font-size: 8px;">●</div>';
-                break;
+                // Use SVG from AtoN module
+                return L.divIcon({
+                    html: getSpecialMarkSVG('SafeWater', size),
+                    className: 'aton-marker',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
+
             case 30: // Special Mark
-                bgColor = '#FFFF00';
-                symbol = '🟡';
-                topMark = '<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); color: #FFFF00; font-size: 8px;">✖</div>';
-                break;
+                // Use SVG from AtoN module
+                return L.divIcon({
+                    html: getSpecialMarkSVG('Special', size),
+                    className: 'aton-marker',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
+
             case 31: // Light Vessel/LANBY/Rigs
-                bgColor = '#FF6600';
-                symbol = '🚢';
-                break;
+                // Use SVG from AtoN module
+                return L.divIcon({
+                    html: getSpecialMarkSVG('LightVessel', size),
+                    className: 'aton-marker',
+                    iconSize: [size, size],
+                    iconAnchor: [size/2, size/2]
+                });
                 
             default:
                 bgColor = '#808080';
                 symbol = '⛯';
         }
-        
+
+        size = size * 0.5; // Scale down for better appearance
+
         iconHtml = `
             <div style="
                 width: ${size}px; 
@@ -3035,6 +3624,58 @@
     }
 
     /**
+     * Clean up old base stations (older than 24 hours)
+     */
+    function cleanupOldBaseStations() {
+        const maxAge = 24 * 60 * 60 * 1000; // 24 hours for base stations (they're usually permanent)
+        
+        Object.keys(baseStations).forEach(mmsi => {
+            const station = baseStations[mmsi];
+            const age = Date.now() - station.lastUpdate;
+            
+            if (age > maxAge) {
+                // Remove marker from map
+                if (station.marker && baseStationLayer) {
+                    baseStationLayer.removeLayer(station.marker);
+                }
+                delete baseStations[mmsi];
+                console.log(`Cleaned up old base station: MMSI ${mmsi}`);
+            }
+        });
+    }
+
+    /**
+     * Clean up old AtoN markers (older than 24 hours)
+     */
+    function cleanupOldAtoNMarkers() {
+        const maxAge = 24 * 60 * 60 * 1000; // 24 hours for AtoN (they're usually permanent)
+        let cleanedCount = 0;
+        
+        Object.keys(atonMarkers).forEach(mmsi => {
+            const aton = atonMarkers[mmsi];
+            if (aton.data && aton.data.lastUpdate) {
+                const age = Date.now() - aton.data.lastUpdate;
+                
+                if (age > maxAge) {
+                    // Remove marker from map
+                    if (aton.marker && atonLayer) {
+                        atonLayer.removeLayer(aton.marker);
+                    }
+                    delete atonMarkers[mmsi];
+                    cleanedCount++;
+                    console.log(`Cleaned up old AtoN marker: MMSI ${mmsi}`);
+                }
+            }
+        });
+        
+        // Save updated AtoN data after cleanup
+        if (cleanedCount > 0) {
+            saveAtoNData(atonMarkers);
+            console.log(`Cleaned up ${cleanedCount} old AtoN markers and saved data`);
+        }
+    }
+
+    /**
      * Decodes AIS message payload and updates vessel data
      * @param aisPayload - The AIS payload string
      * @param isOwnVesselData - Flag indicating if this is our own vessel data
@@ -3088,6 +3729,7 @@
                     data: {},
                     name: 'Unknown',
                     shipType: 0,
+                    classB: false,  // Explicitly mark as Class A
                     lastUpdate: Date.now()
                 };
             }
@@ -3102,18 +3744,18 @@
                     }
                     // Log for debugging if needed
                     if (mmsi !== myMMSI) {
-                        console.debug(`Warning: VDO message with different MMSI ${mmsi} vs known ${myMMSI}`);
+                        //console.debug(`Warning: VDO message with different MMSI ${mmsi} vs known ${myMMSI}`);
                     }
                     
                     // First check if coordinates are valid
                     if (!validateCoordinates(lat, lon)) {
-                        console.warn(`AIS invalid coordinates for own vessel MMSI ${mmsi} - position rejected`);
+                        //console.warn(`AIS invalid coordinates for own vessel MMSI ${mmsi} - position rejected`);
                         return; // Reject this AIS position update
                     }
                     
                     // Then check position jump with speed
                     if (!validatePositionJump(lat, lon, sog)) {
-                        console.warn(`AIS position jump detected for own vessel MMSI ${mmsi} - position rejected`);
+                        //console.warn(`AIS position jump detected for own vessel MMSI ${mmsi} - position rejected`);
                         return; // Reject this AIS position update
                     }
                     
@@ -3144,10 +3786,79 @@
                 } else {
                     // External vessel - use corrected heading
                     const displayHeading = heading !== 511 ? heading : cog;
-                    updateAISShip(mmsi, { lat, lon, cog, sog, heading: displayHeading });
+                    updateAISShip(mmsi, { lat, lon, cog, sog, heading: displayHeading, classB: false });
                 }
             }
-        } 
+        }
+
+        /* AIS Base Station Report
+            * https://www.navcen.uscg.gov/ais-base-station-report-message-4
+        */
+        if (msgType === 4) {
+            // Base Station Report
+            // According to ITU-R M.1371-5, for message type 4:
+            // Longitude: bits 79-106 (28 bits)
+            // Latitude: bits 107-133 (27 bits)
+            const lonRaw = parseInt(bitstring.slice(79, 107), 2);  // 28 bits for longitude
+            const latRaw = parseInt(bitstring.slice(107, 134), 2); // 27 bits for latitude
+            
+            // Two's complement correction for 28 bits (longitude)
+            let lon = (lonRaw & 0x8000000) ? (lonRaw - 0x10000000) : lonRaw;
+            // Two's complement correction for 27 bits (latitude)  
+            let lat = (latRaw & 0x4000000) ? (latRaw - 0x8000000) : latRaw;
+
+            // decimal degrees conversion (in units of 1/10000 minutes)
+            lat = lat / 600000.0;
+            lon = lon / 600000.0;
+            
+            if (lat !== 91 && lon !== 181) { // Valid coordinates
+                // console.debug(`AIS Base Station MMSI ${mmsi} at ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+                
+                // Create or update base station marker
+                if (!baseStations[mmsi]) {
+                    baseStations[mmsi] = {
+                        marker: null,
+                        data: {},
+                        lastUpdate: Date.now()
+                    };
+                }
+
+                baseStations[mmsi].data = {
+                    mmsi: mmsi,
+                    lat: lat,
+                    lon: lon
+                };
+                baseStations[mmsi].lastUpdate = Date.now();
+
+                if (baseStationLayer) {
+                    // Remove existing marker if it exists
+                    if (baseStations[mmsi].marker) {
+                        baseStationLayer.removeLayer(baseStations[mmsi].marker);
+                    }
+
+                    const baseStationIcon = createBaseStationIcon(32);
+                    const marker = L.marker([lat, lon], { 
+                        icon: baseStationIcon, 
+                        zIndexOffset: zIndexBaseStations 
+                    }).addTo(baseStationLayer);
+
+                    const tooltipContent = `
+                        <strong style="color: #ff6600;">📡 AIS BASE STATION</strong><br>
+                        <strong>MMSI:</strong> ${mmsi}<br>
+                        <strong>Position:</strong> ${lat.toFixed(5)}, ${lon.toFixed(5)}<br>
+                        <strong>Last Update:</strong> ${new Date().toLocaleTimeString()}
+                    `;
+
+                    marker.bindTooltip(tooltipContent, { 
+                        permanent: false, 
+                        direction: 'top',
+                        className: 'base-station-tooltip'
+                    });
+
+                    baseStations[mmsi].marker = marker;
+                }
+            }
+        }
 
         /* AIS Class A Ship Static and Voyage Related Data
             * https://www.navcen.uscg.gov/ais-class-a-static-voyage-message-5
@@ -3155,6 +3866,18 @@
         if (msgType === 5) {
             // Static and Voyage Related Data
             const shipType = parseInt(bitstring.slice(232, 240), 2);
+            
+            // Call sign (bits 70-111, 42 bits = 7 characters)
+            let callSignBits = bitstring.slice(70, 112);
+            let callSign = '';
+            for (let i = 0; i < callSignBits.length; i += 6) {
+                const charCode = parseInt(callSignBits.slice(i, i + 6), 2);
+                if (charCode === 0) break;
+                callSign += aisAscii(charCode);
+            }
+            callSign = callSign.replace(/@+$/, '').trim();
+            
+            // Vessel name (bits 112-231, 120 bits = 20 characters)
             let nameBits = bitstring.slice(112, 232);
             let name = '';
             for (let i = 0; i < nameBits.length; i += 6) {
@@ -3163,6 +3886,16 @@
                 name += aisAscii(charCode);
             }
             name = name.replace(/@+$/, '').trim();
+            
+            // Vessel dimensions (bits 240-269)
+            const dimToBow = parseInt(bitstring.slice(240, 249), 2);      // 9 bits
+            const dimToStern = parseInt(bitstring.slice(249, 258), 2);   // 9 bits
+            const dimToPort = parseInt(bitstring.slice(258, 264), 2);    // 6 bits
+            const dimToStarboard = parseInt(bitstring.slice(264, 270), 2); // 6 bits
+            
+            // Calculate total length and beam
+            const totalLength = dimToBow + dimToStern;
+            const totalBeam = dimToPort + dimToStarboard;
             // ETA (bits 274-294, 20 bits)
             // Correct bit ranges for AIS ETA (type 5)
             let etaMonthBits = bitstring.slice(274, 278); // 4 bits: 274-277
@@ -3207,6 +3940,14 @@
                         saveVesselName(name); // Save AIS-received name too
                     }
                 }
+                
+                if (callSign && callSign !== '') {
+                    // Only update and save if the call sign has actually changed
+                    if (vesselCallSign !== callSign) {
+                        vesselCallSign = callSign;
+                        saveVesselCallSign(callSign);
+                    }
+                }
             } else {
                 // External vessel - update or create ship data
                 if (!aisShips[mmsi]) {
@@ -3215,19 +3956,33 @@
                         data: {},
                         name: 'Unknown',
                         shipType: 0,
+                        classB: false,  // Explicitly mark as Class A
                         lastUpdate: Date.now() 
                     };
                 }
                 
-                // Update name and ship type
+                // Update name, call sign and ship type
                 if (name && name !== '') {
                     aisShips[mmsi].name = name;
                     aisShips[mmsi].data.name = name;
                 }
+                if (callSign && callSign !== '') {
+                    aisShips[mmsi].data.callSign = callSign;
+                }
                 aisShips[mmsi].shipType = shipType;
                 aisShips[mmsi].data.shipType = shipType;
+                aisShips[mmsi].classB = false;  // Ensure it stays Class A
                 aisShips[mmsi].data.destination = destination;
                 aisShips[mmsi].data.eta = etaStr;
+                
+                // Store vessel dimensions
+                if (totalLength > 0) {
+                    aisShips[mmsi].data.length = totalLength;
+                }
+                if (totalBeam > 0) {
+                    aisShips[mmsi].data.beam = totalBeam;
+                }
+                
                 aisShips[mmsi].lastUpdate = Date.now();
                 
                 // Update existing marker tooltip if ship is already displayed
@@ -3239,203 +3994,10 @@
             }
         }
 
-        if (msgType === 21) {
-            // Extract AtoN position and info
-            const lonRaw = parseInt(bitstring.slice(164, 192), 2);
-            const latRaw = parseInt(bitstring.slice(193, 219), 2);
-            let lon = (lonRaw & 0x8000000) ? (lonRaw - 0x10000000) : lonRaw;
-            let lat = (latRaw & 0x4000000) ? (latRaw - 0x8000000) : latRaw;
-            lat = lat / 600000.0;
-            lon = lon / 600000.0;
-
-            // Name (20x6 bits)
-            //let nameBits = bitstring.slice(112, 232);
-            let nameBits = bitstring.slice(43, 163);
-            let name = '';
-            for (let i = 0; i < nameBits.length; i += 6) {
-                const charCode = parseInt(nameBits.slice(i, i + 6), 2);
-                if (charCode === 0) break;
-                name += aisAscii(charCode);
-            }
-            name = name.replace(/@+$/, '').trim();
-
-            console.debug(`%c Virtual AtoN detected: ${name} in position (${lat.toFixed(5)}, ${lon.toFixed(5)})`, 'background: #222; color: #bada55');
-
-            // AtoN type (bits 38-42)
-            const atonType = parseInt(bitstring.slice(38, 43), 2);
-            const atonTypeName = getAtoNTypeText(atonType);
-
-            // Add marker to atonLayer
-            if (atonLayer) {
-                const atonIcon = createAtoNIcon(atonType, 12);
-                const marker = L.marker([lat, lon], { icon: atonIcon, zIndexOffset: zIndexWaypoint }).addTo(atonLayer);
-                marker.bindTooltip(
-                    `<strong>AtoN</strong><br>
-                    Name: ${name}<br>
-                    Type: ${atonTypeName}<br>
-                    Lat: ${displayLatitude(lat)}<br>
-                    Lon: ${displayLongitude(lon)}`,
-                    { permanent: false, direction: 'top', className: 'aton-tooltip' }
-                );
-            }
-        }
-
-        if (msgType === 14) {
-            // Safety-Related Broadcast Message (SART)
-            console.debug(`SART Safety message detected from MMSI ${mmsi}`);
-            
-            // Safety text (bits 40-191, max 968 bits, but typically much shorter)
-            // Each character is 6 bits, up to ~25 characters for message type 14
-            const textBits = bitstring.slice(40, 191); // Extract available text bits
-            let safetyText = '';
-            for (let i = 0; i < textBits.length; i += 6) {
-                if (i + 6 <= textBits.length) {
-                    const charCode = parseInt(textBits.slice(i, i + 6), 2);
-                    if (charCode === 0) break; // Null terminator
-                    safetyText += aisAscii(charCode);
-                }
-            }
-            safetyText = safetyText.replace(/@+$/, '').trim();
-
-            // SART devices don't always include position in message 14
-            // Position usually comes from associated message 1/2/3 with status 14
-            let lat = null, lon = null;
-            
-            // Try to get position from existing ship data if this MMSI is known
-            if (aisShips[mmsi] && aisShips[mmsi].data && aisShips[mmsi].data.lat !== undefined) {
-                lat = aisShips[mmsi].data.lat;
-                lon = aisShips[mmsi].data.lon;
-            }
-
-            // Create or update emergency device entry
-            if (!emergencyDevices[mmsi]) {
-                emergencyDevices[mmsi] = {
-                    marker: null,
-                    type: 'SART',
-                    data: {},
-                    lastUpdate: Date.now()
-                };
-            }
-
-            emergencyDevices[mmsi].data.safetyText = safetyText;
-            emergencyDevices[mmsi].data.mmsi = mmsi;
-            emergencyDevices[mmsi].lastUpdate = Date.now();
-
-            // Add SART marker if we have position
-            if (lat !== null && lon !== null && emergencyLayer) {
-                // Remove existing marker
-                if (emergencyDevices[mmsi].marker) {
-                    emergencyLayer.removeLayer(emergencyDevices[mmsi].marker);
-                }
-
-                const sartIcon = createSARTIcon(28);
-                const marker = L.marker([lat, lon], { 
-                    icon: sartIcon, 
-                    zIndexOffset: zIndexOwnShip + 200 // Very high priority
-                }).addTo(emergencyLayer);
-
-                const tooltipContent = `
-                    <strong style="color: #ff0000;">🚨 SART EMERGENCY 🚨</strong><br>
-                    <strong>MMSI:</strong> ${mmsi}<br>
-                    <strong>Safety Message:</strong> ${safetyText || 'SART Active'}<br>
-                    <strong>Position:</strong> ${displayLatitude(lat)}, ${displayLongitude(lon)}<br>
-                    <strong>Time:</strong> ${new Date().toLocaleTimeString()}
-                `;
-
-                marker.bindTooltip(tooltipContent, { 
-                    permanent: false, 
-                    direction: 'top',
-                    className: 'emergency-tooltip'
-                });
-
-                emergencyDevices[mmsi].marker = marker;
-                
-                 // console.debug(`SART device displayed: ${mmsi} - "${safetyText}"`);
-            }
-        }
-
-        if (msgType === 9) {
-            // SAR Aircraft Position Report
-            console.debug(`%c SAR Aircraft detected: MMSI ${mmsi}`, 'background: #222; color: #bada55');
-            
-            // Position (bits 61-88 longitude, 89-115 latitude)
-            const lonRaw = parseInt(bitstring.slice(61, 89), 2);
-            const latRaw = parseInt(bitstring.slice(89, 116), 2);
-            
-            // Two's complement correction
-            let lon = (lonRaw & 0x8000000) ? (lonRaw - 0x10000000) : lonRaw;
-            let lat = (latRaw & 0x4000000) ? (latRaw - 0x8000000) : latRaw;
-            
-            // Convert to decimal degrees
-            lat = lat / 600000.0;
-            lon = lon / 600000.0;
-            
-            // Course Over Ground (bits 116-127)
-            const cog = parseInt(bitstring.slice(116, 128), 2) / 10.0;
-            
-            // Speed Over Ground (bits 50-59) - for aircraft: 1 knot per bit (not 0.1 like ships)
-            const sog = parseInt(bitstring.slice(50, 60), 2); // No division by 10 for aircraft!
-            
-            // Altitude (bits 38-49) in meters
-            const altitudeRaw = parseInt(bitstring.slice(38, 50), 2);
-            const altitude = altitudeRaw === 4095 ? 'N/A' : `${altitudeRaw}m`;
-
-            if (lat !== 91 && lon !== 181) { // Valid coordinates
-                // Create or update SAR aircraft
-                if (!emergencyDevices[mmsi]) {
-                    emergencyDevices[mmsi] = {
-                        marker: null,
-                        type: 'SAR_AIRCRAFT',
-                        data: {},
-                        lastUpdate: Date.now()
-                    };
-                }
-
-                emergencyDevices[mmsi].data = {
-                    mmsi: mmsi,
-                    lat: lat,
-                    lon: lon,
-                    cog: cog,
-                    sog: sog,
-                    altitude: altitude
-                };
-                emergencyDevices[mmsi].lastUpdate = Date.now();
-
-                if (emergencyLayer) {
-                    // Remove existing marker
-                    if (emergencyDevices[mmsi].marker) {
-                        emergencyLayer.removeLayer(emergencyDevices[mmsi].marker);
-                    }
-
-                    const aircraftIcon = createSARAircraftIcon(cog, 32);
-                    const marker = L.marker([lat, lon], { 
-                        icon: aircraftIcon, 
-                        zIndexOffset: zIndexOwnShip + 150 // High priority
-                    }).addTo(emergencyLayer);
-
-                    const tooltipContent = `
-                        <strong style="color: #ff6600;">✈️ SAR AIRCRAFT</strong><br>
-                        <strong>MMSI:</strong> ${mmsi}<br>
-                        <strong>Course:</strong> ${cog.toFixed(1)}°<br>
-                        <strong>Speed:</strong> ${sog.toFixed(1)} knots<br>
-                        <strong>Altitude:</strong> ${altitude}<br>
-                        <strong>Position:</strong> ${displayLatitude(lat)}, ${displayLongitude(lon)}<br>
-                        <strong>Time:</strong> ${new Date().toLocaleTimeString()}
-                    `;
-
-                    marker.bindTooltip(tooltipContent, { 
-                        permanent: false, 
-                        direction: 'top',
-                        className: 'emergency-tooltip'
-                    });
-
-                    emergencyDevices[mmsi].marker = marker;
-                    
-                    // console.debug(`SAR Aircraft displayed: ${mmsi} at ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
-                }
-            }
-        }
-
+        /*
+            * AIS Binary Messages (Types 6, 7, 8)
+            * https://www.navcen.uscg.gov/ais-binary-messages
+        */
         if (msgType === 6) {
             // Binary Addressed Message
             console.debug(`AIS Binary Addressed Message (Type 6) from MMSI ${mmsi}`);
@@ -3488,7 +4050,37 @@
                 console.debug(`Type 6 Regional DAC ${dac}, FID ${fid} to ${destMMSI}`);
             }
         }
+        /*
+            * AIS Binary Acknowledge (Type 7) and Binary Broadcast Message (Type 8)
+            * https://www.navcen.uscg.gov/ais-binary-messages
+        */
+        if (msgType === 7) {
+            // Binary Acknowledge
+            console.debug(`AIS Binary Acknowledge (Type 7) from MMSI ${mmsi}`);
+            // Sequence Number (bits 38-39, 2 bits)
+            const seqNum = parseInt(bitstring.slice(38, 40), 2);
+            // Destination MMSI (bits 40-69, 30 bits)
+            const destMMSI = parseInt(bitstring.slice(40, 70), 2).toString();
+            // Retransmit flag (bit 70)
+            const retransmit = parseInt(bitstring.slice(70, 71), 2);
+            // Number of messages acknowledged (bits 71-75, 5 bits)
+            const numMessages = parseInt(bitstring.slice(71, 76), 2);
+            // Acknowledged message IDs (bits 76+, 30 bits each)
+            let messageIds: number[] = [];
+            for (let i = 0; i < numMessages; i++) {
+                const startBit = 76 + i * 30;
+                if (startBit + 30 <= bitstring.length) {
+                    const msgId = parseInt(bitstring.slice(startBit, startBit + 30), 2);
+                    messageIds.push(msgId);
+                }
+            }
+            console.debug(`Type 7 - Seq: ${seqNum}, Dest: ${destMMSI}, Retransmit: ${retransmit}, Messages Acknowledged: ${messageIds.join(', ')}`);
+        }
 
+        /*
+            * AIS Binary Broadcast Message (Type 8)
+            * https://www.navcen.uscg.gov/ais-binary-messages
+        */
         if (msgType === 8) {
             // Binary Broadcast Message
             console.debug(`AIS Binary Broadcast Message (Type 8) from MMSI ${mmsi}`);
@@ -3608,6 +4200,495 @@
                     console.debug(`Type 8 US/Canada Text: "${text.trim()}"`);
                 } else if (dac === 200) { // European inland waterways
                     console.debug(`Type 8 European Inland Waterways message from ${mmsi}`);
+                }
+            }
+        }
+
+        /*
+            * AIS Search and Rescue Aircraft Position Report (Type 9)
+            * https://www.navcen.uscg.gov/ais-search-and-rescue-aircraft-position-report-message-9
+        */
+        if (msgType === 9) {
+            // SAR Aircraft Position Report
+            console.debug(`%c SAR Aircraft detected: MMSI ${mmsi}`, 'background: #222; color: #bada55');
+            
+            // Position (bits 61-88 longitude, 89-115 latitude)
+            const lonRaw = parseInt(bitstring.slice(61, 89), 2);
+            const latRaw = parseInt(bitstring.slice(89, 116), 2);
+            
+            // Two's complement correction
+            let lon = (lonRaw & 0x8000000) ? (lonRaw - 0x10000000) : lonRaw;
+            let lat = (latRaw & 0x4000000) ? (latRaw - 0x8000000) : latRaw;
+            
+            // Convert to decimal degrees
+            lat = lat / 600000.0;
+            lon = lon / 600000.0;
+            
+            // Course Over Ground (bits 116-127)
+            const cog = parseInt(bitstring.slice(116, 128), 2) / 10.0;
+            
+            // Speed Over Ground (bits 50-59) - for aircraft: 1 knot per bit (not 0.1 like ships)
+            const sog = parseInt(bitstring.slice(50, 60), 2); // No division by 10 for aircraft!
+            
+            // Altitude (bits 38-49) in meters
+            const altitudeRaw = parseInt(bitstring.slice(38, 50), 2);
+            const altitude = altitudeRaw === 4095 ? 'N/A' : `${altitudeRaw}m`;
+
+            if (lat !== 91 && lon !== 181) { // Valid coordinates
+                // Create or update SAR aircraft
+                if (!emergencyDevices[mmsi]) {
+                    emergencyDevices[mmsi] = {
+                        marker: null,
+                        type: 'SAR_AIRCRAFT',
+                        data: {},
+                        lastUpdate: Date.now()
+                    };
+                }
+
+                emergencyDevices[mmsi].data = {
+                    mmsi: mmsi,
+                    lat: lat,
+                    lon: lon,
+                    cog: cog,
+                    sog: sog,
+                    altitude: altitude
+                };
+                emergencyDevices[mmsi].lastUpdate = Date.now();
+
+                if (emergencyLayer) {
+                    // Remove existing marker
+                    if (emergencyDevices[mmsi].marker) {
+                        emergencyLayer.removeLayer(emergencyDevices[mmsi].marker);
+                    }
+
+                    const aircraftIcon = createSARAircraftIcon(cog, 32);
+                    const marker = L.marker([lat, lon], { 
+                        icon: aircraftIcon, 
+                        zIndexOffset: zIndexOwnShip + 150 // High priority
+                    }).addTo(emergencyLayer);
+
+                    const tooltipContent = `
+                        <strong style="color: #ff6600;">✈️ SAR AIRCRAFT</strong><br>
+                        <strong>MMSI:</strong> ${mmsi}<br>
+                        <strong>Course:</strong> ${cog.toFixed(1)}°<br>
+                        <strong>Speed:</strong> ${sog.toFixed(1)} knots<br>
+                        <strong>Altitude:</strong> ${altitude}<br>
+                        <strong>Position:</strong> ${displayLatitude(lat)}, ${displayLongitude(lon)}<br>
+                        <strong>Time:</strong> ${new Date().toLocaleTimeString()}
+                    `;
+
+                    marker.bindTooltip(tooltipContent, { 
+                        permanent: false, 
+                        direction: 'top',
+                        className: 'emergency-tooltip'
+                    });
+
+                    emergencyDevices[mmsi].marker = marker;
+                    
+                    //console.debug(`SAR Aircraft displayed: ${mmsi} at ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+                }
+            }
+        }
+
+        /*
+            * AIS UTC/Date Inquiry (Type 10) and UTC/Date Response (Type 11)
+            * https://www.navcen.uscg.gov/ais-utcdate-inquiry-message-10
+            * https://www.navcen.uscg.gov/ais-utcdate-response-message-11
+        */
+        if (msgType === 10) {
+            // UTC/Date Inquiry
+            console.debug(`AIS UTC/Date Inquiry (Type 10) from MMSI ${mmsi}`);
+            // This message is typically sent by base stations requesting time sync
+            // We can respond with our own UTC time if needed (not implemented here)
+        }
+
+        /*
+            * AIS UTC/Date Response (Type 11)
+            * https://www.navcen.uscg.gov/ais-utcdate-response-message-11
+        */
+        if (msgType === 11) {
+            // UTC/Date Response
+            console.debug(`AIS UTC/Date Response (Type 11) from MMSI ${mmsi}`);
+            // Extract UTC time and date if needed
+            const year = parseInt(bitstring.slice(38, 51), 2);
+            const month = parseInt(bitstring.slice(52, 55), 2);
+            const day = parseInt(bitstring.slice(56, 60), 2);
+            const hour = parseInt(bitstring.slice(61, 65), 2);
+            const minute = parseInt(bitstring.slice(66, 71), 2);
+            const second = parseInt(bitstring.slice(72, 78), 2);
+            console.debug(`UTC Time from ${mmsi}: ${year}-${month}-${day} ${hour}:${minute}:${second} UTC`);
+        }
+
+        /*
+            * AIS Safety-Related Broadcast Message (Type 14)
+            * https://www.navcen.uscg.gov/ais-safety-related-broadcast-message-14
+        */
+        if (msgType === 14) {
+            // Safety-Related Broadcast Message (SART)
+            console.debug(`SART Safety message detected from MMSI ${mmsi}`);
+            
+            // Safety text (bits 40-191, max 968 bits, but typically much shorter)
+            // Each character is 6 bits, up to ~25 characters for message type 14
+            const textBits = bitstring.slice(40, 191); // Extract available text bits
+            let safetyText = '';
+            for (let i = 0; i < textBits.length; i += 6) {
+                if (i + 6 <= textBits.length) {
+                    const charCode = parseInt(textBits.slice(i, i + 6), 2);
+                    if (charCode === 0) break; // Null terminator
+                    safetyText += aisAscii(charCode);
+                }
+            }
+            safetyText = safetyText.replace(/@+$/, '').trim();
+
+            // SART devices don't always include position in message 14
+            // Position usually comes from associated message 1/2/3 with status 14
+            let lat = null, lon = null;
+            
+            // Try to get position from existing ship data if this MMSI is known
+            if (aisShips[mmsi] && aisShips[mmsi].data && aisShips[mmsi].data.lat !== undefined) {
+                lat = aisShips[mmsi].data.lat;
+                lon = aisShips[mmsi].data.lon;
+            }
+
+            // Create or update emergency device entry
+            if (!emergencyDevices[mmsi]) {
+                emergencyDevices[mmsi] = {
+                    marker: null,
+                    type: 'SART',
+                    data: {},
+                    lastUpdate: Date.now()
+                };
+            }
+
+            emergencyDevices[mmsi].data.safetyText = safetyText;
+            emergencyDevices[mmsi].data.mmsi = mmsi;
+            emergencyDevices[mmsi].lastUpdate = Date.now();
+
+            // Add SART marker if we have position
+            if (lat !== null && lon !== null && emergencyLayer) {
+                // Remove existing marker
+                if (emergencyDevices[mmsi].marker) {
+                    emergencyLayer.removeLayer(emergencyDevices[mmsi].marker);
+                }
+
+                const sartIcon = createSARTIcon(28);
+                const marker = L.marker([lat, lon], { 
+                    icon: sartIcon, 
+                    zIndexOffset: zIndexOwnShip + 200 // Very high priority
+                }).addTo(emergencyLayer);
+
+                const tooltipContent = `
+                    <strong style="color: #ff0000;">🚨 SART EMERGENCY 🚨</strong><br>
+                    <strong>MMSI:</strong> ${mmsi}<br>
+                    <strong>Safety Message:</strong> ${safetyText || 'SART Active'}<br>
+                    <strong>Position:</strong> ${displayLatitude(lat)}, ${displayLongitude(lon)}<br>
+                    <strong>Time:</strong> ${new Date().toLocaleTimeString()}
+                `;
+
+                marker.bindTooltip(tooltipContent, { 
+                    permanent: false, 
+                    direction: 'top',
+                    className: 'emergency-tooltip'
+                });
+
+                emergencyDevices[mmsi].marker = marker;
+                
+                 //console.debug(`SART device displayed: ${mmsi} - "${safetyText}"`);
+            }
+        }
+
+        if (msgType === 18) {
+            // Position Report (Class B)
+            // According to ITU-R M.1371-5, for message type 18:
+            // SOG: bits 46-55 (10 bits)
+            // Longitude: bits 57-84 (28 bits)
+            // Latitude: bits 85-111 (27 bits)
+            // COG: bits 112-123 (12 bits)
+            // True Heading: bits 124-132 (9 bits)
+            
+            const sog = parseInt(bitstring.slice(46, 56), 2) / 10.0;
+            const lonRaw = parseInt(bitstring.slice(57, 85), 2);  // 28 bits for longitude
+            const latRaw = parseInt(bitstring.slice(85, 112), 2); // 27 bits for latitude
+            const cog = parseInt(bitstring.slice(112, 124), 2) / 10.0;
+            const heading = parseInt(bitstring.slice(124, 133), 2);
+            
+            // Two's complement correction for 28 bits (longitude)
+            let lon = (lonRaw & 0x8000000) ? (lonRaw - 0x10000000) : lonRaw;
+            // Two's complement correction for 27 bits (latitude)  
+            let lat = (latRaw & 0x4000000) ? (latRaw - 0x8000000) : latRaw;
+
+            // decimal degrees conversion
+            lat = lat / 600000.0;
+            lon = lon / 600000.0;
+
+            if (!aisShips[mmsi]) {
+                // position message (type 18) is received before a static message (type 24) for a new ship.
+                // Let's create a new ship
+                aisShips[mmsi] = {
+                    marker: null,
+                    data: {},
+                    name: 'Unknown',
+                    shipType: 0,
+                    lastUpdate: Date.now(),
+                    classB: true  // Mark as Class B
+                };
+            }
+            aisShips[mmsi].classB = true;  // Ensure it's marked as Class B
+            
+            if (lat !== 91 && lon !== 181) { // Valid coordinates
+                // External vessel - use corrected heading
+                const displayHeading = heading !== 511 ? heading : cog;
+                updateAISShip(mmsi, { lat, lon, cog, sog, heading: displayHeading, classB: true });
+            }
+        }
+
+        if (msgType === 19) {
+            // Extended Position Report (Class B)
+            // According to ITU-R M.1371-5, for message type 19:
+            // SOG: bits 46-55 (10 bits)
+            // Longitude: bits 57-84 (28 bits)
+            // Latitude: bits 85-111 (27 bits)
+            // COG: bits 112-123 (12 bits)
+            // True Heading: bits 124-132 (9 bits)
+            // Ship Name: bits 143-262 (120 bits = 20 x 6-bit characters)
+            // Ship Type: bits 263-270 (8 bits)
+            
+            const sog = parseInt(bitstring.slice(46, 56), 2) / 10.0;
+            const lonRaw = parseInt(bitstring.slice(57, 85), 2);  // 28 bits for longitude
+            const latRaw = parseInt(bitstring.slice(85, 112), 2); // 27 bits for latitude
+            const cog = parseInt(bitstring.slice(112, 124), 2) / 10.0;
+            const heading = parseInt(bitstring.slice(124, 133), 2);
+            const shipType = parseInt(bitstring.slice(263, 271), 2);
+            
+            // Two's complement correction for 28 bits (longitude)
+            let lon = (lonRaw & 0x8000000) ? (lonRaw - 0x10000000) : lonRaw;
+            // Two's complement correction for 27 bits (latitude)  
+            let lat = (latRaw & 0x4000000) ? (latRaw - 0x8000000) : latRaw;
+
+            // decimal degrees conversion
+            lat = lat / 600000.0;
+            lon = lon / 600000.0;
+            
+            // Extract ship name from bits 143-262 (120 bits)
+            let nameBits = bitstring.slice(143, 263);
+            let name = '';
+            for (let i = 0; i < nameBits.length; i += 6) {
+                const charCode = parseInt(nameBits.slice(i, i + 6), 2);
+                if (charCode === 0) break;
+                name += aisAscii(charCode);
+            }
+            name = name.replace(/@+$/, '').trim();
+
+            if (!aisShips[mmsi]) {
+                // position message (type 19) is received before a static message (type 24) for a new ship.
+                // Let's create a new ship
+                aisShips[mmsi] = {
+                    marker: null,
+                    data: {},
+                    name: 'Unknown',
+                    shipType: 0,
+                    lastUpdate: Date.now(),
+                    classB: true  // Mark as Class B
+                };
+            }
+            aisShips[mmsi].classB = true;  // Ensure it's marked as Class B
+            aisShips[mmsi].shipType = shipType;
+            if (name && name !== '') {
+                aisShips[mmsi].name = name;
+                aisShips[mmsi].data.name = name;
+            }
+            if (lat !== 91 && lon !== 181) { // Valid coordinates
+                // External vessel - use corrected heading
+                const displayHeading = heading !== 511 ? heading : cog;
+                updateAISShip(mmsi, { lat, lon, cog, sog, heading: displayHeading, classB: true, shipType: shipType, name: name });
+            }
+        }
+
+        if (msgType === 24) {
+            // Static Data Report (Class B) - Part A and Part B
+            // Part A: Vessel Name (indicated by bit 38-39 = 0)
+            // Part B: Ship Type and Vendor Info (indicated by bit 38-39 = 1)
+            const partNumber = parseInt(bitstring.slice(38, 40), 2);
+            
+            if (partNumber === 0) {
+                // Part A: Vessel Name
+                // Vessel Name: bits 40-159 (120 bits = 20 x 6-bit characters)
+                let nameBits = bitstring.slice(40, 160);
+                let name = '';
+                for (let i = 0; i < nameBits.length; i += 6) {
+                    const charCode = parseInt(nameBits.slice(i, i + 6), 2);
+                    if (charCode === 0) break;
+                    name += aisAscii(charCode);
+                }
+                name = name.replace(/@+$/, '').trim();
+                
+                if (!aisShips[mmsi]) {
+                    // Create new ship entry if it doesn't exist
+                    aisShips[mmsi] = {
+                        marker: null,
+                        data: {},
+                        name: 'Unknown',
+                        shipType: 0,
+                        lastUpdate: Date.now(),
+                        classB: true  // Mark as Class B
+                    };
+                }
+                
+                if (name && name !== '') {
+                    aisShips[mmsi].name = name;
+                    aisShips[mmsi].data.name = name;
+                    aisShips[mmsi].classB = true;
+                    //console.debug(`Class B vessel name updated: MMSI ${mmsi} = "${name}"`);
+                }
+                
+            } else if (partNumber === 1) {
+                // Part B: Ship Type and other static data
+                // Ship Type: bits 40-47 (8 bits)
+                const shipType = parseInt(bitstring.slice(40, 48), 2);
+                
+                // Call sign: bits 90-131 (42 bits = 7 characters)
+                let callSignBits = bitstring.slice(90, 132);
+                let callSign = '';
+                for (let i = 0; i < callSignBits.length; i += 6) {
+                    const charCode = parseInt(callSignBits.slice(i, i + 6), 2);
+                    if (charCode === 0) break;
+                    callSign += aisAscii(charCode);
+                }
+                callSign = callSign.replace(/@+$/, '').trim();
+                
+                // Vessel dimensions (bits 132-161)
+                const dimToBow = parseInt(bitstring.slice(132, 141), 2);      // 9 bits
+                const dimToStern = parseInt(bitstring.slice(141, 150), 2);   // 9 bits
+                const dimToPort = parseInt(bitstring.slice(150, 156), 2);    // 6 bits
+                const dimToStarboard = parseInt(bitstring.slice(156, 162), 2); // 6 bits
+                
+                // Calculate total length and beam
+                const totalLength = dimToBow + dimToStern;
+                const totalBeam = dimToPort + dimToStarboard;
+                
+                if (!aisShips[mmsi]) {
+                    // Create new ship entry if it doesn't exist
+                    aisShips[mmsi] = {
+                        marker: null,
+                        data: {},
+                        name: 'Unknown',
+                        shipType: 0,
+                        lastUpdate: Date.now(),
+                        classB: true  // Mark as Class B
+                    };
+                }
+                
+                aisShips[mmsi].shipType = shipType;
+                aisShips[mmsi].data.shipType = shipType;
+                if (callSign && callSign !== '') {
+                    aisShips[mmsi].data.callSign = callSign;
+                }
+                
+                // Store vessel dimensions for Class B
+                if (totalLength > 0) {
+                    aisShips[mmsi].data.length = totalLength;
+                }
+                if (totalBeam > 0) {
+                    aisShips[mmsi].data.beam = totalBeam;
+                }
+                
+                aisShips[mmsi].classB = true;
+                //console.debug(`Class B vessel type updated: MMSI ${mmsi} = ${shipType} (${getShipTypeName(shipType)})`);
+                
+                // If the ship already has a marker displayed, update it with the new ship type
+                if (aisShips[mmsi].marker && aisShips[mmsi].data.lat && aisShips[mmsi].data.lon) {
+                    const currentData = aisShips[mmsi].data;
+                    updateAISShip(mmsi, { 
+                        ...currentData, 
+                        shipType: shipType, 
+                        classB: true 
+                    });
+                }
+            }
+        }
+
+        if (msgType === 21) {
+            //console.debug(`AIS AtoN Message (Type 21) from MMSI ${mmsi}`);
+            // Extract AtoN position and info
+            const lonRaw = parseInt(bitstring.slice(164, 192), 2);
+            const latRaw = parseInt(bitstring.slice(193, 219), 2);
+            let lon = (lonRaw & 0x8000000) ? (lonRaw - 0x10000000) : lonRaw;
+            let lat = (latRaw & 0x4000000) ? (latRaw - 0x8000000) : latRaw;
+            lat = lat / 600000.0;
+            lon = lon / 600000.0;
+
+            // Name (20x6 bits)
+            //let nameBits = bitstring.slice(112, 232);
+            let nameBits = bitstring.slice(43, 163);
+            let name = '';
+            for (let i = 0; i < nameBits.length; i += 6) {
+                const charCode = parseInt(nameBits.slice(i, i + 6), 2);
+                if (charCode === 0) break;
+                name += aisAscii(charCode);
+            }
+            name = name.replace(/@+$/, '').trim();
+
+            console.debug(`%c Virtual AtoN detected: ${name} in position (${lat.toFixed(5)}, ${lon.toFixed(5)})`, 'background: #FFF; color: #F00');
+
+            // AtoN type (bits 38-42)
+            const atonType = parseInt(bitstring.slice(38, 43), 2);
+            const atonTypeName = getAtoNTypeText(atonType);
+
+            // Add marker to atonLayer
+            if (atonLayer) {
+                // console.debug(`Adding AtoN marker: Type ${atonType} (${atonTypeName}) at ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+                
+                // Calculate icon size based on current zoom level
+                const currentZoom = map.getZoom();
+                const iconSize = calculateAtoNIconSize(currentZoom);
+                // console.debug(`AtoN icon size for zoom ${currentZoom}: ${iconSize}px`);
+                
+                // Check if this AtoN already exists and update it
+                const isNewAtoN = !atonMarkers[mmsi];
+                
+                if (atonMarkers[mmsi]) {
+                    // Update existing marker
+                    const existingAton = atonMarkers[mmsi];
+                    if (existingAton.marker && atonLayer) {
+                        atonLayer.removeLayer(existingAton.marker);
+                    }
+                }
+                
+                const atonIcon = createAtoNIcon(atonType, iconSize);
+                const marker = L.marker([lat, lon], { icon: atonIcon, zIndexOffset: zIndexWaypoint }).addTo(atonLayer);
+                
+                const tooltipContent = `
+                    <strong>AtoN</strong><br>
+                    Name: ${name}<br>
+                    Type: ${atonTypeName}<br>
+                    Lat: ${displayLatitude(lat)}<br>
+                    Lon: ${displayLongitude(lon)}
+                `;
+                
+                marker.bindTooltip(tooltipContent, { 
+                    permanent: false, 
+                    direction: 'top', 
+                    className: 'aton-tooltip' 
+                });
+                
+                // Store AtoN marker data for zoom-based resizing
+                atonMarkers[mmsi] = {
+                    marker: marker,
+                    data: {
+                        mmsi: mmsi,
+                        lat: lat,
+                        lon: lon,
+                        name: name,
+                        atonType: atonType,
+                        atonTypeName: atonTypeName,
+                        lastUpdate: Date.now()
+                    }
+                };
+                
+                // Save AtoN data to localStorage only for new markers
+                if (isNewAtoN) {
+                    console.log(`New AtoN discovered - saving data: ${Object.keys(atonMarkers).length} markers`);
+                    saveAtoNData(atonMarkers);
                 }
             }
         }
@@ -6362,6 +7443,45 @@
         padding: 6px !important;
         font-weight: bold !important;
         font-size: 12px !important;
+    }
+    
+    /* AIS ship tooltip styling */
+    .leaflet-tooltip.ais-ship-tooltip {
+        background: white !important;
+        border: 2px solid #007acc !important;
+        border-radius: 5px !important;
+        padding: 8px !important;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.3) !important;
+        font-size: 12px !important;
+        font-family: 'Segoe UI', Arial, sans-serif !important;
+        white-space: nowrap !important;
+    }
+    
+    /* Marine Traffic style vessel icon */
+    .marine-traffic-marker {
+        background: transparent !important;
+        border: none !important;
+    }
+    
+    .marine-traffic-icon {
+        user-select: none;
+        pointer-events: none;
+    }
+    
+    .marine-traffic-icon svg {
+        filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.3));
+    }
+    
+    /* Base station tooltip styling */
+    .leaflet-tooltip.base-station-tooltip {
+        background: white !important;
+        border: 2px solid #ff6600 !important;
+        border-radius: 5px !important;
+        padding: 8px !important;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.3) !important;
+        font-size: 12px !important;
+        font-family: 'Segoe UI', Arial, sans-serif !important;
+        white-space: nowrap !important;
     }
 </style>
 
