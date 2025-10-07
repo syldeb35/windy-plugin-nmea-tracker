@@ -274,9 +274,9 @@
                 on:change={handleGpxFileUpload}
                 style="width: 100%; margin-bottom: 5px;"
             />
-            {#if routeMetadata.filename}
+            {#if routeMetadata.name}
                 <p style="font-size: 12px; color: #0a0; margin: 2px 0;">
-                    ✅ Loaded: {routeMetadata.filename}
+                    ✅ Loaded: {routeMetadata.name}
                 </p>
             {/if}
         </div>
@@ -306,7 +306,6 @@
                     📍 {showRouteWaypoints ? 'Hide waypoints' : 'Show waypoints'}
                 </button>
                 <button on:click={() => {
-                    console.debug('Leg editor button clicked');
                     showLegEditorModal();
                 }} style="margin-left: 10px;">
                     ✏️ Edit Leg Types
@@ -540,7 +539,7 @@
     let routeProjectionActive: boolean = false; // Flag to indicate route-based projection
     
     // GPX Route variables
-    let gpxRoute: Array<{lat: number, lon: number, name?: string, time?: Date, passedTime?: Date, type?: string}> = []; // Route waypoints
+    let gpxRoute: Array<{lat: number, lon: number, name?: string, time?: string | Date, passedTime?: Date, type?: string, plannedSpeed?: number}> = []; // Route waypoints
     let routeLayer: any = null; // Layer for displaying the route
     let atonLayer: any = null; // Layer for displaying AtoN markers
     let emergencyLayer: any = null; // Layer for displaying emergency devices (SART, SAR aircraft)
@@ -686,7 +685,6 @@
         // Subscribe to Windy timeline changes
         const unsub = store.on('timestamp', (ts: number) => {
             // This code will be executed on every timeline change
-            // console.debug('Windy timeline changed, new timestamp:', ts);  // Commented out to reduce console noise
             
             // Use the rounded timestamp consistently for all timeline-based operations
             const roundedTimestamp = getRoundedHourTimestamp(ts);
@@ -721,7 +719,7 @@
 
         // Subscribe to Windy overlay changes
         const unsubOverlay = store.on('overlay', (overlay: string) => {
-            console.debug('Windy overlay changed, new overlay:', overlay);
+            //console.debug('Windy overlay changed, new overlay:', overlay);
            
             CurrentOverlay = overlay;
             updateButtonText(windyStore.get('timestamp'));
@@ -823,7 +821,10 @@
         
         gpxRoute.forEach((wp, i) => {
             gpx += `        <rtept lat="${wp.lat}" lon="${wp.lon}">\n`;
-            if (wp.time) gpx += `           <time>${wp.time.toISOString()}</time>\n`;
+            if (wp.time) {
+                const timeStr = wp.time instanceof Date ? wp.time.toISOString() : wp.time;
+                gpx += `           <time>${timeStr}</time>\n`;
+            }
             if (wp.name) gpx += `           <name>${wp.name}</name>\n`;
             // Save passedTime as <timePassed> if present
             if (wp.passedTime) {
@@ -1049,7 +1050,7 @@
                 }
             } catch (error) {
                 console.warn('Erreur lors du traitement des données NMEA:', error, 'Données reçues:', data);
-                addError("[Err] Format de données NMEA invalide");
+                // Skip error reporting for NMEA format issues - too technical for users
             }
             
             updateErrorDisplay();
@@ -1487,7 +1488,7 @@
                         lat: wp.lat,
                         lon: wp.lon,
                         name: wp.name,
-                        time: wp.time ? wp.time.toISOString() : null,
+                        time: wp.time ? (wp.time instanceof Date ? wp.time.toISOString() : wp.time) : null,
                         passedTime: wp.passedTime ? (wp.passedTime instanceof Date ? wp.passedTime.toISOString() : wp.passedTime) : null,
                         type: wp.type
                     })),
@@ -1532,7 +1533,10 @@
             
             gpxRoute.forEach((wp, i) => {
                 gpx += `        <rtept lat="${wp.lat}" lon="${wp.lon}">\n`;
-                if (wp.time) gpx += `           <time>${wp.time.toISOString()}</time>\n`;
+                if (wp.time) {
+                    const timeStr = wp.time instanceof Date ? wp.time.toISOString() : wp.time;
+                    gpx += `           <time>${timeStr}</time>\n`;
+                }
                 if (wp.name) gpx += `           <name>${wp.name}</name>\n`;
                 // Save passedTime as <timePassed> if present
                 if (wp.passedTime) {
@@ -1779,7 +1783,7 @@
             color: black !important;
             border-radius: 12px !important;
             width: 95vw !important;
-            max-width: 1200px !important;
+            max-width: 1400px !important;
             height: 85vh !important;
             overflow: hidden !important;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important;
@@ -1837,11 +1841,12 @@
             <thead>
                 <tr style="background: #e9ecef;">
                     <th style="padding: 12px 8px; text-align: center; font-weight: bold; border-right: 1px solid #dee2e6; width: 40px;">Id</th>
-                    <th style="padding: 12px 8px; text-align: left; font-weight: bold; border-right: 1px solid #dee2e6; width: 200px;">From</th>
-                    <th style="padding: 12px 8px; text-align: left; font-weight: bold; border-right: 1px solid #dee2e6; width: 200px;">To</th>
-                    <th style="padding: 12px 8px; text-align: center; font-weight: bold; border-right: 1px solid #dee2e6; width: 100px;">Distance (NM)</th>
+                    <th style="padding: 12px 8px; text-align: left; font-weight: bold; border-right: 1px solid #dee2e6; width: 180px;">From</th>
+                    <th style="padding: 12px 8px; text-align: left; font-weight: bold; border-right: 1px solid #dee2e6; width: 180px;">To</th>
+                    <th style="padding: 12px 8px; text-align: center; font-weight: bold; border-right: 1px solid #dee2e6; width: 80px;">Distance (NM)</th>
+                    <th style="padding: 12px 8px; text-align: center; font-weight: bold; border-right: 1px solid #dee2e6; width: 90px;">Speed (kts)</th>
                     <th style="padding: 12px 8px; text-align: center; font-weight: bold; border-right: 1px solid #dee2e6; width: 80px;">Type</th>
-                    <th style="padding: 12px 8px; text-align: center; font-weight: bold; border-right: 1px solid #dee2e6; width: 140px;">ETA</th>
+                    <th style="padding: 12px 8px; text-align: center; font-weight: bold; border-right: 1px solid #dee2e6; width: 160px;">ETA</th>
                     <th style="padding: 12px 8px; text-align: center; font-weight: bold; width: 140px;">Passed Time</th>
                 </tr>
             </thead>
@@ -1853,6 +1858,7 @@
         content.style.cssText = `
             flex: 1;
             overflow-y: auto;
+            overflow-x: auto;
             background: white;
         `;
         
@@ -1882,12 +1888,50 @@
                 distance = (window as any).modalCalculateStraightLineDistance(wp.lat, wp.lon, nextWp.lat, nextWp.lon);
             }
             
+            // Calculate intended speed based on time difference
+            let speedText = '-';
+            let speedValue = 5.0; // Default speed in knots
+            if (wp.time && nextWp.time) {
+                const timeDiffMs = new Date(nextWp.time).getTime() - new Date(wp.time).getTime();
+                const timeDiffHours = timeDiffMs / (1000 * 60 * 60);
+                if (timeDiffHours > 0) {
+                    speedValue = distance / timeDiffHours;
+                    speedText = speedValue.toFixed(1);
+                    // Store calculated speed for future reference
+                    wp.plannedSpeed = speedValue;
+                } else {
+                    speedText = '-';
+                }
+            } else if (i >= nextWaypointIndex && wp.plannedSpeed) {
+                // Use stored planned speed for future legs
+                speedValue = wp.plannedSpeed;
+                speedText = speedValue.toFixed(1);
+            } else if (i >= nextWaypointIndex) {
+                // Initialize default speed for future legs that don't have one
+                wp.plannedSpeed = speedValue;
+                speedText = speedValue.toFixed(1);
+            }
+            
             // Format ETA
             let etaText = '-';
+            let etaInputValue = '';
+            let etaDateValue = null;
             if (i < nextWaypointIndex && wp.time) {
                 etaText = (window as any).modalFormatDateTime(wp.time);
+                etaDateValue = wp.time instanceof Date ? wp.time : new Date(wp.time);
             } else if (waypointETAs && waypointETAs[i - nextWaypointIndex]) {
-                etaText = (window as any).modalFormatDateTime(new Date(waypointETAs[i - nextWaypointIndex].eta));
+                etaDateValue = new Date(waypointETAs[i - nextWaypointIndex].eta);
+                etaText = (window as any).modalFormatDateTime(etaDateValue);
+            } else if (nextWp.time) {
+                etaDateValue = nextWp.time instanceof Date ? nextWp.time : new Date(nextWp.time);
+                etaText = (window as any).modalFormatDateTime(etaDateValue);
+            }
+            
+            // Create datetime-local input value (ISO format without timezone)
+            if (etaDateValue && !isNaN(etaDateValue.getTime())) {
+                // Use toISOString and remove the 'Z' and seconds part for datetime-local format
+                const isoString = etaDateValue.toISOString();
+                etaInputValue = isoString.slice(0, 16); // YYYY-MM-DDTHH:MM format
             }
             
             // Format passed time
@@ -1899,26 +1943,38 @@
             tableRows += `
                 <tr style="${rowStyle}">
                     <td style="padding: 10px 8px; text-align: center; border-right: 1px solid #dee2e6; font-size: 14px; width: 40px;">${i}</td>
-                    <td style="padding: 10px 8px; text-align: left; border-right: 1px solid #dee2e6; font-size: 14px; width: 200px; overflow: hidden; text-overflow: ellipsis;">
+                    <td style="padding: 10px 8px; text-align: left; border-right: 1px solid #dee2e6; font-size: 14px; width: 180px; overflow: hidden; text-overflow: ellipsis;">
                         <div style="font-weight: bold;">${wp.name || `WP ${i}`}</div>
                         <div style="font-size: 11px; color: #6c757d; line-height: 1.2;">
                             &phi;: ${(window as any).modalDisplayLatitude(wp.lat)} &nbsp;&nbsp;&nbsp; &lambda;: ${(window as any).modalDisplayLongitude(wp.lon)}
                         </div>
                     </td>
-                    <td style="padding: 10px 8px; text-align: left; border-right: 1px solid #dee2e6; font-size: 14px; width: 200px; overflow: hidden; text-overflow: ellipsis;">
+                    <td style="padding: 10px 8px; text-align: left; border-right: 1px solid #dee2e6; font-size: 14px; width: 180px; overflow: hidden; text-overflow: ellipsis;">
                         <div style="font-weight: bold;">${nextWp.name || `WP ${i + 1}`}</div>
                         <div style="font-size: 11px; color: #6c757d; line-height: 1.2;">
                             &phi;: ${(window as any).modalDisplayLatitude(nextWp.lat)} &nbsp;&nbsp;&nbsp; &lambda;: ${(window as any).modalDisplayLongitude(nextWp.lon)}
                         </div>
                     </td>
-                    <td style="padding: 10px 8px; text-align: center; border-right: 1px solid #dee2e6; font-size: 14px; font-weight: bold; color: #495057; width: 100px;">${distance.toFixed(2)}</td>
+                    <td style="padding: 10px 8px; text-align: center; border-right: 1px solid #dee2e6; font-size: 14px; font-weight: bold; color: #495057; width: 80px;">${distance.toFixed(2)}</td>
+                    <td style="padding: 10px 8px; text-align: center; border-right: 1px solid #dee2e6; width: 90px;">
+                        <input type="number" step="0.1" min="0.1" max="50" value="${speedValue.toFixed(1)}" 
+                               onchange="updateLegSpeed(${i}, parseFloat(this.value))" 
+                               style="width: 70px; padding: 4px 6px; border: 1px solid #ced4da; border-radius: 4px; text-align: center; font-size: 13px;"
+                               ${i < nextWaypointIndex ? 'disabled' : ''}>
+                    </td>
                     <td style="padding: 10px 8px; text-align: center; border-right: 1px solid #dee2e6; width: 80px;">
                         <select onchange="updateLegType(${i}, this.value)" style="padding: 4px 8px; border: 1px solid #ced4da; border-radius: 4px; background: white; font-size: 14px;">
                             <option value="RL" ${legType === 'RL' ? 'selected' : ''}>R-L</option>
                             <option value="GC" ${legType === 'GC' ? 'selected' : ''}>G-C</option>
                         </select>
                     </td>
-                    <td style="padding: 10px 8px; text-align: center; border-right: 1px solid #dee2e6; font-size: 13px; color: #6c757d; width: 140px;">${etaText}</td>
+                    <td style="padding: 10px 8px; text-align: center; border-right: 1px solid #dee2e6; font-size: 13px; color: #6c757d; width: 160px;">
+                        ${i >= nextWaypointIndex && etaInputValue ? 
+                            `<input type="datetime-local" value="${etaInputValue}" 
+                                    onchange="updateWaypointETA(${i + 1}, this.value)" 
+                                    style="width: 150px; padding: 2px 4px; border: 1px solid #ced4da; border-radius: 4px; font-size: 12px;">` 
+                            : etaText}
+                    </td>
                     <td style="padding: 10px 8px; text-align: center; font-size: 13px; color: #6c757d; width: 140px;">${passedTimeText}</td>
                 </tr>
             `;
@@ -2062,6 +2118,255 @@
                     }, 1000);
                 }
             }
+        };
+
+        // Function to update leg speed and recalculate ETAs
+        (window as any).updateLegSpeed = (legIndex: number, newSpeed: number) => {
+            console.debug(`updateLegSpeed called: leg ${legIndex}, speed: ${newSpeed} kts`);
+            
+            if (!gpxRoute[legIndex] || !gpxRoute[legIndex + 1] || newSpeed <= 0) {
+                console.debug(`Cannot update leg ${legIndex}: invalid parameters`);
+                return;
+            }
+            
+            const wp = gpxRoute[legIndex];
+            const nextWp = gpxRoute[legIndex + 1];
+            
+            // Store the planned speed for this leg
+            wp.plannedSpeed = newSpeed;
+            
+            // Calculate distance for this leg
+            const legType = wp.type || 'RL';
+            let distance;
+            if (legType === 'GC') {
+                distance = (window as any).modalCalculateGreatCircleDistance(wp.lat, wp.lon, nextWp.lat, nextWp.lon);
+            } else {
+                distance = (window as any).modalCalculateStraightLineDistance(wp.lat, wp.lon, nextWp.lat, nextWp.lon);
+            }
+            
+            // Calculate time needed for this leg (in milliseconds)
+            const timeNeededHours = distance / newSpeed;
+            const timeNeededMs = timeNeededHours * 60 * 60 * 1000;
+            
+            // Get current waypoint time (either actual time if passed, or estimated)
+            let currentTime;
+            if (legIndex < nextWaypointIndex && wp.time) {
+                currentTime = new Date(wp.time);
+            } else if (legIndex === 0 && routeStartTime) {
+                currentTime = new Date(routeStartTime);
+            } else {
+                // Use previous waypoint ETA + time to this waypoint
+                currentTime = (window as any).getWaypointETA(legIndex);
+            }
+            
+            if (currentTime) {
+                // Calculate new ETA for next waypoint
+                const newETA = new Date(currentTime.getTime() + timeNeededMs);
+                
+                // Update the waypoint time
+                nextWp.time = newETA.toISOString();
+                
+                // Trigger reactivity
+                gpxRoute = [...gpxRoute];
+                
+                // Recalculate all subsequent ETAs
+                (window as any).recalculateETAsFromWaypoint(legIndex + 1);
+                
+                // Save changes
+                saveGpxRoute();
+                
+                console.debug(`Updated leg ${legIndex} speed to ${newSpeed} kts, new ETA: ${newETA}`);
+                
+                // Update the modal display
+                (window as any).refreshModalETAs();
+            }
+        };
+
+        // Function to update waypoint ETA and recalculate speeds/ETAs
+        (window as any).updateWaypointETA = (waypointIndex: number, newETAString: string) => {
+            console.debug(`updateWaypointETA called: waypoint ${waypointIndex}, ETA: ${newETAString}`);
+            
+            if (!gpxRoute[waypointIndex] || waypointIndex < nextWaypointIndex) {
+                console.debug(`Cannot update waypoint ${waypointIndex}: invalid or already passed`);
+                return;
+            }
+            
+            const newETA = new Date(newETAString);
+            if (isNaN(newETA.getTime())) {
+                console.debug(`Invalid ETA string: ${newETAString}`);
+                return;
+            }
+            
+            console.debug(`Setting waypoint ${waypointIndex} ETA to: ${newETA}`);
+            
+            // Update the waypoint time
+            gpxRoute[waypointIndex].time = newETA.toISOString();
+            
+            // Recalculate speed for the previous leg
+            if (waypointIndex > 0) {
+                const prevWp = gpxRoute[waypointIndex - 1];
+                const currentWp = gpxRoute[waypointIndex];
+                
+                // Get previous waypoint ETA
+                let prevETA;
+                if (waypointIndex - 1 < nextWaypointIndex && prevWp.time) {
+                    prevETA = new Date(prevWp.time);
+                } else {
+                    prevETA = (window as any).getWaypointETA(waypointIndex - 1);
+                }
+                
+                if (prevETA) {
+                    // Calculate time difference
+                    const timeDiffMs = newETA.getTime() - prevETA.getTime();
+                    const timeDiffHours = timeDiffMs / (1000 * 60 * 60);
+                    
+                    if (timeDiffHours > 0) {
+                        // Calculate distance for the leg
+                        const legType = prevWp.type || 'RL';
+                        let distance;
+                        if (legType === 'GC') {
+                            distance = (window as any).modalCalculateGreatCircleDistance(prevWp.lat, prevWp.lon, currentWp.lat, currentWp.lon);
+                        } else {
+                            distance = (window as any).modalCalculateStraightLineDistance(prevWp.lat, prevWp.lon, currentWp.lat, currentWp.lon);
+                        }
+                        
+                        // Calculate and store new speed
+                        const newSpeed = distance / timeDiffHours;
+                        prevWp.plannedSpeed = newSpeed;
+                        
+                        console.debug(`Updated waypoint ${waypointIndex} ETA, calculated speed for leg ${waypointIndex - 1}: ${newSpeed.toFixed(1)} kts`);
+                    }
+                }
+            }
+            
+            // Trigger reactivity
+            gpxRoute = [...gpxRoute];
+            
+            // Recalculate all subsequent ETAs
+            (window as any).recalculateETAsFromWaypoint(waypointIndex);
+            
+            // Save changes
+            saveGpxRoute();
+            
+            // Update the modal display
+            (window as any).refreshModalETAs();
+        };
+
+        // Helper function to get waypoint ETA
+        (window as any).getWaypointETA = (waypointIndex: number) => {
+            if (waypointIndex < 0 || waypointIndex >= gpxRoute.length) {
+                return new Date(); // Fallback to current time
+            }
+            
+            const wp = gpxRoute[waypointIndex];
+            
+            // If this waypoint has a time, use it
+            if (wp.time) {
+                return new Date(wp.time);
+            }
+            
+            // If this is the first waypoint and we have departure time, use it
+            if (waypointIndex === 0 && routeStartTime) {
+                return new Date(routeStartTime);
+            }
+            
+            // For other waypoints, calculate based on previous waypoint
+            if (waypointIndex > 0) {
+                const prevWp = gpxRoute[waypointIndex - 1];
+                const prevETA = (window as any).getWaypointETA(waypointIndex - 1);
+                
+                if (prevWp.plannedSpeed && prevWp.plannedSpeed > 0) {
+                    // Calculate distance to current waypoint
+                    const legType = prevWp.type || 'RL';
+                    let distance;
+                    if (legType === 'GC') {
+                        distance = (window as any).modalCalculateGreatCircleDistance(prevWp.lat, prevWp.lon, wp.lat, wp.lon);
+                    } else {
+                        distance = (window as any).modalCalculateStraightLineDistance(prevWp.lat, prevWp.lon, wp.lat, wp.lon);
+                    }
+                    
+                    // Calculate time needed
+                    const timeNeededHours = distance / prevWp.plannedSpeed;
+                    const timeNeededMs = timeNeededHours * 60 * 60 * 1000;
+                    
+                    return new Date(prevETA.getTime() + timeNeededMs);
+                }
+            }
+            
+            return new Date(); // Fallback to current time
+        };
+
+        // Helper function to recalculate ETAs from a specific waypoint onwards
+        (window as any).recalculateETAsFromWaypoint = (startIndex: number) => {
+            for (let i = startIndex; i < gpxRoute.length - 1; i++) {
+                const wp = gpxRoute[i];
+                const nextWp = gpxRoute[i + 1];
+                
+                if (!wp.plannedSpeed) continue;
+                
+                // Calculate distance
+                const legType = wp.type || 'RL';
+                let distance;
+                if (legType === 'GC') {
+                    distance = (window as any).modalCalculateGreatCircleDistance(wp.lat, wp.lon, nextWp.lat, nextWp.lon);
+                } else {
+                    distance = (window as any).modalCalculateStraightLineDistance(wp.lat, wp.lon, nextWp.lat, nextWp.lon);
+                }
+                
+                // Get current waypoint ETA
+                const currentETA = (window as any).getWaypointETA(i);
+                
+                // Calculate time needed
+                const timeNeededHours = distance / wp.plannedSpeed;
+                const timeNeededMs = timeNeededHours * 60 * 60 * 1000;
+                
+                // Set next waypoint ETA
+                const nextETA = new Date(currentETA.getTime() + timeNeededMs);
+                nextWp.time = nextETA.toISOString();
+            }
+        };
+
+        // Function to refresh ETA displays in the modal
+        (window as any).refreshModalETAs = () => {
+            const modal = document.getElementById('leg-editor-modal-external');
+            if (!modal) return;
+            
+            const rows = modal.querySelectorAll('tbody tr');
+            rows.forEach((row, index) => {
+                const etaCell = (row as HTMLTableRowElement).cells[6]; // ETA column is 7th (index 6)
+                const speedCell = (row as HTMLTableRowElement).cells[4]; // Speed column is 5th (index 4)
+                
+                if (etaCell && speedCell) {
+                    const wp = gpxRoute[index];
+                    const nextWp = gpxRoute[index + 1];
+                    
+                    if (wp && nextWp) {
+                        // Update speed display
+                        const speedInput = speedCell.querySelector('input') as HTMLInputElement;
+                        if (speedInput && wp.plannedSpeed) {
+                            speedInput.value = wp.plannedSpeed.toFixed(1);
+                        }
+                        
+                        // Update ETA display
+                        if (index >= nextWaypointIndex) {
+                            const etaInput = etaCell.querySelector('input') as HTMLInputElement;
+                            if (etaInput) {
+                                let etaDate;
+                                if (nextWp.time) {
+                                    etaDate = new Date(nextWp.time);
+                                } else {
+                                    etaDate = (window as any).getWaypointETA(index + 1);
+                                }
+                                
+                                if (etaDate && !isNaN(etaDate.getTime())) {
+                                    const isoString = etaDate.toISOString();
+                                    etaInput.value = isoString.slice(0, 16); // YYYY-MM-DDTHH:MM format
+                                }
+                            }
+                        }
+                    }
+                }
+            });
         };
 
         // Add to document body
@@ -2310,13 +2615,13 @@
         resetNoFrameTimer();
         
         if (!data.startsWith('$') && !data.startsWith('!')) {
-            addError("[Err] Invalid NMEA frame");
+            console.debug("Invalid NMEA frame format:", data);
             return null;
         }
         
-        // Validate NMEA checksum
+        // Validate NMEA checksum (silently fail if invalid)
         if (!validateNMEAChecksum(data)) {
-            addError("[Err] NMEA checksum validation failed");
+            console.debug("NMEA checksum validation failed for:", data);
             return null;
         }    
         
@@ -2329,17 +2634,17 @@
         // Decoding classic GPS frames
         if (data.includes('GLL')) {
             if (parts.length < 6) {
-                addError("[Err] Invalid GLL frame - insufficient parts");
+                console.debug("Invalid GLL frame - insufficient parts");
                 return null;
             }
             if (parts[6] === 'V') {
-                addError("[Err] Invalid GLL frame - status invalid");
+                console.debug("Invalid GLL frame - status invalid");
                 return null;
             }
             const parsedLat = parseFloat(parts[1]);
             const parsedLon = parseFloat(parts[3]);
             if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLon)) {
-                addError("[Err] Invalid GLL frame - invalid coordinates");
+                console.debug("Invalid GLL frame - invalid coordinates");
                 return null;
             }
             latitudesal = parsedLat;
@@ -2349,17 +2654,17 @@
             frameType = 'GLL';
         } else if (data.includes('GGA')) {
             if (parts.length < 7) {
-                addError("[Err] Invalid GGA frame - insufficient parts");
+                console.debug("Invalid GGA frame - insufficient parts");
                 return null;
             }
             if (parts[6] === '0' || parts[6] === 'V') {
-                addError("[Err] Invalid GGA frame - no GPS fix");
+                console.debug("Invalid GGA frame - no GPS fix");
                 return null;
             }
             const parsedLat = parseFloat(parts[2]);
             const parsedLon = parseFloat(parts[4]);
             if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLon)) {
-                addError("[Err] Invalid GGA frame - invalid coordinates");
+                console.debug("Invalid GGA frame - invalid coordinates");
                 return null;
             }
             latitudesal = parsedLat;
@@ -2369,17 +2674,17 @@
             frameType = 'GGA';
         } else if (data.includes('RMC')) {
             if (parts.length < 9) {
-                addError("[Err] Invalid RMC frame - insufficient parts");
+                console.debug("Invalid RMC frame - insufficient parts");
                 return null;
             }
             if (parts[2] === 'V') {
-                addError("[Err] Invalid RMC frame - status invalid");
+                console.debug("Invalid RMC frame - status invalid");
                 return null;
             }
             const parsedLat = parseFloat(parts[3]);
             const parsedLon = parseFloat(parts[5]);
             if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLon)) {
-                addError("[Err] Invalid RMC frame - invalid coordinates");
+                console.debug("Invalid RMC frame - invalid coordinates");
                 return null;
             }
             latitudesal = parsedLat;
@@ -2391,7 +2696,7 @@
             frameType = 'RMC';
         } else if (data.includes('VTG')) {
             if (parts.length < 6) {
-                addError("[Err] Invalid VTG frame - insufficient parts");
+                console.debug("Invalid VTG frame - insufficient parts");
                 return null;
             }
             courseOverGroundT = parseFloat(parts[1]);
@@ -2408,14 +2713,14 @@
             frameType = 'VTG';
         } else if (data.includes('HDG')) {
             if (parts.length < 5) {
-                addError("[Err] Invalid HDG frame - insufficient parts");
+                console.debug("Invalid HDG frame - insufficient parts");
                 return null;
             }
             // HDG contains magnetic course and variation (not used in current implementation)
             frameType = 'HDG';
         } else if (data.includes('HDT')) {
             if (parts.length < 2) {
-                addError("[Err] Invalid HDT frame - insufficient parts");
+                console.debug("Invalid HDT frame - insufficient parts");
                 return null;
             }
             trueHeading = parseFloat(parts[1]);
@@ -2437,14 +2742,14 @@
             if (latitude !== null && longitude !== null) {
                 // First check if coordinates are valid
                 if (!validateCoordinates(latitude, longitude)) {
-                    addError("[Err] Invalid coordinates - frame rejected");
+                    console.debug("Invalid coordinates - frame rejected");
                     return frameType;
                 }
                 
                 // Pass speed if available for better validation
                 const currentSpeed = speedOverGround && !Number.isNaN(speedOverGround) ? speedOverGround : undefined;
                 if (!validatePositionJump(latitude, longitude, currentSpeed)) {
-                    addError("[Err] Position jump detected - frame rejected");
+                    console.debug("Position jump detected - frame rejected");
                     return frameType; // Return frameType to indicate frame was processed but position rejected
                 }
             }
@@ -2489,7 +2794,7 @@
         if (data.startsWith('!') && data.includes('VDO')) {
             const parts = data.split(',');
             if (parts.length < 6) {
-                addError("[Err] Invalid AIS VDO frame - insufficient parts");
+                console.debug("Invalid AIS VDO frame - insufficient parts");
                 return null;
             }
             
@@ -2507,7 +2812,7 @@
         if (data.startsWith('!') && data.includes('AIVDM')) {
             const parts = data.split(',');
             if (parts.length < 6) {
-                addError("[Err] Invalid AIS AIVDM frame - insufficient parts");
+                console.debug("Invalid AIS AIVDM frame - insufficient parts");
                 return null;
             }
             
@@ -4159,12 +4464,12 @@
             }
         }
         /*
-            * AIS Binary Acknowledge (Type 7) and Binary Broadcast Message (Type 8)
+            * AIS Binary Acknowledge (Type 7)
             * https://www.navcen.uscg.gov/ais-binary-messages
         */
         if (msgType === 7) {
             // Binary Acknowledge
-            console.debug(`AIS Binary Acknowledge (Type 7) from MMSI ${mmsi}`);
+            // console.debug(`AIS Binary Acknowledge (Type 7) from MMSI ${mmsi}`);
             // Sequence Number (bits 38-39, 2 bits)
             const seqNum = parseInt(bitstring.slice(38, 40), 2);
             // Destination MMSI (bits 40-69, 30 bits)
@@ -4182,7 +4487,7 @@
                     messageIds.push(msgId);
                 }
             }
-            console.debug(`Type 7 - Seq: ${seqNum}, Dest: ${destMMSI}, Retransmit: ${retransmit}, Messages Acknowledged: ${messageIds.join(', ')}`);
+            // console.debug(`Type 7 - Seq: ${seqNum}, Dest: ${destMMSI}, Retransmit: ${retransmit}, Messages Acknowledged: ${messageIds.join(', ')}`);
         }
 
         /*
@@ -4191,8 +4496,8 @@
         */
         if (msgType === 8) {
             // Binary Broadcast Message
-            console.debug(`AIS Binary Broadcast Message (Type 8) from MMSI ${mmsi}`);
-            console.debug(`Type 8 - Full bitstring length: ${bitstring.length} bits`);
+            // console.debug(`AIS Binary Broadcast Message (Type 8) from MMSI ${mmsi}`);
+            // console.debug(`Type 8 - Full bitstring length: ${bitstring.length} bits`);
             
             // Application Identifier (DAC/FID) (bits 40-55, 16 bits)
             const dac = parseInt(bitstring.slice(40, 50), 2); // Designated Area Code (10 bits)
@@ -4201,11 +4506,11 @@
             // Binary data payload (bits 56+, variable length)
             const binaryData = bitstring.slice(56);
             
-            console.debug(`Type 8 - DAC: ${dac}, FID: ${fid}, Data length: ${binaryData.length} bits`);
+            // console.debug(`Type 8 - DAC: ${dac}, FID: ${fid}, Data length: ${binaryData.length} bits`);
             
             // Add debug logging for text-based messages
             if (dac === 1 && (fid === 0 || fid === 29)) {
-                console.debug(`Type 8 Binary data (first 60 bits): ${binaryData.slice(0, Math.min(60, binaryData.length))}`);
+                // console.debug(`Type 8 Binary data (first 60 bits): ${binaryData.slice(0, Math.min(60, binaryData.length))}`);
             }
             
             // Handle specific DAC/FID combinations
@@ -4213,7 +4518,7 @@
                 switch (fid) {
                     case 0: // Text using 6-bit ASCII
                         let text = '';
-                        console.debug(`Type 8 FID 0 - Processing ${binaryData.length} bits of text data`);
+                        // console.debug(`Type 8 FID 0 - Processing ${binaryData.length} bits of text data`);
                         for (let i = 0; i < binaryData.length; i += 6) {
                             if (i + 6 <= binaryData.length) {
                                 const charCode = parseInt(binaryData.slice(i, i + 6), 2);
@@ -4226,7 +4531,177 @@
                         break;
                     case 11: // Meteorological and Hydrographic Data
                         console.debug(`Type 8 Met/Hydro Data from ${mmsi}`);
-                        // Could decode detailed weather data here
+                        if (binaryData.length >= 352) { // Full message is 352 bits
+                            // Position (bits 0-54)
+                            const lonRaw = parseInt(binaryData.slice(0, 25), 2);
+                            const latRaw = parseInt(binaryData.slice(25, 49), 2);
+                            
+                            // Two's complement correction for 25 bits (longitude)
+                            let metLon = (lonRaw & 0x1000000) ? (lonRaw - 0x2000000) : lonRaw;
+                            // Two's complement correction for 24 bits (latitude)
+                            let metLat = (latRaw & 0x800000) ? (latRaw - 0x1000000) : latRaw;
+                            
+                            // Convert to decimal degrees (units of 1/1000 minutes)
+                            metLat = metLat / 60000.0;
+                            metLon = metLon / 60000.0;
+                            
+                            // Position accuracy (bit 49)
+                            const positionAccuracy = parseInt(binaryData.slice(49, 50), 2);
+                            
+                            // UTC Day/Hour/Minute (bits 50-66)
+                            const utcDay = parseInt(binaryData.slice(50, 55), 2);
+                            const utcHour = parseInt(binaryData.slice(55, 60), 2);
+                            const utcMin = parseInt(binaryData.slice(60, 66), 2);
+                            
+                            // Average Wind Speed (bits 66-73) - 0.5 m/s resolution
+                            const avgWindSpeedRaw = parseInt(binaryData.slice(66, 73), 2);
+                            const avgWindSpeed = avgWindSpeedRaw === 127 ? 'N/A' : (avgWindSpeedRaw * 0.5).toFixed(1);
+                            
+                            // Wind Gust Speed (bits 73-80) - 0.5 m/s resolution
+                            const windGustRaw = parseInt(binaryData.slice(73, 80), 2);
+                            const windGust = windGustRaw === 127 ? 'N/A' : (windGustRaw * 0.5).toFixed(1);
+                            
+                            // Wind Direction (bits 80-89) - degrees
+                            const windDirRaw = parseInt(binaryData.slice(80, 89), 2);
+                            const windDir = windDirRaw === 511 ? 'N/A' : windDirRaw;
+                            
+                            // Wind Gust Direction (bits 89-98) - degrees
+                            const windGustDirRaw = parseInt(binaryData.slice(89, 98), 2);
+                            const windGustDir = windGustDirRaw === 511 ? 'N/A' : windGustDirRaw;
+                            
+                            // Air Temperature (bits 98-109) - 0.1°C resolution, -60°C offset
+                            const airTempRaw = parseInt(binaryData.slice(98, 109), 2);
+                            const airTemp = airTempRaw === 2047 ? 'N/A' : ((airTempRaw * 0.1) - 60).toFixed(1);
+                            
+                            // Relative Humidity (bits 109-116) - percentage
+                            const humidityRaw = parseInt(binaryData.slice(109, 116), 2);
+                            const humidity = humidityRaw === 127 ? 'N/A' : humidityRaw;
+                            
+                            // Dew Point (bits 116-126) - 0.1°C resolution, -20°C offset
+                            const dewPointRaw = parseInt(binaryData.slice(116, 126), 2);
+                            const dewPoint = dewPointRaw === 1023 ? 'N/A' : ((dewPointRaw * 0.1) - 20).toFixed(1);
+                            
+                            // Air Pressure (bits 126-135) - 1 hPa offset from 800 hPa
+                            const pressureRaw = parseInt(binaryData.slice(126, 135), 2);
+                            const pressure = pressureRaw === 511 ? 'N/A' : (pressureRaw + 800);
+                            
+                            // Air Pressure Tendency (bits 135-137)
+                            const pressureTendencyRaw = parseInt(binaryData.slice(135, 137), 2);
+                            const pressureTendencies = ['Steady', 'Decreasing', 'Increasing', 'N/A'];
+                            const pressureTendency = pressureTendencies[pressureTendencyRaw] || 'N/A';
+                            
+                            // Horizontal Visibility (bits 137-145) - 0.1 NM resolution
+                            const visibilityRaw = parseInt(binaryData.slice(137, 145), 2);
+                            const visibility = visibilityRaw === 255 ? 'N/A' : (visibilityRaw * 0.1).toFixed(1);
+                            
+                            // Water Level (bits 145-154) - 0.01m resolution, -10m offset
+                            const waterLevelRaw = parseInt(binaryData.slice(145, 154), 2);
+                            const waterLevel = waterLevelRaw === 511 ? 'N/A' : ((waterLevelRaw * 0.01) - 10).toFixed(2);
+                            
+                            // Water Level Trend (bits 154-156)
+                            const waterTrendRaw = parseInt(binaryData.slice(154, 156), 2);
+                            const waterTrends = ['Steady', 'Decreasing', 'Increasing', 'N/A'];
+                            const waterTrend = waterTrends[waterTrendRaw] || 'N/A';
+                            
+                            // Surface Current Speed (bits 156-164) - 0.1 knots resolution
+                            const currentSpeedRaw = parseInt(binaryData.slice(156, 164), 2);
+                            const currentSpeed = currentSpeedRaw === 255 ? 'N/A' : (currentSpeedRaw * 0.1).toFixed(1);
+                            
+                            // Surface Current Direction (bits 164-173) - degrees
+                            const currentDirRaw = parseInt(binaryData.slice(164, 173), 2);
+                            const currentDir = currentDirRaw === 511 ? 'N/A' : currentDirRaw;
+                            
+                            // Current Speed #2 (bits 173-181) - 0.1 knots resolution
+                            const currentSpeed2Raw = parseInt(binaryData.slice(173, 181), 2);
+                            const currentSpeed2 = currentSpeed2Raw === 255 ? 'N/A' : (currentSpeed2Raw * 0.1).toFixed(1);
+                            
+                            // Current Direction #2 (bits 181-190) - degrees
+                            const currentDir2Raw = parseInt(binaryData.slice(181, 190), 2);
+                            const currentDir2 = currentDir2Raw === 511 ? 'N/A' : currentDir2Raw;
+                            
+                            // Current Depth #2 (bits 190-195) - meters
+                            const currentDepth2Raw = parseInt(binaryData.slice(190, 195), 2);
+                            const currentDepth2 = currentDepth2Raw === 31 ? 'N/A' : currentDepth2Raw;
+                            
+                            // Current Speed #3 (bits 195-203) - 0.1 knots resolution
+                            const currentSpeed3Raw = parseInt(binaryData.slice(195, 203), 2);
+                            const currentSpeed3 = currentSpeed3Raw === 255 ? 'N/A' : (currentSpeed3Raw * 0.1).toFixed(1);
+                            
+                            // Current Direction #3 (bits 203-212) - degrees
+                            const currentDir3Raw = parseInt(binaryData.slice(203, 212), 2);
+                            const currentDir3 = currentDir3Raw === 511 ? 'N/A' : currentDir3Raw;
+                            
+                            // Current Depth #3 (bits 212-217) - meters
+                            const currentDepth3Raw = parseInt(binaryData.slice(212, 217), 2);
+                            const currentDepth3 = currentDepth3Raw === 31 ? 'N/A' : currentDepth3Raw;
+                            
+                            // Significant Wave Height (bits 217-225) - 0.1m resolution
+                            const waveHeightRaw = parseInt(binaryData.slice(217, 225), 2);
+                            const waveHeight = waveHeightRaw === 255 ? 'N/A' : (waveHeightRaw * 0.1).toFixed(1);
+                            
+                            // Wave Period (bits 225-231) - seconds
+                            const wavePeriodRaw = parseInt(binaryData.slice(225, 231), 2);
+                            const wavePeriod = wavePeriodRaw === 63 ? 'N/A' : wavePeriodRaw;
+                            
+                            // Wave Direction (bits 231-240) - degrees
+                            const waveDirRaw = parseInt(binaryData.slice(231, 240), 2);
+                            const waveDir = waveDirRaw === 511 ? 'N/A' : waveDirRaw;
+                            
+                            // Swell Height (bits 240-248) - 0.1m resolution
+                            const swellHeightRaw = parseInt(binaryData.slice(240, 248), 2);
+                            const swellHeight = swellHeightRaw === 255 ? 'N/A' : (swellHeightRaw * 0.1).toFixed(1);
+                            
+                            // Swell Period (bits 248-254) - seconds
+                            const swellPeriodRaw = parseInt(binaryData.slice(248, 254), 2);
+                            const swellPeriod = swellPeriodRaw === 63 ? 'N/A' : swellPeriodRaw;
+                            
+                            // Swell Direction (bits 254-263) - degrees
+                            const swellDirRaw = parseInt(binaryData.slice(254, 263), 2);
+                            const swellDir = swellDirRaw === 511 ? 'N/A' : swellDirRaw;
+                            
+                            // Sea State (bits 263-267) - Beaufort scale
+                            const seaStateRaw = parseInt(binaryData.slice(263, 267), 2);
+                            const seaStateDescriptions = [
+                                'Calm (glassy)', 'Calm (rippled)', 'Smooth', 'Slight', 
+                                'Moderate', 'Rough', 'Very rough', 'High', 
+                                'Very high', 'Phenomenal', 'N/A', 'N/A', 
+                                'N/A', 'N/A', 'N/A', 'N/A'
+                            ];
+                            const seaState = seaStateDescriptions[seaStateRaw] || 'N/A';
+                            
+                            // Water Temperature (bits 267-277) - 0.1°C resolution, -10°C offset
+                            const waterTempRaw = parseInt(binaryData.slice(267, 277), 2);
+                            const waterTemp = waterTempRaw === 1023 ? 'N/A' : ((waterTempRaw * 0.1) - 10).toFixed(1);
+                            
+                            // Precipitation (bits 277-279)
+                            const precipRaw = parseInt(binaryData.slice(277, 279), 2);
+                            const precipTypes = ['None', 'Rain', 'Snow', 'N/A'];
+                            const precipitation = precipTypes[precipRaw] || 'N/A';
+                            
+                            // Salinity (bits 279-288) - 0.1‰ resolution
+                            const salinityRaw = parseInt(binaryData.slice(279, 288), 2);
+                            const salinity = salinityRaw === 511 ? 'N/A' : (salinityRaw * 0.1).toFixed(1);
+                            
+                            // Ice Coverage (bits 288-290)
+                            const iceRaw = parseInt(binaryData.slice(288, 290), 2);
+                            const iceTypes = ['None', 'Light', 'Moderate', 'Heavy'];
+                            const ice = iceTypes[iceRaw] || 'N/A';
+                            
+                            console.log(`🌊 METEOROLOGICAL DATA from MMSI ${mmsi}:`);
+                            console.log(`📍 Position: ${metLat.toFixed(5)}°, ${metLon.toFixed(5)}° (Accuracy: ${positionAccuracy ? 'High' : 'Low'})`);
+                            console.log(`🕐 Time: Day ${utcDay}, ${String(utcHour).padStart(2, '0')}:${String(utcMin).padStart(2, '0')} UTC`);
+                            console.log(`💨 Wind: ${avgWindSpeed} m/s from ${windDir}° (Gusts: ${windGust} m/s from ${windGustDir}°)`);
+                            console.log(`🌡️ Air: ${airTemp}°C, Humidity: ${humidity}%, Dew Point: ${dewPoint}°C`);
+                            console.log(`📊 Pressure: ${pressure} hPa (${pressureTendency}), Visibility: ${visibility} NM`);
+                            console.log(`🌊 Water: ${waterTemp}°C, Level: ${waterLevel}m (${waterTrend}), Salinity: ${salinity}‰`);
+                            console.log(`🌊 Waves: ${waveHeight}m @ ${wavePeriod}s from ${waveDir}°, Swell: ${swellHeight}m @ ${swellPeriod}s from ${swellDir}°`);
+                            console.log(`⚡ Sea State: ${seaState}, Current: ${currentSpeed} kt from ${currentDir}°`);
+                            if (currentSpeed2 !== 'N/A') console.log(`🌊 Current L2 (${currentDepth2}m): ${currentSpeed2} kt from ${currentDir2}°`);
+                            if (currentSpeed3 !== 'N/A') console.log(`🌊 Current L3 (${currentDepth3}m): ${currentSpeed3} kt from ${currentDir3}°`);
+                            console.log(`☔ Precipitation: ${precipitation}, Ice: ${ice}`);
+                        } else {
+                            console.debug(`Type 8 Met/Hydro Data: Insufficient data length (${binaryData.length} bits, need 352)`);
+                        }
                         break;
                     case 13: // Fairway Closed
                         console.debug(`Type 8 Fairway Closed notification from ${mmsi}`);
@@ -4293,7 +4768,7 @@
                         console.debug(`Type 8 Unknown International FID ${fid} from ${mmsi}`);
                 }
             } else {
-                console.debug(`Type 8 Regional DAC ${dac}, FID ${fid} from ${mmsi}`);
+                //console.debug(`Type 8 Regional DAC ${dac}, FID ${fid} from ${mmsi}`);
                 
                 // Handle some common regional applications
                 if (dac === 316 && fid === 1) { // US/Canada - Text message
@@ -4307,7 +4782,7 @@
                     }
                     console.debug(`Type 8 US/Canada Text: "${text.trim()}"`);
                 } else if (dac === 200) { // European inland waterways
-                    console.debug(`Type 8 European Inland Waterways message from ${mmsi}`);
+                    // console.debug(`Type 8 European Inland Waterways message from ${mmsi}`);
                 }
             }
         }
@@ -4736,7 +5211,7 @@
             }
             name = name.replace(/@+$/, '').trim();
 
-            console.debug(`%c Virtual AtoN detected: ${name} in position (${lat.toFixed(5)}, ${lon.toFixed(5)})`, 'background: #FFF; color: #F00');
+            // console.debug(`%c Virtual AtoN detected: ${name} in position (${lat.toFixed(5)}, ${lon.toFixed(5)})`, 'background: #FFF; color: #F00');
 
             // AtoN type (bits 38-42)
             const atonType = parseInt(bitstring.slice(38, 43), 2);
@@ -4795,7 +5270,7 @@
                 
                 // Save AtoN data to localStorage only for new markers
                 if (isNewAtoN) {
-                    console.debug(`New AtoN discovered - saving data: ${Object.keys(atonMarkers).length} markers`);
+                    // console.debug(`New AtoN discovered - saving data: ${Object.keys(atonMarkers).length} markers`);
                     saveAtoNData(atonMarkers);
                 }
             }
@@ -4969,7 +5444,7 @@
             }
             routeMetadata = {
                 name: metadata.getElementsByTagName('name')[0]?.textContent?.trim() || 'Unknown Route',
-                filename: metadata.getElementsByTagName('filename')[0]?.textContent?.trim() || 'No Name Route',
+                filename: metadata.getElementsByTagName('filename')[0]?.textContent?.trim() || fileName,
                 desc: metadata.getElementsByTagName('desc')[0]?.textContent?.trim() || '',
                 author: authorName,
                 time: metadata.getElementsByTagName('time')[0]?.textContent?.trim() || '',
@@ -4986,7 +5461,15 @@
             // Store or display the metadata as needed
             console.debug('Route Metadata:', routeMetadata);
         } else {
-            routeMetadata = {};
+            // When there's no metadata section, at least preserve the filename
+            routeMetadata = {
+                name: 'Unknown Route',
+                filename: fileName,
+                desc: '',
+                author: 'Unknown',
+                time: '',
+                keywords: '',
+            };
         }
     }
 
@@ -5029,7 +5512,7 @@
             }
 
             // Always use a new waypoints array for reactivity
-            let waypoints: Array<{lat: number, lon: number, name?: string, time?: Date, passedTime?: Date, type?: string}> = [];
+            let waypoints: Array<{lat: number, lon: number, name?: string, time?: string | Date, passedTime?: Date, type?: string, plannedSpeed?: number}> = [];
 
             // PRIORITY 1: Extract route points (rtept) from route blocks
             const routePoints = xmlDoc.getElementsByTagName('rtept');
@@ -5103,7 +5586,7 @@
             }
             
             // Extract departure time from first waypoint
-            routeStartTime = waypoints[0].time || null;
+            routeStartTime = waypoints[0].time ? (waypoints[0].time instanceof Date ? waypoints[0].time : new Date(waypoints[0].time)) : null;
             
             // Success - load the route
             gpxRoute = [...waypoints]; // Ensure Svelte reactivity
@@ -6894,24 +7377,30 @@
 
     /**
      * Formats a date as dd/mm/yyyy
-     * @param date Date object to format
+     * @param date Date object or ISO string to format
      * @returns Formatted date string in dd/mm/yyyy format
     */
-    function formatDateDDMMYYYY(date: Date): string {
-        const day = date.getDate().toString().padStart(2, '0');
-        const month = (date.getMonth() + 1).toString().padStart(2, '0');
-        const year = date.getFullYear();
+    function formatDateDDMMYYYY(date: Date | string): string {
+        const dateObj = date instanceof Date ? date : new Date(date);
+        if (isNaN(dateObj.getTime())) return 'Invalid Date';
+        
+        const day = dateObj.getDate().toString().padStart(2, '0');
+        const month = (dateObj.getMonth() + 1).toString().padStart(2, '0');
+        const year = dateObj.getFullYear();
         return `${day}/${month}/${year}`;
     }
 
     /**
      * Formats time as HH:MM (24-hour format)
-     * @param date Date object to format
+     * @param date Date object or ISO string to format
      * @returns Formatted time string in HH:MM format
     */
-    function formatTime24Hour(date: Date): string {
-        const hours = date.getHours().toString().padStart(2, '0');
-        const minutes = date.getMinutes().toString().padStart(2, '0');
+    function formatTime24Hour(date: Date | string): string {
+        const dateObj = date instanceof Date ? date : new Date(date);
+        if (isNaN(dateObj.getTime())) return 'Invalid Time';
+        
+        const hours = dateObj.getHours().toString().padStart(2, '0');
+        const minutes = dateObj.getMinutes().toString().padStart(2, '0');
         return `${hours}:${minutes}`;
     }
 
@@ -6929,11 +7418,14 @@
 
     /**
      * Formats date and time together
-     * @param date Date object to format
+     * @param date Date object or ISO string to format
      * @returns Formatted date and time string in dd/mm/yyyy HH:MM format
     */
-    function formatDateTime(date: Date): string {
-        return `${formatDateDDMMYYYY(date)} ${formatTime24Hour(date)}`;
+    function formatDateTime(date: Date | string): string {
+        const dateObj = date instanceof Date ? date : new Date(date);
+        if (isNaN(dateObj.getTime())) return 'Invalid DateTime';
+        
+        return `${formatDateDDMMYYYY(dateObj)} ${formatTime24Hour(dateObj)}`;
     }
 
     /**
