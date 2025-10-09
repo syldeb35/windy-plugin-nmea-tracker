@@ -2632,7 +2632,7 @@
         let frameType: string | null = null; // Track which frame type was processed
 
         // Decoding classic GPS frames
-        if (data.includes('GLL')) {
+        if (parts[0].includes('GLL')) {
             if (parts.length < 6) {
                 console.debug("Invalid GLL frame - insufficient parts");
                 return null;
@@ -2652,7 +2652,7 @@
             longitudesal = parsedLon;
             lonDirection = parts[4];
             frameType = 'GLL';
-        } else if (data.includes('GGA')) {
+        } else if (parts[0].includes('GGA')) {
             if (parts.length < 7) {
                 console.debug("Invalid GGA frame - insufficient parts");
                 return null;
@@ -2672,9 +2672,9 @@
             longitudesal = parsedLon;
             lonDirection = parts[5];
             frameType = 'GGA';
-        } else if (data.includes('RMC')) {
+        } else if (parts[0].includes('RMC')) {
             if (parts.length < 9) {
-                console.debug("Invalid RMC frame - insufficient parts");
+                console.debug("Invalid RMC frame - insufficient parts", data);
                 return null;
             }
             if (parts[2] === 'V') {
@@ -2694,7 +2694,7 @@
             speedOverGround = parseFloat(parts[7]);
             courseOverGroundT = parseFloat(parts[8]);
             frameType = 'RMC';
-        } else if (data.includes('VTG')) {
+        } else if (parts[0].includes('VTG')) {
             if (parts.length < 6) {
                 console.debug("Invalid VTG frame - insufficient parts");
                 return null;
@@ -2711,14 +2711,14 @@
                 speedOverGround = parseFloat(parts[5]) / 1852 * 3600;
             }
             frameType = 'VTG';
-        } else if (data.includes('HDG')) {
+        } else if (parts[0].includes('HDG')) {
             if (parts.length < 5) {
                 console.debug("Invalid HDG frame - insufficient parts");
                 return null;
             }
             // HDG contains magnetic course and variation (not used in current implementation)
             frameType = 'HDG';
-        } else if (data.includes('HDT')) {
+        } else if (parts[0].includes('HDT')) {
             if (parts.length < 2) {
                 console.debug("Invalid HDT frame - insufficient parts");
                 return null;
@@ -4751,7 +4751,7 @@
                             for (let i = 10; i < binaryData.length; i += 6) {
                                 if (i + 6 <= binaryData.length) {
                                     const charCode = parseInt(binaryData.slice(i, i + 6), 2);
-                                    console.debug(`Type 8 FID 29 - Char ${(i-10)/6}: code ${charCode} = '${aisAscii(charCode)}'`);
+                                    // console.debug(`Type 8 FID 29 - Char ${(i-10)/6}: code ${charCode} = '${aisAscii(charCode)}'`);
                                     if (charCode === 0) break;
                                     description += aisAscii(charCode);
                                 }
@@ -4789,7 +4789,7 @@
 
         /*
             * AIS Search and Rescue Aircraft Position Report (Type 9)
-            * https://www.navcen.uscg.gov/ais-search-and-rescue-aircraft-position-report-message-9
+            * https://www.navcen.uscg.gov/ais-search-and-rescue-aircraft-position-report-message9
         */
         if (msgType === 9) {
             // SAR Aircraft Position Report
