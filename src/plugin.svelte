@@ -388,6 +388,7 @@
     import config from './pluginConfig';
     import { getCardinalMarkSVG } from './AtoN';
     import { getSpecialMarkSVG } from './AtoN';
+    import { decode } from "punycode";
 
     /**
      * Constants declaration
@@ -4531,177 +4532,7 @@
                         break;
                     case 11: // Meteorological and Hydrographic Data
                         console.debug(`Type 8 Met/Hydro Data from ${mmsi}`);
-                        if (binaryData.length >= 352) { // Full message is 352 bits
-                            // Position (bits 0-54)
-                            const lonRaw = parseInt(binaryData.slice(0, 25), 2);
-                            const latRaw = parseInt(binaryData.slice(25, 49), 2);
-                            
-                            // Two's complement correction for 25 bits (longitude)
-                            let metLon = (lonRaw & 0x1000000) ? (lonRaw - 0x2000000) : lonRaw;
-                            // Two's complement correction for 24 bits (latitude)
-                            let metLat = (latRaw & 0x800000) ? (latRaw - 0x1000000) : latRaw;
-                            
-                            // Convert to decimal degrees (units of 1/1000 minutes)
-                            metLat = metLat / 60000.0;
-                            metLon = metLon / 60000.0;
-                            
-                            // Position accuracy (bit 49)
-                            const positionAccuracy = parseInt(binaryData.slice(49, 50), 2);
-                            
-                            // UTC Day/Hour/Minute (bits 50-66)
-                            const utcDay = parseInt(binaryData.slice(50, 55), 2);
-                            const utcHour = parseInt(binaryData.slice(55, 60), 2);
-                            const utcMin = parseInt(binaryData.slice(60, 66), 2);
-                            
-                            // Average Wind Speed (bits 66-73) - 0.5 m/s resolution
-                            const avgWindSpeedRaw = parseInt(binaryData.slice(66, 73), 2);
-                            const avgWindSpeed = avgWindSpeedRaw === 127 ? 'N/A' : (avgWindSpeedRaw * 0.5).toFixed(1);
-                            
-                            // Wind Gust Speed (bits 73-80) - 0.5 m/s resolution
-                            const windGustRaw = parseInt(binaryData.slice(73, 80), 2);
-                            const windGust = windGustRaw === 127 ? 'N/A' : (windGustRaw * 0.5).toFixed(1);
-                            
-                            // Wind Direction (bits 80-89) - degrees
-                            const windDirRaw = parseInt(binaryData.slice(80, 89), 2);
-                            const windDir = windDirRaw === 511 ? 'N/A' : windDirRaw;
-                            
-                            // Wind Gust Direction (bits 89-98) - degrees
-                            const windGustDirRaw = parseInt(binaryData.slice(89, 98), 2);
-                            const windGustDir = windGustDirRaw === 511 ? 'N/A' : windGustDirRaw;
-                            
-                            // Air Temperature (bits 98-109) - 0.1°C resolution, -60°C offset
-                            const airTempRaw = parseInt(binaryData.slice(98, 109), 2);
-                            const airTemp = airTempRaw === 2047 ? 'N/A' : ((airTempRaw * 0.1) - 60).toFixed(1);
-                            
-                            // Relative Humidity (bits 109-116) - percentage
-                            const humidityRaw = parseInt(binaryData.slice(109, 116), 2);
-                            const humidity = humidityRaw === 127 ? 'N/A' : humidityRaw;
-                            
-                            // Dew Point (bits 116-126) - 0.1°C resolution, -20°C offset
-                            const dewPointRaw = parseInt(binaryData.slice(116, 126), 2);
-                            const dewPoint = dewPointRaw === 1023 ? 'N/A' : ((dewPointRaw * 0.1) - 20).toFixed(1);
-                            
-                            // Air Pressure (bits 126-135) - 1 hPa offset from 800 hPa
-                            const pressureRaw = parseInt(binaryData.slice(126, 135), 2);
-                            const pressure = pressureRaw === 511 ? 'N/A' : (pressureRaw + 800);
-                            
-                            // Air Pressure Tendency (bits 135-137)
-                            const pressureTendencyRaw = parseInt(binaryData.slice(135, 137), 2);
-                            const pressureTendencies = ['Steady', 'Decreasing', 'Increasing', 'N/A'];
-                            const pressureTendency = pressureTendencies[pressureTendencyRaw] || 'N/A';
-                            
-                            // Horizontal Visibility (bits 137-145) - 0.1 NM resolution
-                            const visibilityRaw = parseInt(binaryData.slice(137, 145), 2);
-                            const visibility = visibilityRaw === 255 ? 'N/A' : (visibilityRaw * 0.1).toFixed(1);
-                            
-                            // Water Level (bits 145-154) - 0.01m resolution, -10m offset
-                            const waterLevelRaw = parseInt(binaryData.slice(145, 154), 2);
-                            const waterLevel = waterLevelRaw === 511 ? 'N/A' : ((waterLevelRaw * 0.01) - 10).toFixed(2);
-                            
-                            // Water Level Trend (bits 154-156)
-                            const waterTrendRaw = parseInt(binaryData.slice(154, 156), 2);
-                            const waterTrends = ['Steady', 'Decreasing', 'Increasing', 'N/A'];
-                            const waterTrend = waterTrends[waterTrendRaw] || 'N/A';
-                            
-                            // Surface Current Speed (bits 156-164) - 0.1 knots resolution
-                            const currentSpeedRaw = parseInt(binaryData.slice(156, 164), 2);
-                            const currentSpeed = currentSpeedRaw === 255 ? 'N/A' : (currentSpeedRaw * 0.1).toFixed(1);
-                            
-                            // Surface Current Direction (bits 164-173) - degrees
-                            const currentDirRaw = parseInt(binaryData.slice(164, 173), 2);
-                            const currentDir = currentDirRaw === 511 ? 'N/A' : currentDirRaw;
-                            
-                            // Current Speed #2 (bits 173-181) - 0.1 knots resolution
-                            const currentSpeed2Raw = parseInt(binaryData.slice(173, 181), 2);
-                            const currentSpeed2 = currentSpeed2Raw === 255 ? 'N/A' : (currentSpeed2Raw * 0.1).toFixed(1);
-                            
-                            // Current Direction #2 (bits 181-190) - degrees
-                            const currentDir2Raw = parseInt(binaryData.slice(181, 190), 2);
-                            const currentDir2 = currentDir2Raw === 511 ? 'N/A' : currentDir2Raw;
-                            
-                            // Current Depth #2 (bits 190-195) - meters
-                            const currentDepth2Raw = parseInt(binaryData.slice(190, 195), 2);
-                            const currentDepth2 = currentDepth2Raw === 31 ? 'N/A' : currentDepth2Raw;
-                            
-                            // Current Speed #3 (bits 195-203) - 0.1 knots resolution
-                            const currentSpeed3Raw = parseInt(binaryData.slice(195, 203), 2);
-                            const currentSpeed3 = currentSpeed3Raw === 255 ? 'N/A' : (currentSpeed3Raw * 0.1).toFixed(1);
-                            
-                            // Current Direction #3 (bits 203-212) - degrees
-                            const currentDir3Raw = parseInt(binaryData.slice(203, 212), 2);
-                            const currentDir3 = currentDir3Raw === 511 ? 'N/A' : currentDir3Raw;
-                            
-                            // Current Depth #3 (bits 212-217) - meters
-                            const currentDepth3Raw = parseInt(binaryData.slice(212, 217), 2);
-                            const currentDepth3 = currentDepth3Raw === 31 ? 'N/A' : currentDepth3Raw;
-                            
-                            // Significant Wave Height (bits 217-225) - 0.1m resolution
-                            const waveHeightRaw = parseInt(binaryData.slice(217, 225), 2);
-                            const waveHeight = waveHeightRaw === 255 ? 'N/A' : (waveHeightRaw * 0.1).toFixed(1);
-                            
-                            // Wave Period (bits 225-231) - seconds
-                            const wavePeriodRaw = parseInt(binaryData.slice(225, 231), 2);
-                            const wavePeriod = wavePeriodRaw === 63 ? 'N/A' : wavePeriodRaw;
-                            
-                            // Wave Direction (bits 231-240) - degrees
-                            const waveDirRaw = parseInt(binaryData.slice(231, 240), 2);
-                            const waveDir = waveDirRaw === 511 ? 'N/A' : waveDirRaw;
-                            
-                            // Swell Height (bits 240-248) - 0.1m resolution
-                            const swellHeightRaw = parseInt(binaryData.slice(240, 248), 2);
-                            const swellHeight = swellHeightRaw === 255 ? 'N/A' : (swellHeightRaw * 0.1).toFixed(1);
-                            
-                            // Swell Period (bits 248-254) - seconds
-                            const swellPeriodRaw = parseInt(binaryData.slice(248, 254), 2);
-                            const swellPeriod = swellPeriodRaw === 63 ? 'N/A' : swellPeriodRaw;
-                            
-                            // Swell Direction (bits 254-263) - degrees
-                            const swellDirRaw = parseInt(binaryData.slice(254, 263), 2);
-                            const swellDir = swellDirRaw === 511 ? 'N/A' : swellDirRaw;
-                            
-                            // Sea State (bits 263-267) - Beaufort scale
-                            const seaStateRaw = parseInt(binaryData.slice(263, 267), 2);
-                            const seaStateDescriptions = [
-                                'Calm (glassy)', 'Calm (rippled)', 'Smooth', 'Slight', 
-                                'Moderate', 'Rough', 'Very rough', 'High', 
-                                'Very high', 'Phenomenal', 'N/A', 'N/A', 
-                                'N/A', 'N/A', 'N/A', 'N/A'
-                            ];
-                            const seaState = seaStateDescriptions[seaStateRaw] || 'N/A';
-                            
-                            // Water Temperature (bits 267-277) - 0.1°C resolution, -10°C offset
-                            const waterTempRaw = parseInt(binaryData.slice(267, 277), 2);
-                            const waterTemp = waterTempRaw === 1023 ? 'N/A' : ((waterTempRaw * 0.1) - 10).toFixed(1);
-                            
-                            // Precipitation (bits 277-279)
-                            const precipRaw = parseInt(binaryData.slice(277, 279), 2);
-                            const precipTypes = ['None', 'Rain', 'Snow', 'N/A'];
-                            const precipitation = precipTypes[precipRaw] || 'N/A';
-                            
-                            // Salinity (bits 279-288) - 0.1‰ resolution
-                            const salinityRaw = parseInt(binaryData.slice(279, 288), 2);
-                            const salinity = salinityRaw === 511 ? 'N/A' : (salinityRaw * 0.1).toFixed(1);
-                            
-                            // Ice Coverage (bits 288-290)
-                            const iceRaw = parseInt(binaryData.slice(288, 290), 2);
-                            const iceTypes = ['None', 'Light', 'Moderate', 'Heavy'];
-                            const ice = iceTypes[iceRaw] || 'N/A';
-                            
-                            console.log(`🌊 METEOROLOGICAL DATA from MMSI ${mmsi}:`);
-                            console.log(`📍 Position: ${metLat.toFixed(5)}°, ${metLon.toFixed(5)}° (Accuracy: ${positionAccuracy ? 'High' : 'Low'})`);
-                            console.log(`🕐 Time: Day ${utcDay}, ${String(utcHour).padStart(2, '0')}:${String(utcMin).padStart(2, '0')} UTC`);
-                            console.log(`💨 Wind: ${avgWindSpeed} m/s from ${windDir}° (Gusts: ${windGust} m/s from ${windGustDir}°)`);
-                            console.log(`🌡️ Air: ${airTemp}°C, Humidity: ${humidity}%, Dew Point: ${dewPoint}°C`);
-                            console.log(`📊 Pressure: ${pressure} hPa (${pressureTendency}), Visibility: ${visibility} NM`);
-                            console.log(`🌊 Water: ${waterTemp}°C, Level: ${waterLevel}m (${waterTrend}), Salinity: ${salinity}‰`);
-                            console.log(`🌊 Waves: ${waveHeight}m @ ${wavePeriod}s from ${waveDir}°, Swell: ${swellHeight}m @ ${swellPeriod}s from ${swellDir}°`);
-                            console.log(`⚡ Sea State: ${seaState}, Current: ${currentSpeed} kt from ${currentDir}°`);
-                            if (currentSpeed2 !== 'N/A') console.log(`🌊 Current L2 (${currentDepth2}m): ${currentSpeed2} kt from ${currentDir2}°`);
-                            if (currentSpeed3 !== 'N/A') console.log(`🌊 Current L3 (${currentDepth3}m): ${currentSpeed3} kt from ${currentDir3}°`);
-                            console.log(`☔ Precipitation: ${precipitation}, Ice: ${ice}`);
-                        } else {
-                            console.debug(`Type 8 Met/Hydro Data: Insufficient data length (${binaryData.length} bits, need 352)`);
-                        }
+                        meteoDecode(binaryData, mmsi);
                         break;
                     case 13: // Fairway Closed
                         console.debug(`Type 8 Fairway Closed notification from ${mmsi}`);
@@ -4763,6 +4594,7 @@
                         break;
                     case 31: // Meteorological/Hydrological Data
                         console.debug(`Type 8 Met/Hydro Data (FID 31) from ${mmsi}`);
+                        meteoDecode(bitstring, mmsi);
                         break;
                     default:
                         console.debug(`Type 8 Unknown International FID ${fid} from ${mmsi}`);
@@ -5277,6 +5109,221 @@
         }
     }
     
+    function meteoDecode(binaryData: string, mmsi?: string) {
+        // Decode meteorological and hydrographic data according to IMO289 standard (FID 31)
+        // Handles variable message lengths: 304 bits minimum, up to 360 bits full message
+        console.debug(`Met/Hydro data length: ${binaryData.length} bits`);
+        
+        // Helper function to extract bits with proper offset handling
+        function extractBits(binary: string, start: number, length: number): number {
+            const end = start + length;
+            if (end > binary.length) {
+                console.debug(`Warning: Trying to extract bits ${start}-${end-1} but data only has ${binary.length} bits`);
+                return 0;
+            }
+            const bits = binary.substring(start, end);
+            return parseInt(bits, 2);
+        }
+        
+        // Helper function for signed integers (two's complement)
+        function extractSignedBits(binary: string, start: number, length: number): number {
+            const value = extractBits(binary, start, length);
+            const signBit = 1 << (length - 1);
+            return (value & signBit) ? value - (1 << length) : value;
+        }
+        
+        if (binaryData.length < 122) {
+            console.debug(`Type 8 Met/Hydro Data: Insufficient data length (${binaryData.length} bits, need at least 122)`);
+            return;
+        }
+
+        // Extract fields according to IMO289 standard (FID 31) - starting at bit 56 after header
+        // Header: Message Type (6) + Repeat (2) + MMSI (30) + Spare (2) + DAC (10) + FID (6) = 56 bits
+        
+        // Longitude (bits 56-80): 25 bits, signed, minutes * 0.001
+        const lonRaw = extractSignedBits(binaryData, 56, 25);
+        const metLon = lonRaw === 181000 ? 'N/A' : (lonRaw * 0.001 / 60.0).toFixed(5);
+        
+        // Latitude (bits 81-104): 24 bits, signed, minutes * 0.001  
+        const latRaw = extractSignedBits(binaryData, 81, 24);
+        const metLat = latRaw === 91000 ? 'N/A' : (latRaw * 0.001 / 60.0).toFixed(5);
+        
+        // Position accuracy (bit 105): 1 bit
+        const positionAccuracy = extractBits(binaryData, 105, 1);
+        
+        // Day (bits 106-110): 5 bits, 1-31, 0=N/A
+        const dayRaw = extractBits(binaryData, 106, 5);
+        const utcDay = dayRaw === 0 ? 'N/A' : dayRaw;
+        
+        // Hour (bits 111-115): 5 bits, 0-23, 24=N/A
+        const hourRaw = extractBits(binaryData, 111, 5);
+        const utcHour = hourRaw === 24 ? 'N/A' : hourRaw;
+        
+        // Minute (bits 116-121): 6 bits, 0-59, 60=N/A
+        const minuteRaw = extractBits(binaryData, 116, 6);
+        const utcMin = minuteRaw === 60 ? 'N/A' : minuteRaw;
+        
+        // Wind Speed (bits 122-128): 7 bits, knots, 126=>=126kt, 127=N/A
+        const windSpeedRaw = extractBits(binaryData, 122, 7);
+        const avgWindSpeed = windSpeedRaw === 127 ? 'N/A' : (windSpeedRaw === 126 ? '>=126' : windSpeedRaw.toString());
+        
+        // Gust Speed (bits 129-135): 7 bits, knots, 126=>=126kt, 127=N/A
+        const gustSpeedRaw = extractBits(binaryData, 129, 7);
+        const windGust = gustSpeedRaw === 127 ? 'N/A' : (gustSpeedRaw === 126 ? '>=126' : gustSpeedRaw.toString());
+        
+        // Wind Direction (bits 136-144): 9 bits, 0-359 degrees, 360=N/A
+        const windDirRaw = extractBits(binaryData, 136, 9);
+        const windDir = windDirRaw === 360 ? 'N/A' : windDirRaw.toString();
+        
+        // Wind Gust Direction (bits 145-153): 9 bits, 0-359 degrees, 360=N/A
+        const gustDirRaw = extractBits(binaryData, 145, 9);
+        const windGustDir = gustDirRaw === 360 ? 'N/A' : gustDirRaw.toString();
+        
+        // Air Temperature (bits 154-164): 11 bits, signed, 0.1°C, -60.0 to +60.0, -1024=N/A
+        const airTempRaw = extractSignedBits(binaryData, 154, 11);
+        console.debug(`Air temp raw value: ${airTempRaw} (bits 154-164)`);
+        const airTemp = airTempRaw === -1024 ? 'N/A' : (airTempRaw * 0.1).toFixed(1);
+        
+        // Relative Humidity (bits 165-171): 7 bits, 0-100%, 101=N/A
+        const humidityRaw = extractBits(binaryData, 165, 7);
+        const humidity = humidityRaw === 101 ? 'N/A' : humidityRaw.toString();
+        
+        // Dew Point (bits 172-181): 10 bits, signed, 0.1°C, -20.0 to +50.0, 501=N/A
+        const dewRaw = extractSignedBits(binaryData, 172, 10);
+        const dewPoint = dewRaw === 501 ? 'N/A' : (dewRaw * 0.1).toFixed(1);
+        
+        // Air Pressure (bits 182-190): 9 bits, 800-1200hPa, 0=<=799, 402=>=1201, 511=N/A
+        const pressureRaw = extractBits(binaryData, 182, 9);
+        let pressure = 'N/A';
+        if (pressureRaw === 511) {
+            pressure = 'N/A';
+        } else if (pressureRaw === 0) {
+            pressure = '<=799';
+        } else if (pressureRaw === 402) {
+            pressure = '>=1201';
+        } else {
+            pressure = (pressureRaw + 800).toString();
+        }
+        
+        // Pressure Tendency (bits 191-192): 2 bits, 0=steady, 1=decreasing, 2=increasing, 3=N/A
+        const pressureTrendRaw = extractBits(binaryData, 191, 2);
+        const pressureTrendMap: Record<number, string> = { 0: 'Steady', 1: 'Decreasing', 2: 'Increasing', 3: 'N/A' };
+        const pressureTendency = pressureTrendMap[pressureTrendRaw] || 'N/A';
+        
+        // Initialization for optional fields
+        let visibilityGreater = false;
+        let visibility = 'N/A';
+        let waterLevel = 'N/A';
+        let waterTrend = 'N/A';
+        let currentSpeed = 'N/A';
+        let currentDir = 'N/A';
+        let waterTemp = 'N/A';
+        let precipitation = 'N/A';
+        let ice = 'N/A';
+        let salinity = 'N/A';
+        
+        // Continue with optional fields if we have enough bits
+        if (binaryData.length >= 201) {
+            // Visibility greater than flag (bit 193): 1 bit
+            visibilityGreater = extractBits(binaryData, 193, 1) === 1;
+            
+            // Horizontal Visibility (bits 194-200): 7 bits, 0.1nm units, 127=N/A
+            const visRaw = extractBits(binaryData, 194, 7);
+            visibility = visRaw === 127 ? 'N/A' : (visRaw * 0.1).toFixed(1);
+        }
+        
+        if (binaryData.length >= 215) {
+            // Water Level (bits 201-212): 12 bits, signed, 0.01m, -10.0 to +30.0, 4001=N/A
+            const waterLevelRaw = extractSignedBits(binaryData, 201, 12);
+            waterLevel = waterLevelRaw === 4001 ? 'N/A' : ((waterLevelRaw - 1000) * 0.01).toFixed(2);
+            
+            // Water Level Trend (bits 213-214): 2 bits, 0=steady, 1=decreasing, 2=increasing, 3=N/A
+            const waterTrendRaw = extractBits(binaryData, 213, 2);
+            const waterTrendMap: { [key: number]: string } = { 0: 'Steady', 1: 'Decreasing', 2: 'Increasing', 3: 'N/A' };
+            waterTrend = waterTrendMap[waterTrendRaw] || 'N/A';
+        }
+        
+        if (binaryData.length >= 232) {
+            // Surface Current Speed (bits 215-222): 8 bits, 0.1 knot units, 251=>=25.1kt, 255=N/A
+            const currentSpeedRaw = extractBits(binaryData, 215, 8);
+            if (currentSpeedRaw === 255) {
+                currentSpeed = 'N/A';
+            } else if (currentSpeedRaw === 251) {
+                currentSpeed = '>=25.1';
+            } else {
+                currentSpeed = (currentSpeedRaw * 0.1).toFixed(1);
+            }
+            
+            // Surface Current Direction (bits 223-231): 9 bits, 0-359 degrees, 360=N/A
+            const currentDirRaw = extractBits(binaryData, 223, 9);
+            currentDir = currentDirRaw === 360 ? 'N/A' : currentDirRaw.toString();
+        }
+        
+        if (binaryData.length >= 336) {
+            // Water Temperature (bits 326-335): 10 bits, signed, 0.1°C, -10.0 to 50.0, 501=N/A
+            const waterTempRaw = extractSignedBits(binaryData, 326, 10);
+            console.debug(`Water temp raw value: ${waterTempRaw} (bits 326-335)`);
+            waterTemp = waterTempRaw === 501 ? 'N/A' : (waterTempRaw * 0.1).toFixed(1);
+        }
+        
+        if (binaryData.length >= 339) {
+            // Precipitation Type (bits 336-338): 3 bits, 0=reserved, 1=rain, 2=thunderstorm, 3=freezing rain, 4=mixed/ice, 5=snow, 6=reserved, 7=N/A
+            const precipRaw = extractBits(binaryData, 336, 3);
+            console.debug(`Precipitation raw value: ${precipRaw} (bits 336-338)`);
+            const precipMap: { [key: number]: string } = { 0: 'N/A', 1: 'Rain', 2: 'Thunderstorm', 3: 'Freezing rain', 4: 'Mixed/ice', 5: 'Snow', 6: 'N/A', 7: 'N/A' };
+            precipitation = precipMap[precipRaw] || 'N/A';
+        }
+        
+        if (binaryData.length >= 348) {
+            // Salinity (bits 339-347): 9 bits, 0.1% units, 0.0-50.0%, 501=>=50.1%, 510=N/A, 511=sensor N/A
+            const salinityRaw = extractBits(binaryData, 339, 9);
+            if (salinityRaw === 510 || salinityRaw === 511) {
+                salinity = 'N/A';
+            } else if (salinityRaw === 501) {
+                salinity = '>=50.1';
+            } else {
+                salinity = (salinityRaw * 0.1).toFixed(1);
+            }
+        }
+        
+        if (binaryData.length >= 350) {
+            // Ice (bits 348-349): 2 bits, 0=No, 1=Yes, 2=reserved, 3=N/A
+            const iceRaw = extractBits(binaryData, 348, 2);
+            console.debug(`Ice raw value: ${iceRaw} (bits 348-349)`);
+            const iceMap: { [key: number]: string } = { 0: 'No', 1: 'Yes', 2: 'N/A', 3: 'N/A' };
+            ice = iceMap[iceRaw] || 'N/A';
+        }
+        
+        // Display results
+        console.log(`🌊 METEOROLOGICAL DATA from MMSI ${mmsi} (${binaryData.length} bits) - IMO289 FID 31:`);
+        
+        if (metLat !== 'N/A') {
+            console.log(`📍 Position: ${metLat}°, ${metLon}° (Accuracy: ${positionAccuracy ? 'High' : 'Low'})`);
+        }
+        if (utcDay !== 'N/A') {
+            console.log(`🕐 Time: Day ${utcDay}, ${String(utcHour).padStart(2, '0')}:${String(utcMin).padStart(2, '0')} UTC`);
+        }
+        if (avgWindSpeed !== 'N/A') {
+            console.log(`💨 Wind: ${avgWindSpeed} kt from ${windDir}° (Gusts: ${windGust} kt from ${windGustDir}°)`);
+        }
+        if (airTemp !== 'N/A') {
+            console.log(`🌡️ Air: ${airTemp}°C, Humidity: ${humidity}%, Dew Point: ${dewPoint}°C`);
+        }
+        if (pressure !== 'N/A') {
+            console.log(`📊 Pressure: ${pressure} hPa (${pressureTendency}), Visibility: ${visibility} NM${visibilityGreater ? '+' : ''}`);
+        }
+        if (waterTemp !== 'N/A') {
+            console.log(`🌊 Water: ${waterTemp}°C, Level: ${waterLevel}m (${waterTrend}), Salinity: ${salinity}‰`);
+        }
+        if (currentSpeed !== 'N/A') {
+            console.log(`🌊 Current: ${currentSpeed} kt from ${currentDir}°`);
+        }
+        if (precipitation !== 'N/A' || ice !== 'N/A') {
+            console.log(`☔ Precipitation: ${precipitation}, Ice: ${ice}`);
+        }
+    }
+
+
     /**
      * Décode le payload 6 bits AIS en binaire
      * @param {string} payload - Le payload AIS 6 bits
