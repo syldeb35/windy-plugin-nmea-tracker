@@ -693,7 +693,7 @@
             // Check if this was a user-initiated change to force recalculation
             const forceRecalculation = userInitiatedTimelineChange;
             if (userInitiatedTimelineChange) {
-               console.info('User-initiated timeline change detected, forcing recalculation');
+               // User-initiated timeline change detected, forcing recalculation
                 userInitiatedTimelineChange = false; // Reset the flag
             }
             
@@ -1317,7 +1317,7 @@
                     };
                     
                     restoredCount++;
-                    console.debug('Restored AtoN marker:', atonData.name, 'at', atonData.lat, atonData.lon);
+                    // console.debug('Restored AtoN marker:', atonData.name, 'at', atonData.lat, atonData.lon);
                 } catch (error) {
                     console.warn('Failed to restore AtoN marker for MMSI', mmsi, ':', error);
                 }
@@ -2123,7 +2123,7 @@
 
         // Function to update leg speed and recalculate ETAs
         (window as any).updateLegSpeed = (legIndex: number, newSpeed: number) => {
-            console.debug(`updateLegSpeed called: leg ${legIndex}, speed: ${newSpeed} kts`);
+            // console.debug(`updateLegSpeed called: leg ${legIndex}, speed: ${newSpeed} kts`);
             
             if (!gpxRoute[legIndex] || !gpxRoute[legIndex + 1] || newSpeed <= 0) {
                 console.debug(`Cannot update leg ${legIndex}: invalid parameters`);
@@ -2185,7 +2185,7 @@
 
         // Function to update waypoint ETA and recalculate speeds/ETAs
         (window as any).updateWaypointETA = (waypointIndex: number, newETAString: string) => {
-            console.debug(`updateWaypointETA called: waypoint ${waypointIndex}, ETA: ${newETAString}`);
+            // console.debug(`updateWaypointETA called: waypoint ${waypointIndex}, ETA: ${newETAString}`);
             
             if (!gpxRoute[waypointIndex] || waypointIndex < nextWaypointIndex) {
                 console.debug(`Cannot update waypoint ${waypointIndex}: invalid or already passed`);
@@ -5295,31 +5295,31 @@
         }
         
         // Display results
-        console.log(`🌊 METEOROLOGICAL DATA from MMSI ${mmsi} (${binaryData.length} bits) - IMO289 FID 31:`);
+        console.info(`🌊 METEOROLOGICAL DATA from MMSI ${mmsi} (${binaryData.length} bits) - IMO289 FID 31:`);
         
         if (metLat !== 'N/A') {
-            console.log(`📍 Position: ${metLat}°, ${metLon}° (Accuracy: ${positionAccuracy ? 'High' : 'Low'})`);
+            console.info(`📍 Position: ${metLat}°, ${metLon}° (Accuracy: ${positionAccuracy ? 'High' : 'Low'})`);
         }
         if (utcDay !== 'N/A') {
-            console.log(`🕐 Time: Day ${utcDay}, ${String(utcHour).padStart(2, '0')}:${String(utcMin).padStart(2, '0')} UTC`);
+            console.info(`🕐 Time: Day ${utcDay}, ${String(utcHour).padStart(2, '0')}:${String(utcMin).padStart(2, '0')} UTC`);
         }
         if (avgWindSpeed !== 'N/A') {
-            console.log(`💨 Wind: ${avgWindSpeed} kt from ${windDir}° (Gusts: ${windGust} kt from ${windGustDir}°)`);
+            console.info(`💨 Wind: ${avgWindSpeed} kt from ${windDir}° (Gusts: ${windGust} kt from ${windGustDir}°)`);
         }
         if (airTemp !== 'N/A') {
-            console.log(`🌡️ Air: ${airTemp}°C, Humidity: ${humidity}%, Dew Point: ${dewPoint}°C`);
+            console.info(`🌡️ Air: ${airTemp}°C, Humidity: ${humidity}%, Dew Point: ${dewPoint}°C`);
         }
         if (pressure !== 'N/A') {
-            console.log(`📊 Pressure: ${pressure} hPa (${pressureTendency}), Visibility: ${visibility} NM${visibilityGreater ? '+' : ''}`);
+            console.info(`📊 Pressure: ${pressure} hPa (${pressureTendency}), Visibility: ${visibility} NM${visibilityGreater ? '+' : ''}`);
         }
         if (waterTemp !== 'N/A') {
-            console.log(`🌊 Water: ${waterTemp}°C, Level: ${waterLevel}m (${waterTrend}), Salinity: ${salinity}‰`);
+            console.info(`🌊 Water: ${waterTemp}°C, Level: ${waterLevel}m (${waterTrend}), Salinity: ${salinity}‰`);
         }
         if (currentSpeed !== 'N/A') {
-            console.log(`🌊 Current: ${currentSpeed} kt from ${currentDir}°`);
+            console.info(`🌊 Current: ${currentSpeed} kt from ${currentDir}°`);
         }
         if (precipitation !== 'N/A' || ice !== 'N/A') {
-            console.log(`☔ Precipitation: ${precipitation}, Ice: ${ice}`);
+            console.info(`☔ Precipitation: ${precipitation}, Ice: ${ice}`);
         }
     }
 
@@ -5781,15 +5781,9 @@
         
         // Create route line
         let routeLatLngs: any[] = [];
-        console.debug(`DEBUG ROUTE DISPLAY: Creating route with ${gpxRoute.length} waypoints`);
         for (let i = 0; i < gpxRoute.length - 1; i++) {
             const wp1 = gpxRoute[i];
             const wp2 = gpxRoute[i + 1];
-            
-            // Debug waypoints 49-50 specifically
-            if (i === 49 || i === 50) {
-                console.debug(`DEBUG ROUTE DISPLAY: WP${i} = (${wp1.lat.toFixed(5)}, ${wp1.lon.toFixed(5)}) type=${wp1.type || 'RL'}`);
-            }
             
             if (wp1.type === 'GC') {
                 // Interpolate great circle points for GC legs
@@ -5799,11 +5793,6 @@
             } else {
                 // For RL legs and default: use straight lines (matches ECDIS/chart plotter display)
                 routeLatLngs.push([wp1.lat, wp1.lon]);
-                
-                // Debug the coordinates being added to the route display
-                if (i === 49) {
-                    console.debug(`DEBUG ROUTE DISPLAY: Adding WP${i} to route display: [${wp1.lat.toFixed(5)}, ${wp1.lon.toFixed(5)}]`);
-                }
             }
         }
         // Always add the last waypoint
@@ -5811,9 +5800,6 @@
         
         // Debug the final waypoint being added
         const lastWP = gpxRoute[gpxRoute.length - 1];
-        if (gpxRoute.length - 1 === 50) {
-            console.debug(`DEBUG ROUTE DISPLAY: Adding final WP${gpxRoute.length - 1} to route display: [${lastWP.lat.toFixed(5)}, ${lastWP.lon.toFixed(5)}]`);
-        }
 
         L.polyline(routeLatLngs, {
             color: '#ff6600',
@@ -6393,13 +6379,13 @@
      * @returns {{lat: number, lon: number, heading: number} | null} Projected position
     */
     function computeRouteProjection(currentSOG: number, targetTime: number): {lat: number, lon: number, heading: number} | null {
-        console.info('computeRouteProjection called:', {
+        /* console.info('computeRouteProjection called:', {
             currentSOG,
             targetTime: new Date(targetTime).toISOString(),
             isRouteLoaded,
             gpxRouteLength: gpxRoute.length,
             routeStartTime: routeStartTime?.toISOString()
-        });
+        }); */
         
         if (!isRouteLoaded || gpxRoute.length < 2) {
            console.info('Early return due to:', { isRouteLoaded, gpxRouteLength: gpxRoute.length });
@@ -6417,24 +6403,24 @@
             // BEFORE DEPARTURE: Always use GPX-time projection for passage planning
             if (beforeDeparture) {
                 const gpxProjection = computeGpxTimeProjection(targetTime);
-               console.info('GPX projection (passage planning mode - before departure):', {
+              /*  console.info('GPX projection (passage planning mode - before departure):', {
                     targetTime: new Date(targetTime).toISOString(),
                     routeStartTime: routeStartTime.toISOString(),
                     currentTime: new Date(now).toISOString(),
                     beforeDeparture: true,
                     gpxProjection
-                });
+                }); */
                 return gpxProjection;
             }
 
             // AFTER DEPARTURE: Use real-time projection from vessel's actual position
-           console.info('After route departure - using real-time projection from vessel position');
+           //console.info('After route departure - using real-time projection from vessel position');
             
             // If test mode is disabled after departure, we still need to project from actual vessel position
             // This handles the case where the vessel may be off schedule but we want to show realistic projection
             // After departure: for real-time projection, we need SOG > 0
             if (currentSOG <= 0) {
-               console.info('No SOG for real-time projection after departure');
+               //console.info('No SOG for real-time projection after departure');
                 return null;
             }
 
@@ -6448,7 +6434,7 @@
             // For route projection after departure, calculate time from NOW to timeline (not from route start)
             const projectionDurationSeconds = (targetTime - now) / 1000; // seconds from current time to timeline
             
-           console.info('Real-time projection after departure:', {
+           /* console.info('Real-time projection after departure:', {
                 vesselPosition: { lat: vesselLat, lon: vesselLon },
                 currentTime: new Date(now).toISOString(),
                 targetTime: new Date(targetTime).toISOString(),
@@ -6456,12 +6442,12 @@
                 projectionDurationHours: projectionDurationSeconds / 3600,
                 currentSOG,
                 testModeEnabled
-            });
+            }); */
             
             // Special case: When timeline is at current time (projectionDurationSeconds ≈ 0), 
             // return the vessel's current snapped position
             if (Math.abs(projectionDurationSeconds) < 30) { // Within 30 seconds of current time
-               console.info('Timeline at current time, returning snapped vessel position');
+               // console.info('Timeline at current time, returning snapped vessel position');
                 
                 // Snap vessel to route and return that position
                 const snapResult = snapToRoute(vesselLat, vesselLon);
@@ -6482,7 +6468,7 @@
             }
             
             // For projection beyond current time, calculate from vessel's current position
-           console.info('Projecting from current vessel position along route');
+           // console.info('Projecting from current vessel position along route');
             
             // calculate the snapped point:
             // Find the intersection between abeam the vessel and the actual leg: it will be the snapped point and departure of our projected vessel's icon.
@@ -7150,7 +7136,7 @@
             lastProjectionSOG = effectiveSOG;
             lastProjectionTargetTime = targetTime;
             lastProjectionRouteState = `${isRouteLoaded}-${routeProjectionActive}-${gpxRoute.length}-${routeStartTime?.getTime() || 0}-${testModeEnabled}-${testModeEnabled ? testSOG : 'N/A'}-${testModeEnabled ? testCOG : 'N/A'}`;
-           console.info('Force recalculation triggered');
+            // console.info('Force recalculation triggered');
             return true;
         }
         
@@ -7171,7 +7157,7 @@
         
         // Only log if something actually changed to reduce console noise
         if (hasChanged) {
-           console.info('Parameter change detected:', {
+           /* console.info('Parameter change detected:', {
                 effectiveSOG,
                 lastProjectionSOG,
                 sogChanged,
@@ -7184,7 +7170,7 @@
                 lastRouteState: lastProjectionRouteState,
                 routeStateChanged,
                 reason: sogChanged ? 'SOG' : timeChanged ? 'Time' : 'Route'
-            });
+            }); */
             
             // Update last known parameters
             lastProjectionSOG = effectiveSOG;
@@ -7227,17 +7213,17 @@
         if (isRouteLoaded && routeProjectionActive && gpxRoute.length > 0 && routeStartTime) {
             // Only compute route projection if parameters have changed significantly
             if (hasRouteProjectionParametersChanged(effectiveSOG, ts, forceRecalculation)) {
-               console.info('Route projection conditions met and parameters changed:', {
+               /* console.info('Route projection conditions met and parameters changed:', {
                     isRouteLoaded,
                     routeProjectionActive,
                     gpxRouteLength: gpxRoute.length,
                     routeStartTime: routeStartTime?.toISOString(),
                     testModeEnabled,
                     effectiveSOG
-                });
+                }); */
                 // Route-based projection: use timeline vs route start time
                 lastRouteProjection = computeRouteProjection(effectiveSOG, ts);
-               console.info('computeRouteProjection returned:', lastRouteProjection);
+                // console.info('computeRouteProjection returned:', lastRouteProjection);
             }
             
             // If route projection returns null (e.g., before route start), use fallback projection
