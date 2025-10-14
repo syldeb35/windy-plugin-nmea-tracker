@@ -12,7 +12,7 @@ export interface AtoNSVG {
  */
 export const SpecialMarks = {
     Special: {
-        viewBox: "650 200 500 1100",
+        viewBox: "650 150 440 800",
         paths: `
             <path style="fill:none;stroke-width:.94074076" d="M0 106.667h1693.333V1800H0z"/>
             <path transform="translate(13.742 -321.808) scale(.95249)" style="fill:#000;stroke:#000;stroke-width:27.94485283;stroke-miterlimit:4;stroke-dasharray:none" d="m984 1139 119 49v109H697v-109l119-49 53-303h62z"/>
@@ -22,22 +22,34 @@ export const SpecialMarks = {
             <text xml:space="preserve" style="font-style:normal;font-variant:normal;font-weight:700;font-stretch:normal;font-size:654.53009033px;line-height:1309.05993652px;font-family:sans-serif;-inkscape-font-specification:'sans-serif Bold';text-align:center;letter-spacing:0;word-spacing:0;text-anchor:middle;fill:#ff0;fill-opacity:1;stroke:#000;stroke-width:15.70872498;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" x="852.4" y="445.248" transform="matrix(.99999 0 0 1.00001 18.841 -26.458)"><tspan x="852.4" y="445.248" style="font-style:normal;font-variant:normal;font-weight:700;font-stretch:normal;font-size:418.89938354px;font-family:sans-serif;-inkscape-font-specification:'sans-serif Bold';fill:#ff0;fill-opacity:1;stroke:#000;stroke-width:15.70872498;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1">+</tspan></text>
         `
     },
-    Port: {
-        viewBox: "650 200 500 1100",
+    FixedPort: {
+        viewBox: "670 250 460 700",
         paths: `
-            <path style="fill:none;stroke-width:.94074076" d="M0 106.667h1693.333V1800H0z"/>
+            <path style="fill:red;stroke:#000;stroke-width:20" d="M844 567h112v112H844z" transform="translate(-26.865 -316.125)"/>
+            <path style="fill:#f00;stroke:#000;stroke-width:20" d="M820 750h160v516H820z" transform="translate(-26.865 -316.125)"/>
+        `
+    },
+    FixedStarboard: {
+        viewBox: "670 250 460 700",
+        paths: `
+            <path style="fill:#0f0;stroke:#000;stroke-width:20" d="M900 567l56 112H844z" transform="translate(-26.865 -316.125)"/>
+            <path style="fill:#0f0;stroke:#000;stroke-width:20" d="M820 750h160v516H820z" transform="translate(-26.865 -316.125)"/>
+        `
+    },
+    Port: {
+        viewBox: "670 250 460 700",
+        paths: `
             <path style="fill:red;stroke:#000;stroke-width:20" d="M844 567h112v112H844zm259 666H697v-109l119-48 53-304h62l53 304 119 48z" transform="translate(-26.865 -316.125)"/>
         `
     },
     Starboard: {
-        viewBox: "650 200 500 1100",
+        viewBox: "670 250 460 700",
         paths: `
-            <path style="fill:none;stroke-width:.94074076" d="M0 106.667h1693.333V1800H0z"/>
-            <path style="fill:#0f0;stroke:#000;stroke-width:20" d="M844 567h112v112H844zm-147 557 119-48 53-304h62l53 304 119 48v109H697z" transform="translate(-26.865 -316.125)"/>
+            <path style="fill:#0f0;stroke:#000;stroke-width:20" d="M900 567l56 112H844zm259 666H697v-109l119-48 53-304h62l53 304 119 48z" transform="translate(-26.865 -316.125)"/>
         `
     },
     SafeWater: {
-        viewBox: "650 200 500 1100",
+        viewBox: "670 250 460 800",
         paths: `
             <g transform="translate(18.828 -26.458)">
                 <circle style="fill:red;stroke:#000;stroke-width:16.83804893;stroke-miterlimit:4;stroke-dasharray:none" r="71.842" cy="362.126" cx="852.095"/>
@@ -49,7 +61,7 @@ export const SpecialMarks = {
         `
     },
     SafeWaterWithLight: {
-        viewBox: "650 200 500 1100",
+        viewBox: "650 200 500 800",
         paths: `
             <path style="fill:none;stroke-width:.94074076" d="M0 106.667h1693.333V1800H0z"/>
             <circle cx="870.923" cy="335.667" r="71.842" style="fill:red;stroke:#000;stroke-width:16.83804893;stroke-miterlimit:4;stroke-dasharray:none"/>
@@ -61,7 +73,7 @@ export const SpecialMarks = {
         `
     },
     IsolatedDanger: {
-        viewBox: "650 000 500 1100",
+        viewBox: "650 000 500 800",
         paths: `
             <path style="fill:none;stroke-width:.94074076" d="M0 106.667h1693.333V1800H0z"/>
             <g transform="translate(-26.865 -380.125)">
@@ -74,7 +86,7 @@ export const SpecialMarks = {
         `
     },
     IsolatedDangerWithLight: {
-        viewBox: "650 000 500 1100",
+        viewBox: "650 000 500 800",
         paths: `
             <path style="fill:none;stroke-width:.94074076" d="M0 106.667h1693.333V1800H0z"/>
             <path style="fill:#ff0;stroke-width:.93393499" d="M1587.085 169.287c105 191.892-380 272.137-669 272.137 186-192.764 568-465.773 669-272.137z"/>
@@ -88,7 +100,7 @@ export const SpecialMarks = {
         `
     },
     LightVessel: {
-        viewBox: "300 400 1200 900",
+        viewBox: "300 400 1200 800",
         paths: `
             <path fill="none" stroke="#000" stroke-width="20" d="M1209 900H584m517 0 55-164c-174 55-338 55-512 0l55 164h402z"/>
             <path fill="#90C" d="M329 1220c-100-176 296-280 535-297-141 194-439 475-535 297z"/>
@@ -98,7 +110,7 @@ export const SpecialMarks = {
         `
     },
     FixedLight: {
-        viewBox: "0 0 1800 1800",
+        viewBox: "350 480 1100 600", // Tight bounds around lighthouse content (x=350-1100, y=480-600)
         paths: `
             <defs>
                 <mask id="c">
@@ -136,7 +148,7 @@ export const SpecialMarks = {
  */
 export const CardinalMarks = {
     North: {
-        viewBox: "650 100 500 1100",  // Tighter viewBox around the actual buoy
+        viewBox: "670 120 460 800", // Optimized bounds around North cardinal mark
         paths: `
             <path style="fill:#000" d="m900 497 80 123H821zm0 156 80 123H821z" transform="matrix(1 0 0 .99267 -26.864 -376.502)"/>
             <path style="fill:#fff212;stroke:#000;stroke-width:20" d="m931 842 53 304 119 48v109H697v-109l119-48 53-304z" transform="matrix(1 0 0 .99267 -26.864 -376.502)"/>
@@ -144,7 +156,7 @@ export const CardinalMarks = {
         `
     },
     East: {
-        viewBox: "650 100 500 1100",  // Tighter viewBox around the actual buoy
+        viewBox: "670 120 460 800", // Optimized bounds around East cardinal mark
         paths: `
                 <path style="fill:#000" d="m980 653-80 123-79-123zm-159-33 79-123 80 123z" transform="translate(-26.86 -386.125)"/>
                 <path style="fill:#000;stroke:#000;stroke-width:20" d="m931 842 53 304 119 48v109H697v-109l119-48 53-304z" transform="translate(-26.86 -386.125)"/>
@@ -153,7 +165,7 @@ export const CardinalMarks = {
         `
     },
     South: {
-        viewBox: "650 100 500 1100",  // Tighter viewBox around the actual buoy
+        viewBox: "670 120 460 800", // Optimized bounds around South cardinal mark
         paths: `
             <path transform="translate(-26.865 -383.502)" style="fill:#000" d="m908 770-79-123h159zm-79-279h159l-80 123z"/>
             <path transform="translate(-26.865 -392.125)" style="fill:#000;stroke:#000;stroke-width:20" d="m697 1200 119-49 53-303h62l53 303 119 49v109H697z"/>
@@ -161,7 +173,7 @@ export const CardinalMarks = {
         `
     },
     West: {
-        viewBox: "650 100 500 900",  // Tighter viewBox around the actual buoy
+        viewBox: "670 120 460 800", // Optimized bounds around West cardinal mark (made consistent)
         paths: `
             <path transform="matrix(1 0 0 -1 -26.865 1033.498)" style="fill:#000" d="m908 770-79-123h159z"/>
             <path transform="translate(-26.865 -383.502)" style="fill:#000" d="m988 491-80 123-79-123z"/>
@@ -174,11 +186,11 @@ export const CardinalMarks = {
 
 export const preferredChannel = {
     portHand: {
-        viewBox: "0 0 1800 1800",
+        viewBox: "670 250 460 800", // Consistent with other channel marks
         paths: ``
     },
     starboardHand:{
-        viewBox: "0 0 1800 1800",
+        viewBox: "670 250 460 800", // Consistent with other channel marks
         paths: ``
     }
 }

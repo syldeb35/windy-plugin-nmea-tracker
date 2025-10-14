@@ -53,8 +53,9 @@
                 <div style="font-size: 12px; color: #666; line-height: 1.4;">
                     <div style="margin-bottom: 5px;">🔝 <strong>Top Layer:</strong> Your Ship (always visible on top)</div>
                     <div style="margin-bottom: 5px;">📍 <strong>Middle Layer:</strong> Route Waypoints & Lines</div>
-                    <div style="margin-bottom: 5px;">� <strong>Base Layer:</strong> AIS Base Stations (orange antenna icons)</div>
-                    <div style="margin-bottom: 5px;">�🚢 <strong>Bottom Layer:</strong> Other AIS Ships</div>
+                    <div style="margin-bottom: 5px;">📡 <strong>Base Layer:</strong> AIS Base Stations (orange antenna icons)</div>
+                    <div style="margin-bottom: 5px;">🌦️ <strong>Weather Layer:</strong> Meteorological Stations (blue weather icons)</div>
+                    <div style="margin-bottom: 5px;">🚢 <strong>Bottom Layer:</strong> Other AIS Ships</div>
                 </div>
             </div>
             <p style="font-size: 11px; color: #888; margin: 5px 0;">
@@ -545,6 +546,7 @@
     let atonLayer: any = null; // Layer for displaying AtoN markers
     let emergencyLayer: any = null; // Layer for displaying emergency devices (SART, SAR aircraft)
     let baseStationLayer: any = null; // Layer for displaying AIS base stations
+    let meteoLayer: any = null; // Layer for displaying meteorological stations
     let routeMarkers: any = null; // Layer for route waypoints
     let isRouteLoaded: boolean = false; // Flag to track if route is loaded
     let routeProgress: number = 0; // Current progress along route (0-1)
@@ -576,6 +578,7 @@
     let zIndexRoute: number = 600; // Route markers
     let zIndexAisShips: number = 400; // AIS ships markers
     let zIndexBaseStations: number = 200; // AIS base stations
+    let zIndexMeteo: number = 150; // Meteorological stations
     let zIndexAtoN: number = 100; // AtoN markers
 
     let helpVisible = false;
@@ -641,6 +644,7 @@
         // Initialize layers with proper z-index ordering        
         aisShipsLayer = createLayerGroup(map, zIndexAisShips); // Bottom layer: Other AIS ships
         baseStationLayer = createLayerGroup(map, zIndexBaseStations); // AIS base stations
+        meteoLayer = createLayerGroup(map, zIndexMeteo); // Meteorological stations
         atonLayer = createLayerGroup(map, zIndexAtoN); // AtoN markers
         emergencyLayer = createLayerGroup(map, zIndexOwnShip + 100); // Emergency devices (SART, SAR) - high priority
         markerLayer = createLayerGroup(map, zIndexOwnShip); // Top layer: Your ship
@@ -3475,8 +3479,8 @@
         // Linear interpolation: size = minSize + (zoom - minZoom) * (maxSize - minSize) / (maxZoom - minZoom)
         const minZoom = 3;
         const maxZoom = 16;
-        const minSize = 12;
-        const maxSize = 64;
+        const minSize = 6;
+        const maxSize = 48;
         
         // Clamp zoom level to valid range
         const clampedZoom = Math.max(minZoom, Math.min(maxZoom, zoom));
@@ -3523,7 +3527,8 @@
                 `;
                 newMarker.bindTooltip(tooltipContent, { 
                     permanent: false, 
-                    direction: 'top', 
+                    direction: 'top',
+                    offset: [0, -newSize - 5], // Anchor to top of icon with small gap
                     className: 'aton-tooltip' 
                 });
                 
@@ -3588,6 +3593,120 @@
     // Storage for AtoN markers to enable zoom-based resizing
     let atonMarkers: Record<string, any> = {};
 
+    // Storage for meteorological station markers
+    let meteoMarkers: Record<string, any> = {};
+
+    /**
+     * Add or update meteorological station marker on the chart
+     * @param mmsi Station MMSI identifier
+     * @param lat Latitude
+     * @param lon Longitude
+     * @param weatherData Weather data object
+     */
+    function addMeteoStationMarker(mmsi: string, lat: number, lon: number, weatherData: any) {
+        if (!meteoLayer || !map) return;
+
+        // Remove existing marker if it exists
+        if (meteoMarkers[mmsi]) {
+            const existingMarker = meteoMarkers[mmsi];
+            if (existingMarker.marker) {
+                meteoLayer.removeLayer(existingMarker.marker);
+            }
+        }
+
+        // Create weather station icon
+        const currentZoom = map.getZoom();
+        const iconSize = Math.max(20, Math.min(32, currentZoom * 2));
+        const meteoIcon = createMeteoIcon(iconSize);
+
+        // Create marker
+        const marker = L.marker([lat, lon], { 
+            icon: meteoIcon, 
+            zIndexOffset: zIndexMeteo 
+        }).addTo(meteoLayer);
+
+        // Create detailed tooltip with weather information
+        let tooltipContent = `<strong>🌦️ Weather Station</strong><br>`;
+        tooltipContent += `MMSI: ${mmsi}<br>`;
+        tooltipContent += `📍 ${displayLatitude(lat)}, ${displayLongitude(lon)}<br>`;
+        
+        if (weatherData.utcDay !== 'N/A') {
+            tooltipContent += `🕐 ${String(weatherData.utcHour).padStart(2, '0')}:${String(weatherData.utcMin).padStart(2, '0')} UTC<br>`;
+        }
+
+        // Wind data
+        if (weatherData.avgWindSpeed !== 'N/A') {
+            tooltipContent += `💨 Wind: ${weatherData.avgWindSpeed} kt from ${weatherData.windDir}°<br>`;
+            if (weatherData.windGust !== 'N/A') {
+                tooltipContent += `💨 Gusts: ${weatherData.windGust} kt from ${weatherData.windGustDir}°<br>`;
+            }
+        }
+
+        // Temperature and humidity
+        if (weatherData.airTemp !== 'N/A') {
+            tooltipContent += `🌡️ Air: ${weatherData.airTemp}°C<br>`;
+        }
+        if (weatherData.humidity !== 'N/A') {
+            tooltipContent += `💧 Humidity: ${weatherData.humidity}%<br>`;
+        }
+        if (weatherData.dewPoint !== 'N/A') {
+            tooltipContent += `🌡️ Dew Point: ${weatherData.dewPoint}°C<br>`;
+        }
+
+        // Pressure and visibility
+        if (weatherData.pressure !== 'N/A') {
+            tooltipContent += `📊 Pressure: ${weatherData.pressure} hPa (${weatherData.pressureTendency})<br>`;
+        }
+        if (weatherData.visibility !== 'N/A') {
+            tooltipContent += `👁️ Visibility: ${weatherData.visibility} NM${weatherData.visibilityGreater ? '+' : ''}<br>`;
+        }
+
+        // Water data
+        if (weatherData.waterTemp !== 'N/A') {
+            tooltipContent += `🌊 Water: ${weatherData.waterTemp}°C<br>`;
+        }
+        if (weatherData.waterLevel !== 'N/A') {
+            tooltipContent += `🌊 Level: ${weatherData.waterLevel}m (${weatherData.waterTrend})<br>`;
+        }
+        if (weatherData.salinity !== 'N/A') {
+            tooltipContent += `🧂 Salinity: ${weatherData.salinity}‰<br>`;
+        }
+
+        // Current
+        if (weatherData.currentSpeed !== 'N/A') {
+            tooltipContent += `🌊 Current: ${weatherData.currentSpeed} kt from ${weatherData.currentDir}°<br>`;
+        }
+
+        // Precipitation and ice
+        if (weatherData.precipitation !== 'N/A') {
+            tooltipContent += `☔ Precipitation: ${weatherData.precipitation}<br>`;
+        }
+        if (weatherData.ice !== 'N/A') {
+            tooltipContent += `🧊 Ice: ${weatherData.ice}<br>`;
+        }
+
+        // Add tooltip
+        marker.bindTooltip(tooltipContent, {
+            permanent: false,
+            direction: 'top',
+            offset: [0, -10]
+        });
+
+        // Store marker data
+        meteoMarkers[mmsi] = {
+            marker: marker,
+            data: {
+                lat: lat,
+                lon: lon,
+                mmsi: mmsi,
+                timestamp: Date.now(),
+                weather: weatherData
+            }
+        };
+
+
+    }
+
     /**
      * Create AIS Base Station icon
      * @param size Icon size multiplier
@@ -3617,6 +3736,40 @@
         return L.divIcon({
             html: iconHtml,
             className: 'base-station-marker',
+            iconSize: [size, size],
+            iconAnchor: [size/2, size]
+        });
+    }
+
+    /**
+     * Create Meteorological Station icon
+     * @param size Icon size multiplier
+     * @returns Leaflet DivIcon for meteorological station
+     */
+    function createMeteoIcon(size: number = 24): any {
+        const iconHtml = `
+            <div style="
+                width: ${size}px;
+                height: ${size}px;
+                background: linear-gradient(135deg, #4A90E2 0%, #87CEEB 100%);
+                border: 2px solid #2E86AB;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: ${size * 0.5}px;
+                font-weight: bold;
+                color: #ffffff;
+                text-shadow: 1px 1px 1px rgba(0,0,0,0.8);
+                box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            ">
+                🌦️
+            </div>
+        `;
+        
+        return L.divIcon({
+            html: iconHtml,
+            className: 'meteo-station-marker',
             iconSize: [size, size],
             iconAnchor: [size/2, size/2]
         });
@@ -3663,20 +3816,22 @@
                 
             case 5: // Fixed Light, without sectors
                 // Use SVG from AtoN module
+                size = size * 2;
                 return L.divIcon({
-                    html: getSpecialMarkSVG('FixedLight', size*2),
+                    html: getSpecialMarkSVG('FixedLight', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size] // Bottom center anchor for lighthouse
                 });
                 
             case 6: // Fixed Light, with sectors
                 // Use SVG from AtoN module
+                size = size * 2;
                 return L.divIcon({
-                    html: getSpecialMarkSVG('FixedLight', size*2),
+                    html: getSpecialMarkSVG('FixedLight', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size] // Bottom center anchor for lighthouse
                 });
                 
             case 7: // Fixed Leading Light Front
@@ -3696,7 +3851,7 @@
                     html: getCardinalMarkSVG('North', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size]
                 });
             case 10: // Cardinal E
                 // Use SVG from AtoN module
@@ -3704,7 +3859,7 @@
                     html: getCardinalMarkSVG('East', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size]
                 });
             case 11: // Cardinal S
                 // Use SVG from AtoN module
@@ -3712,7 +3867,7 @@
                     html: getCardinalMarkSVG('South', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size]
                 });
             case 12: // Cardinal W
                 // Use SVG from AtoN module
@@ -3720,25 +3875,25 @@
                     html: getCardinalMarkSVG('West', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size]
                 });
                 
             // Port/Starboard Beacons (Fixed)
             case 13: // Port hand
                 // Use SVG from AtoN module
                 return L.divIcon({
-                    html: getSpecialMarkSVG('Port', size),
+                    html: getSpecialMarkSVG('FixedPort', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size]
                 });
-            case 14: // Starboard hand
+            case 14: // Fixed Starboard hand
                 // Use SVG from AtoN module
                 return L.divIcon({
-                    html: getSpecialMarkSVG('Starboard', size),
+                    html: getSpecialMarkSVG('FixedStarboard', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size]
                 });
                 
             case 15: // Preferred Channel port hand
@@ -3759,7 +3914,7 @@
                     html: getSpecialMarkSVG('IsolatedDanger', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size]
                 });
 
             case 18: // Safe water
@@ -3768,7 +3923,7 @@
                     html: getSpecialMarkSVG('SafeWater', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size]
                 });
 
             case 19: // Special mark
@@ -3777,7 +3932,7 @@
                     html: getSpecialMarkSVG('Special', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size]
                 });
                 
             // Floating Cardinal Marks
@@ -3787,7 +3942,7 @@
                     html: getCardinalMarkSVG('North', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size]
                 });
 
             case 21: // Cardinal Mark E
@@ -3796,7 +3951,7 @@
                     html: getCardinalMarkSVG('East', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size]
                 });
 
             case 22: // Cardinal Mark S
@@ -3805,7 +3960,7 @@
                     html: getCardinalMarkSVG('South', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size]
                 });
 
             case 23: // Cardinal Mark W
@@ -3814,7 +3969,7 @@
                     html: getCardinalMarkSVG('West', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size]
                 });
                 
             // Floating Port/Starboard Marks
@@ -3824,7 +3979,7 @@
                     html: getSpecialMarkSVG('Port', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size]
                 });
 
             case 25: // Starboard hand Mark
@@ -3833,7 +3988,7 @@
                     html: getSpecialMarkSVG('Starboard', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size]
                 });
                 
             case 26: // Preferred Channel Port hand
@@ -3853,7 +4008,7 @@
                     html: getSpecialMarkSVG('IsolatedDanger', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size]
                 });
 
             case 29: // Safe Water
@@ -3862,7 +4017,7 @@
                     html: getSpecialMarkSVG('SafeWater', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size]
                 });
 
             case 30: // Special Mark
@@ -3871,7 +4026,7 @@
                     html: getSpecialMarkSVG('Special', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size]
                 });
 
             case 31: // Light Vessel/LANBY/Rigs
@@ -3880,14 +4035,14 @@
                     html: getSpecialMarkSVG('LightVessel', size),
                     className: 'aton-marker',
                     iconSize: [size, size],
-                    iconAnchor: [size/2, size/2]
+                    iconAnchor: [size/2, size]
                 });
                 
             default:
                 bgColor = '#808080';
                 symbol = '⛯';
         }
-
+        
         size = size * 0.5; // Scale down for better appearance
 
         iconHtml = `
@@ -3912,7 +4067,7 @@
             html: iconHtml,
             className: 'aton-marker',
             iconSize: [size, size],
-            iconAnchor: [size/2, size/2]
+            iconAnchor: [size/2, size]
         });
     }
 
@@ -4266,7 +4421,8 @@
                     marker.bindTooltip(tooltipContent, { 
                         permanent: false, 
                         direction: 'top',
-                        className: 'base-station-tooltip'
+                        className: 'base-station-tooltip',
+                        offset: [0, -20]
                     });
 
                     baseStations[mmsi].marker = marker;
@@ -4724,14 +4880,23 @@
         if (msgType === 11) {
             // UTC/Date Response
             console.debug(`AIS UTC/Date Response (Type 11) from MMSI ${mmsi}`);
-            // Extract UTC time and date if needed
-            const year = parseInt(bitstring.slice(38, 51), 2);
-            const month = parseInt(bitstring.slice(52, 55), 2);
-            const day = parseInt(bitstring.slice(56, 60), 2);
-            const hour = parseInt(bitstring.slice(61, 65), 2);
-            const minute = parseInt(bitstring.slice(66, 71), 2);
-            const second = parseInt(bitstring.slice(72, 78), 2);
-            console.debug(`UTC Time from ${mmsi}: ${year}-${month}-${day} ${hour}:${minute}:${second} UTC`);
+            // Extract UTC time and date according to ITU-R M.1371-5
+            const year = parseInt(bitstring.slice(38, 52), 2); // bits 38-51 (14 bits)
+            const month = parseInt(bitstring.slice(52, 56), 2); // bits 52-55 (4 bits)
+            const day = parseInt(bitstring.slice(56, 61), 2); // bits 56-60 (5 bits)
+            const hour = parseInt(bitstring.slice(61, 66), 2); // bits 61-65 (5 bits)
+            const minute = parseInt(bitstring.slice(66, 72), 2); // bits 66-71 (6 bits)
+            const second = parseInt(bitstring.slice(72, 78), 2); // bits 72-77 (6 bits)
+            
+            // Validate and format the time components
+            const validYear = year === 0 ? 'N/A' : year;
+            const validMonth = (month === 0 || month > 12) ? 'N/A' : month.toString().padStart(2, '0');
+            const validDay = (day === 0 || day > 31) ? 'N/A' : day.toString().padStart(2, '0');
+            const validHour = hour >= 24 ? 'N/A' : hour.toString().padStart(2, '0');
+            const validMinute = minute >= 60 ? 'N/A' : minute.toString().padStart(2, '0');
+            const validSecond = second >= 60 ? 'N/A' : second.toString().padStart(2, '0');
+            
+            console.debug(`UTC Time from ${mmsi}: ${validYear}-${validMonth}-${validDay} ${validHour}:${validMinute}:${validSecond} UTC`);
         }
 
         /*
@@ -5082,7 +5247,8 @@
                 
                 marker.bindTooltip(tooltipContent, { 
                     permanent: false, 
-                    direction: 'top', 
+                    direction: 'top',
+                    offset: [0, -iconSize - 5], // Anchor to top of icon with small gap
                     className: 'aton-tooltip' 
                 });
                 
@@ -5181,7 +5347,6 @@
         
         // Air Temperature (bits 154-164): 11 bits, signed, 0.1°C, -60.0 to +60.0, -1024=N/A
         const airTempRaw = extractSignedBits(binaryData, 154, 11);
-        console.debug(`Air temp raw value: ${airTempRaw} (bits 154-164)`);
         const airTemp = airTempRaw === -1024 ? 'N/A' : (airTempRaw * 0.1).toFixed(1);
         
         // Relative Humidity (bits 165-171): 7 bits, 0-100%, 101=N/A
@@ -5262,14 +5427,12 @@
         if (binaryData.length >= 336) {
             // Water Temperature (bits 326-335): 10 bits, signed, 0.1°C, -10.0 to 50.0, 501=N/A
             const waterTempRaw = extractSignedBits(binaryData, 326, 10);
-            console.debug(`Water temp raw value: ${waterTempRaw} (bits 326-335)`);
             waterTemp = waterTempRaw === 501 ? 'N/A' : (waterTempRaw * 0.1).toFixed(1);
         }
         
         if (binaryData.length >= 339) {
             // Precipitation Type (bits 336-338): 3 bits, 0=reserved, 1=rain, 2=thunderstorm, 3=freezing rain, 4=mixed/ice, 5=snow, 6=reserved, 7=N/A
             const precipRaw = extractBits(binaryData, 336, 3);
-            console.debug(`Precipitation raw value: ${precipRaw} (bits 336-338)`);
             const precipMap: { [key: number]: string } = { 0: 'N/A', 1: 'Rain', 2: 'Thunderstorm', 3: 'Freezing rain', 4: 'Mixed/ice', 5: 'Snow', 6: 'N/A', 7: 'N/A' };
             precipitation = precipMap[precipRaw] || 'N/A';
         }
@@ -5289,7 +5452,6 @@
         if (binaryData.length >= 350) {
             // Ice (bits 348-349): 2 bits, 0=No, 1=Yes, 2=reserved, 3=N/A
             const iceRaw = extractBits(binaryData, 348, 2);
-            console.debug(`Ice raw value: ${iceRaw} (bits 348-349)`);
             const iceMap: { [key: number]: string } = { 0: 'No', 1: 'Yes', 2: 'N/A', 3: 'N/A' };
             ice = iceMap[iceRaw] || 'N/A';
         }
@@ -5320,6 +5482,39 @@
         }
         if (precipitation !== 'N/A' || ice !== 'N/A') {
             console.info(`☔ Precipitation: ${precipitation}, Ice: ${ice}`);
+        }
+
+        // Add meteorological station marker to chart
+        if (metLat !== 'N/A' && metLon !== 'N/A' && meteoLayer && mmsi) {
+            const lat = parseFloat(metLat);
+            const lon = parseFloat(metLon);
+            if (!isNaN(lat) && !isNaN(lon)) {
+                addMeteoStationMarker(mmsi, lat, lon, {
+                utcDay,
+                utcHour,
+                utcMin,
+                avgWindSpeed,
+                windDir,
+                windGust,
+                windGustDir,
+                airTemp,
+                humidity,
+                dewPoint,
+                pressure,
+                pressureTendency,
+                visibility,
+                visibilityGreater,
+                waterTemp,
+                waterLevel,
+                waterTrend,
+                salinity,
+                currentSpeed,
+                currentDir,
+                precipitation,
+                ice,
+                positionAccuracy
+                });
+            }
         }
     }
 
@@ -7820,6 +8015,53 @@
             aisFragments = {};
         }
     );
+
+    // Test function to manually create a meteorological marker (for debugging)
+    function testMeteoMarker() {
+        if (!map) {
+            console.error('Map not available for testing');
+            return;
+        }
+        
+        // Get current map center for test marker
+        const center = map.getCenter();
+        const testLat = center.lat;
+        const testLon = center.lng;
+        
+        // Test weather data
+        const testWeatherData = {
+            utcDay: 12,
+            utcHour: 14,
+            utcMin: 30,
+            avgWindSpeed: '15',
+            windDir: '270',
+            windGust: '22',
+            windGustDir: '280',
+            airTemp: '18.5',
+            humidity: '65',
+            dewPoint: '12.1',
+            pressure: '1013.2',
+            pressureTendency: 'Steady',
+            visibility: '15',
+            visibilityGreater: false,
+            waterTemp: '16.8',
+            waterLevel: '2.1',
+            waterTrend: 'Rising',
+            salinity: '35.2',
+            currentSpeed: '1.2',
+            currentDir: '045',
+            precipitation: 'No',
+            ice: 'No',
+            positionAccuracy: true
+        };
+        
+        addMeteoStationMarker('TEST001', testLat, testLon, testWeatherData);
+    }
+
+    // Make test function available globally for console testing
+    if (typeof window !== 'undefined') {
+        (window as any).testMeteoMarker = testMeteoMarker;
+    }
 </script>
 
 <style lang="less">
@@ -8304,7 +8546,7 @@
     
     /* AtoN (Aid to Navigation) Styles */
     .aton-marker {
-        background: transparent !important;
+        /*background: transparent !important;*/
         border: none !important;
     }
     
@@ -8316,7 +8558,7 @@
     
     /* Specific AtoN tooltip styling */
     .leaflet-tooltip.aton-tooltip {
-        background: rgba(70, 130, 180, 0.95) !important;
+        background: rgba(70, 130, 180, 0.55) !important;
         color: white !important;
         border: 2px solid #fff !important;
         border-radius: 5px !important;
@@ -8338,7 +8580,7 @@
     }
     
     /* Marine Traffic style vessel icon */
-    .marine-traffic-marker {
+    /*.marine-traffic-marker {
         background: transparent !important;
         border: none !important;
     }
@@ -8351,7 +8593,7 @@
     .marine-traffic-icon svg {
         filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.3));
     }
-    
+    */
     /* Base station tooltip styling */
     .leaflet-tooltip.base-station-tooltip {
         background: white !important;
