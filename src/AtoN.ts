@@ -196,6 +196,14 @@ export const preferredChannel = {
 }
 
 /**
+ * Light symbol SVG for AtoNs with lights - Official chart symbol
+ */
+export const LightSymbol = {
+    viewBox: "0 2 2 2",
+    paths: `<path d="M 131.60087,181.31159 L 69.97299,257.62001 L 65.44288,263.19827 L 59.885447,267.42201 L 52.986033,269.53125 L 45.663807,269.42153 L 38.851616,267.12524 L 33.104189,262.78791 L 28.902861,256.70061 L 26.677963,249.64945 L 26.834933,242.67425 L 29.567773,236.58472 L 34.162548,231.27636 L 39.756076,226.40835 L 40.930254,225.46186 L 131.60087,181.31159 z M 159.60212,156.05108 C 161.79918,155.83146 163.76054,157.43633 163.98017,159.63337 C 164.19979,161.83043 162.59492,163.79179 160.39788,164.01142 C 158.20082,164.23104 156.23946,162.62617 156.01983,160.42913 C 155.80021,158.23207 157.40508,156.27071 159.60212,156.05108 z" style="fill:#a30075;fill-opacity:1;fill-rule:evenodd;stroke:none"/>`
+}
+
+/**
  * Generate SVG icon HTML for a cardinal mark
  * @param direction Cardinal direction (North, East, South, West)
  * @param size Icon size in pixels
@@ -241,4 +249,82 @@ export function getSpecialMarkSVG(type: keyof typeof SpecialMarks, size: number 
             ${mark.paths}
         </svg>
     `;
+}
+
+/**
+ * Generate SVG icon HTML for a light symbol
+ * @param size Icon size in pixels
+ * @returns Complete SVG HTML string
+ */
+export function getLightSymbolSVG(size: number = 16): string {
+    return `
+        <svg xmlns="http://www.w3.org/2000/svg" 
+             xml:space="preserve" 
+             width="${size}px" 
+             height="${size}px" 
+             shape-rendering="geometricPrecision" 
+             text-rendering="geometricPrecision" 
+             image-rendering="optimizeQuality" 
+             fill-rule="evenodd" 
+             clip-rule="evenodd" 
+             viewBox="${LightSymbol.viewBox}">
+            ${LightSymbol.paths}
+        </svg>
+    `;
+}
+
+/**
+ * Create composite SVG with AtoN base and light symbol overlay
+ * @param baseType AtoN type for base SVG
+ * @param hasLight Whether to show light symbol
+ * @param size Icon size in pixels
+ * @returns Complete composite SVG HTML string
+ */
+export function getAtoNWithLightSVG(baseType: keyof typeof SpecialMarks | keyof typeof CardinalMarks, hasLight: boolean, size: number = 24): string {
+    let baseSVG = '';
+    let baseViewBox = '';
+    
+    // console.debug(`getAtoNWithLightSVG: baseType=${baseType}, hasLight=${hasLight}, size=${size}`);
+    
+    // Get the base SVG content
+    if (baseType in SpecialMarks) {
+        const mark = SpecialMarks[baseType as keyof typeof SpecialMarks];
+        baseSVG = mark.paths;
+        baseViewBox = mark.viewBox;
+        // console.debug(`Using SpecialMarks: viewBox=${baseViewBox}`);
+    } else if (baseType in CardinalMarks) {
+        const mark = CardinalMarks[baseType as keyof typeof CardinalMarks];
+        baseSVG = mark.paths;
+        baseViewBox = mark.viewBox;
+        // console.debug(`Using CardinalMarks: viewBox=${baseViewBox}`);
+    }
+    
+    if (!hasLight || !baseSVG) {
+        // console.debug(`Returning base SVG without light: hasLight=${hasLight}, baseSVG exists=${!!baseSVG}`);
+        // Return base SVG without light
+        if (baseType in SpecialMarks) {
+            return getSpecialMarkSVG(baseType as keyof typeof SpecialMarks, size);
+        } else if (baseType in CardinalMarks) {
+            return getCardinalMarkSVG(baseType as keyof typeof CardinalMarks, size);
+        }
+        return '';
+    }
+    
+    const compositeResult = `
+        <svg xmlns="http://www.w3.org/2000/svg" 
+             xml:space="preserve" 
+             width="${size}px" 
+             height="${size}px" 
+             shape-rendering="geometricPrecision" 
+             text-rendering="geometricPrecision" 
+             image-rendering="optimizeQuality" 
+             fill-rule="evenodd" 
+             clip-rule="evenodd" 
+             viewBox="${baseViewBox}">
+            ${baseSVG}
+        </svg>
+    `;
+    
+    // console.debug(`Generated composite SVG with light symbol`);
+    return compositeResult;
 }

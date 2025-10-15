@@ -387,9 +387,8 @@
     import io from './socket.io.min.js';
     import { createRotatingBoatIcon } from './boatIcon';
     import config from './pluginConfig';
-    import { getCardinalMarkSVG } from './AtoN';
     import { getSpecialMarkSVG } from './AtoN';
-    import { decode } from "punycode";
+    import { getAtoNWithLightSVG } from './AtoN';
 
     /**
      * Constants declaration
@@ -651,6 +650,9 @@
 
         // Restore AtoN markers from previous session (after atonLayer is created)
         restoreAtoNMarkers();
+        
+        // Create test AtoN near Funchal for debugging (disabled - using real implementation)
+        // createTestAtoNFunchal();
 
         // Add zoom event listener to center on vessel after zoom changes
         map.on('zoomend', () => {
@@ -724,8 +726,6 @@
 
         // Subscribe to Windy overlay changes
         const unsubOverlay = store.on('overlay', (overlay: string) => {
-            //console.debug('Windy overlay changed, new overlay:', overlay);
-           
             CurrentOverlay = overlay;
             updateButtonText(windyStore.get('timestamp'));
         });
@@ -1275,6 +1275,145 @@
     }
 
     /**
+     * Create test AtoN near Funchal for debugging light symbols
+     */
+    function createTestAtoNFunchal(): void {
+        if (!atonLayer) {
+            console.warn('Cannot create test AtoN: atonLayer not initialized');
+            return;
+        }
+
+        // Funchal coordinates (approximately)
+        const funchalLat = 32.0000;
+        const funchalLon = -16.9000;
+        
+        // Create a test Cardinal North with light
+        const testMMSI = "999999999";
+        const atonType = 20; // Cardinal Mark N (floating)
+        const name = "TEST CARDINAL N";
+        const iconSize = calculateAtoNIconSize(map.getZoom());
+        
+        // Create test status with light conditions
+        const testStatusMessages = ['Light ON']; // This should show light symbol
+        const hasLight = atonHasLight(atonType, testStatusMessages, false);
+        
+        /*
+        console.info(`*** TEST ATON DEBUG ***`);
+        console.info(`Creating test AtoN: type=${atonType}, hasLight=${hasLight}, statusMessages=${JSON.stringify(testStatusMessages)}`);
+        console.info(`AtoN location: ${funchalLat}, ${funchalLon} (near Funchal)`);
+        console.info(`Icon size: ${iconSize}px`);
+        */
+
+        const atonIcon = createAtoNIcon(atonType, iconSize, hasLight, 'Test Light');
+        const marker = L.marker([funchalLat, funchalLon], { 
+            icon: atonIcon, 
+            zIndexOffset: zIndexWaypoint 
+        }).addTo(atonLayer);
+        
+        // Add a separate light indicator as HTML overlay for testing
+        if (hasLight) {
+            const lightOverlay = L.marker([funchalLat, funchalLon], {
+                icon: L.divIcon({
+                    html: '<div style="background: red; color: white; padding: 2px 4px; border-radius: 3px; font-size: 10px; font-weight: bold; margin-left: 20px; margin-top: -10px;">LIGHT</div>',
+                    className: 'light-overlay',
+                    iconSize: [40, 15],
+                    iconAnchor: [0, 0]
+                }),
+                zIndexOffset: zIndexWaypoint + 10
+            }).addTo(atonLayer);
+            
+            console.log('Added separate light overlay for test AtoN');
+        }
+        
+        const tooltipContent = `
+            <strong>TEST AtoN (Funchal)</strong><br>
+            Name: ${name}<br>
+            Type: Cardinal Mark N<br>
+            Has Light: ${hasLight}<br>
+            Status: Test Light<br>
+            Lat: ${funchalLat.toFixed(5)}<br>
+            Lon: ${funchalLon.toFixed(5)}
+        `;
+        
+        marker.bindTooltip(tooltipContent, { 
+            permanent: false, 
+            direction: 'top',
+            offset: [0, -iconSize - 5],
+            className: 'aton-tooltip' 
+        });
+        
+        // Store test AtoN data
+        atonMarkers[testMMSI] = {
+            marker: marker,
+            statusLabel: null,
+            data: {
+                mmsi: testMMSI,
+                lat: funchalLat,
+                lon: funchalLon,
+                name: name,
+                atonType: atonType,
+                atonTypeName: 'Cardinal Mark N',
+                offPosition: 0,
+                virtualAtoN: 0,
+                statusText: 'Test Light',
+                atonStatus: { statusMessages: testStatusMessages },
+                lastUpdate: Date.now()
+            }
+        };
+        
+        // console.info(`Test AtoN created near Funchal: ${testMMSI}`);
+        
+        // Create a second test AtoN with different coordinates for comparison
+        const testMMSI2 = "999999998";
+        const atonType2 = 19; // Special mark
+        const name2 = "TEST SPECIAL MARK";
+        const testStatusMessages2 = ['Light OFF']; // Different status but still has light
+        const hasLight2 = atonHasLight(atonType2, testStatusMessages2, false);
+        
+        // console.info(`Creating second test AtoN: type=${atonType2}, hasLight=${hasLight2}, statusMessages=${JSON.stringify(testStatusMessages2)}`);
+        
+        const atonIcon2 = createAtoNIcon(atonType2, iconSize, hasLight2, 'Test Light OFF');
+        const marker2 = L.marker([funchalLat + 0.01, funchalLon + 0.01], { 
+            icon: atonIcon2, 
+            zIndexOffset: zIndexWaypoint 
+        }).addTo(atonLayer);
+        
+        // Add a separate light indicator as HTML overlay for testing
+        if (hasLight2) {
+            const lightOverlay2 = L.marker([funchalLat + 0.01, funchalLon + 0.01], {
+                icon: L.divIcon({
+                    html: '<div style="background: orange; color: white; padding: 2px 4px; border-radius: 3px; font-size: 10px; font-weight: bold; margin-left: 20px; margin-top: -10px;">LIGHT OFF</div>',
+                    className: 'light-overlay',
+                    iconSize: [60, 15],
+                    iconAnchor: [0, 0]
+                }),
+                zIndexOffset: zIndexWaypoint + 10
+            }).addTo(atonLayer);
+            
+            console.log('Added separate light overlay for second test AtoN');
+        }
+        
+        const tooltipContent2 = `
+            <strong>TEST AtoN #2 (Special)</strong><br>
+            Name: ${name2}<br>
+            Type: Special Mark<br>
+            Has Light: ${hasLight2}<br>
+            Status: Test Light OFF<br>
+            Lat: ${(funchalLat + 0.01).toFixed(5)}<br>
+            Lon: ${(funchalLon + 0.01).toFixed(5)}
+        `;
+        
+        marker2.bindTooltip(tooltipContent2, { 
+            permanent: false, 
+            direction: 'top',
+            offset: [0, -iconSize - 5],
+            className: 'aton-tooltip' 
+        });
+        
+        // console.info(`Second test AtoN created: ${testMMSI2}`);
+    }
+
+    /**
      * Restore AtoN markers from saved data
      */
     function restoreAtoNMarkers(): void {
@@ -1294,16 +1433,84 @@
                     const currentZoom = map.getZoom();
                     const iconSize = calculateAtoNIconSize(currentZoom);
                     
-                    const atonIcon = createAtoNIcon(atonData.atonType, iconSize);
+                    // Check if AtoN has a light based on new default assumption logic
+                    const statusMessages = atonData.statusText ? atonData.statusText.split(', ') : [];
+                    const hasLight = atonHasLight(atonData.atonType, statusMessages, atonData.virtualAtoN === 1);
+                    const atonIcon = createAtoNIcon(atonData.atonType, iconSize, hasLight, atonData.statusText || '');
                     const marker = L.marker([atonData.lat, atonData.lon], { 
                         icon: atonIcon, 
                         zIndexOffset: zIndexWaypoint 
                     }).addTo(atonLayer);
                     
+                    // Add status label for critical conditions
+                    let statusLabel = null;
+                    let statusLabelText = '';
+                    let statusColor = '';
+                    
+                    // Determine what status label to show based on stored data
+                    if (atonData.offPosition === 1 || (atonData.statusText && atonData.statusText.includes('Off Position'))) {
+                        statusLabelText = 'Off Pstn';
+                        statusColor = 'rgba(255,0,0,0.8)';
+                    } else if (atonData.statusText && atonData.statusText.includes('Light OFF')) {
+                        statusLabelText = 'Light OFF';
+                        statusColor = 'rgba(255,165,0,0.8)';
+                    } else if (atonData.statusText && atonData.statusText.includes('Light Error')) {
+                        statusLabelText = 'Light Error';
+                        statusColor = 'rgba(255,165,0,0.8)';
+                    } else if (atonData.statusText && atonData.statusText.includes('Racon OFF')) {
+                        statusLabelText = 'Racon OFF';
+                        statusColor = 'rgba(255,165,0,0.8)';
+                    } else if (atonData.statusText && atonData.statusText.includes('Racon Error')) {
+                        statusLabelText = 'Racon Error';
+                        statusColor = 'rgba(255,165,0,0.8)';
+                    }
+                    
+                    if (statusLabelText) {
+                        const statusTextIcon = L.divIcon({
+                            className: 'aton-status-label',
+                            html: `<div style="background: ${statusColor}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; text-align: center; white-space: nowrap;">${statusLabelText}</div>`,
+                            iconSize: [Math.max(50, statusLabelText.length * 7), 15],
+                            iconAnchor: [Math.max(25, statusLabelText.length * 3.5), 0]
+                        });
+                        statusLabel = L.marker([atonData.lat, atonData.lon], { icon: statusTextIcon, zIndexOffset: zIndexWaypoint + 1 }).addTo(atonLayer);
+                    }
+                    
+                    // Add light indicator if AtoN has a light
+                    let lightIndicator = null;
+                    if (hasLight) {
+                        const lightSize = Math.max(24, Math.floor(iconSize * 2)); // Make it bigger for the teardrop
+                        
+                        // Use the official maritime light symbol (teardrop/flame shape)
+                        const lightSvg = `<svg xmlns="http://www.w3.org/2000/svg"
+                                            width="${lightSize}px"
+                                            height="${lightSize}px" 
+                                            viewBox="0 0 320 320">
+                                            <g transform="rotate(-90 160 160)">
+                                            <path d="M 131.60087,181.31159 L 69.97299,257.62001 L 65.44288,263.19827 L 59.885447,267.42201 L 52.986033,269.53125 L 45.663807,269.42153 L 38.851616,267.12524 L 33.104189,262.78791 L 28.902861,256.70061 L 26.677963,249.64945 L 26.834933,242.67425 L 29.567773,236.58472 L 34.162548,231.27636 L 39.756076,226.40835 L 40.930254,225.46186 L 131.60087,181.31159 z M 159.60212,156.05108 C 161.79918,155.83146 163.76054,157.43633 163.98017,159.63337 C 164.19979,161.83043 162.59492,163.79179 160.39788,164.01142 C 158.20082,164.23104 156.23946,162.62617 156.01983,160.42913 C 155.80021,158.23207 157.40508,156.27071 159.60212,156.05108 z"
+                                            style="fill:#a30075;fill-opacity:0.5;fill-rule:evenodd;stroke:none"/>
+                                          </svg>`;
+                        
+                        const lightIcon = L.divIcon({
+                            className: 'aton-light-indicator',
+                            html: lightSvg,
+                            iconSize: [lightSize, lightSize],
+                            iconAnchor: [lightSize/2, lightSize/2], // Position at bottom-center of AtoN
+                            popupAnchor: [0, 0]
+                        });
+                        
+                        // Position light indicator at same coordinates as AtoN, offset by iconAnchor
+                        lightIndicator = L.marker([atonData.lat, atonData.lon], { 
+                            icon: lightIcon,
+                            interactive: false, // Prevent interference with AtoN clicks
+                            zIndexOffset: zIndexWaypoint + 5
+                        }).addTo(atonLayer);
+                    }
+                    
                     const tooltipContent = `
                         <strong>AtoN</strong><br>
                         Name: ${atonData.name}<br>
                         Type: ${atonData.atonTypeName}<br>
+                        ${atonData.statusText ? `Status: ${atonData.statusText}<br>` : ''}
                         Lat: ${displayLatitude(atonData.lat)}<br>
                         Lon: ${displayLongitude(atonData.lon)}
                     `;
@@ -1317,6 +1524,8 @@
                     // Store AtoN marker data for zoom-based resizing
                     atonMarkers[mmsi] = {
                         marker: marker,
+                        statusLabel: statusLabel,
+                        lightIndicator: lightIndicator,
                         data: atonData
                     };
                     
@@ -3500,8 +3709,6 @@
         const currentZoom = map.getZoom();
         const newSize = calculateAtoNIconSize(currentZoom);
         
-        //console.debug(`Updating AtoN icon sizes for zoom ${currentZoom} -> size ${newSize}px`);
-        
         // We'll store AtoN data and recreate markers with new sizes
         // This is simpler than trying to update existing markers
         Object.keys(atonMarkers || {}).forEach(mmsi => {
@@ -3509,19 +3716,94 @@
             if (atonData && atonData.marker && atonData.data) {
                 // Remove old marker
                 atonLayer.removeLayer(atonData.marker);
+                if (atonData.statusLabel) {
+                    atonLayer.removeLayer(atonData.statusLabel);
+                }
+                if (atonData.lightIndicator) {
+                    atonLayer.removeLayer(atonData.lightIndicator);
+                }
                 
-                // Create new marker with updated size
-                const newIcon = createAtoNIcon(atonData.data.atonType, newSize);
+                // Create new marker with updated size and light status
+                const statusMessages = atonData.data.statusText ? atonData.data.statusText.split(', ') : [];
+                const hasLight = atonHasLight(atonData.data.atonType, statusMessages, atonData.data.virtualAtoN === 1);
+                const newIcon = createAtoNIcon(atonData.data.atonType, newSize, hasLight, atonData.data.statusText || '');
                 const newMarker = L.marker([atonData.data.lat, atonData.data.lon], { 
                     icon: newIcon, 
                     zIndexOffset: zIndexWaypoint 
                 }).addTo(atonLayer);
+                
+                // Recreate status label if needed
+                let newStatusLabel = null;
+                let statusLabelText = '';
+                let statusColor = '';
+                
+                // Determine what status label to show
+                if (atonData.data.offPosition === 1 || (atonData.data.statusText && atonData.data.statusText.includes('Off Position'))) {
+                    statusLabelText = 'Off Pstn';
+                    statusColor = 'rgba(255,0,0,0.8)';
+                } else if (atonData.data.statusText && atonData.data.statusText.includes('Light OFF')) {
+                    statusLabelText = 'Light OFF';
+                    statusColor = 'rgba(255,165,0,0.8)';
+                } else if (atonData.data.statusText && atonData.data.statusText.includes('Light Error')) {
+                    statusLabelText = 'Light Error';
+                    statusColor = 'rgba(255,165,0,0.8)';
+                } else if (atonData.data.statusText && atonData.data.statusText.includes('Racon OFF')) {
+                    statusLabelText = 'Racon OFF';
+                    statusColor = 'rgba(255,165,0,0.8)';
+                } else if (atonData.data.statusText && atonData.data.statusText.includes('Racon Error')) {
+                    statusLabelText = 'Racon Error';
+                    statusColor = 'rgba(255,165,0,0.8)';
+                }
+                
+                if (statusLabelText) {
+                    const statusTextIcon = L.divIcon({
+                        className: 'aton-status-label',
+                        html: `<div style="background: ${statusColor}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; text-align: center; white-space: nowrap;">${statusLabelText}</div>`,
+                        iconSize: [Math.max(50, statusLabelText.length * 7), 15],
+                        iconAnchor: [Math.max(25, statusLabelText.length * 3.5), 0]
+                    });
+                    newStatusLabel = L.marker([atonData.data.lat, atonData.data.lon], { icon: statusTextIcon, zIndexOffset: zIndexWaypoint + 1 }).addTo(atonLayer);
+                }
+                
+                // Recreate light indicator with new size if AtoN has light
+                let newLightIndicator = null;
+                if (hasLight) {
+                    const lightSize = Math.max(24, Math.floor(newSize * 2)); // Make it bigger for the teardrop
+                    
+                    // Use the official maritime light symbol (teardrop/flame shape)
+                    const lightSvg = `<svg xmlns="http://www.w3.org/2000/svg" 
+                                        width="${lightSize}px"
+                                        height="${lightSize}px"
+                                        viewBox="0 0 320 320">
+                                        <g transform="rotate(-90 160 160)">
+                                        <path d="M 131.60087,181.31159 L 69.97299,257.62001 L 65.44288,263.19827 L 59.885447,267.42201 L 52.986033,269.53125 L 45.663807,269.42153 L 38.851616,267.12524 L 33.104189,262.78791 L 28.902861,256.70061 L 26.677963,249.64945 L 26.834933,242.67425 L 29.567773,236.58472 L 34.162548,231.27636 L 39.756076,226.40835 L 40.930254,225.46186 L 131.60087,181.31159 z M 159.60212,156.05108 C 161.79918,155.83146 163.76054,157.43633 163.98017,159.63337 C 164.19979,161.83043 162.59492,163.79179 160.39788,164.01142 C 158.20082,164.23104 156.23946,162.62617 156.01983,160.42913 C 155.80021,158.23207 157.40508,156.27071 159.60212,156.05108 z"
+                                        style="fill:#a30075;fill-opacity:0.5;fill-rule:evenodd;stroke:none"/>
+                                      </svg>`;
+                    
+                    const lightIcon = L.divIcon({
+                        className: 'aton-light-indicator',
+                        html: lightSvg,
+                        iconSize: [lightSize, lightSize],
+                        iconAnchor: [lightSize/2, lightSize/2], // Position at bottom-center of AtoN
+                        popupAnchor: [0, 0]
+                    });
+                    
+                    // Position light indicator at same coordinates as AtoN, offset by iconAnchor
+                    newLightIndicator = L.marker([atonData.data.lat, atonData.data.lon], { 
+                        icon: lightIcon,
+                        interactive: false, // Prevent interference with AtoN clicks
+                        zIndexOffset: zIndexWaypoint + 5
+                    }).addTo(atonLayer);
+                }
+                
+
                 
                 // Restore tooltip
                 const tooltipContent = `
                     <strong>AtoN</strong><br>
                     Name: ${atonData.data.name}<br>
                     Type: ${atonData.data.atonTypeName}<br>
+                    ${atonData.data.statusText ? `Status: ${atonData.data.statusText}<br>` : ''}
                     Lat: ${displayLatitude(atonData.data.lat)}<br>
                     Lon: ${displayLongitude(atonData.data.lon)}
                 `;
@@ -3532,8 +3814,10 @@
                     className: 'aton-tooltip' 
                 });
                 
-                // Update stored marker reference
+                // Update stored marker references
                 atonData.marker = newMarker;
+                atonData.statusLabel = newStatusLabel;
+                atonData.lightIndicator = newLightIndicator;
             }
         });
     }
@@ -3781,7 +4065,7 @@
      * @param size Icon size
      * @returns Leaflet DivIcon for specific AtoN type
      */
-    function createAtoNIcon(atonType: number, size: number = 24): any {
+    function createAtoNIcon(atonType: number, size: number = 24, hasLight: boolean = true, lightStatus: string = ''): any {
         let iconHtml = '';
         let bgColor = '#666666'; // Default gray
         let symbol = '⛯'; // Default symbol
@@ -3846,33 +4130,33 @@
                 
             // Cardinal Beacons (Fixed)
             case 9: // Cardinal N
-                // Use SVG from AtoN module
+                // Use SVG from AtoN module with optional light
                 return L.divIcon({
-                    html: getCardinalMarkSVG('North', size),
+                    html: getAtoNWithLightSVG('North', false, size), // Light rendered separately as HTML overlay
                     className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size]
                 });
             case 10: // Cardinal E
-                // Use SVG from AtoN module
+                // Use SVG from AtoN module with optional light
                 return L.divIcon({
-                    html: getCardinalMarkSVG('East', size),
+                    html: getAtoNWithLightSVG('East', hasLight, size),
                     className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size]
                 });
             case 11: // Cardinal S
-                // Use SVG from AtoN module
+                // Use SVG from AtoN module with optional light
                 return L.divIcon({
-                    html: getCardinalMarkSVG('South', size),
+                    html: getAtoNWithLightSVG('South', hasLight, size),
                     className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size]
                 });
             case 12: // Cardinal W
-                // Use SVG from AtoN module
+                // Use SVG from AtoN module with optional light
                 return L.divIcon({
-                    html: getCardinalMarkSVG('West', size),
+                    html: getAtoNWithLightSVG('West', hasLight, size),
                     className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size]
@@ -3909,27 +4193,27 @@
                 break;
                 
             case 17: // Isolated danger
-                // Use SVG from AtoN module
+                // Use SVG from AtoN module with optional light
                 return L.divIcon({
-                    html: getSpecialMarkSVG('IsolatedDanger', size),
+                    html: getAtoNWithLightSVG('IsolatedDanger', hasLight, size),
                     className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size]
                 });
 
             case 18: // Safe water
-                // Use SVG from AtoN module
+                // Use SVG from AtoN module with optional light
                 return L.divIcon({
-                    html: getSpecialMarkSVG('SafeWater', size),
+                    html: getAtoNWithLightSVG('SafeWater', hasLight, size),
                     className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size]
                 });
 
             case 19: // Special mark
-                // Use SVG from AtoN module
+                // Use SVG from AtoN module with optional light
                 return L.divIcon({
-                    html: getSpecialMarkSVG('Special', size),
+                    html: getAtoNWithLightSVG('Special', hasLight, size),
                     className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size]
@@ -3937,36 +4221,36 @@
                 
             // Floating Cardinal Marks
             case 20: // Cardinal Mark N
-                // Use SVG from AtoN module (floating)
+                // Use SVG from AtoN module (floating) with optional light
                 return L.divIcon({
-                    html: getCardinalMarkSVG('North', size),
+                    html: getAtoNWithLightSVG('North', hasLight, size),
                     className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size]
                 });
 
             case 21: // Cardinal Mark E
-                // Use SVG from AtoN module (floating)
+                // Use SVG from AtoN module (floating) with optional light
                 return L.divIcon({
-                    html: getCardinalMarkSVG('East', size),
+                    html: getAtoNWithLightSVG('East', hasLight, size),
                     className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size]
                 });
 
             case 22: // Cardinal Mark S
-                // Use SVG from AtoN module (floating)
+                // Use SVG from AtoN module (floating) with optional light
                 return L.divIcon({
-                    html: getCardinalMarkSVG('South', size),
+                    html: getAtoNWithLightSVG('South', hasLight, size),
                     className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size]
                 });
 
             case 23: // Cardinal Mark W
-                // Use SVG from AtoN module (floating)
+                // Use SVG from AtoN module (floating) with optional light
                 return L.divIcon({
-                    html: getCardinalMarkSVG('West', size),
+                    html: getAtoNWithLightSVG('West', hasLight, size),
                     className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size]
@@ -3974,18 +4258,18 @@
                 
             // Floating Port/Starboard Marks
             case 24: // Port hand Mark
-                // Use SVG from AtoN module
+                // Use SVG from AtoN module with optional light
                 return L.divIcon({
-                    html: getSpecialMarkSVG('Port', size),
+                    html: getAtoNWithLightSVG('Port', hasLight, size),
                     className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size]
                 });
 
             case 25: // Starboard hand Mark
-                // Use SVG from AtoN module
+                // Use SVG from AtoN module with optional light
                 return L.divIcon({
-                    html: getSpecialMarkSVG('Starboard', size),
+                    html: getAtoNWithLightSVG('Starboard', hasLight, size),
                     className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size]
@@ -4003,27 +4287,27 @@
                 break;
                 
             case 28: // Isolated danger
-                // Use SVG from AtoN module
+                // Use SVG from AtoN module with optional light
                 return L.divIcon({
-                    html: getSpecialMarkSVG('IsolatedDanger', size),
+                    html: getAtoNWithLightSVG('IsolatedDanger', hasLight, size),
                     className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size]
                 });
 
             case 29: // Safe Water
-                // Use SVG from AtoN module
+                // Use SVG from AtoN module with optional light
                 return L.divIcon({
-                    html: getSpecialMarkSVG('SafeWater', size),
+                    html: getAtoNWithLightSVG('SafeWater', hasLight, size),
                     className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size]
                 });
 
             case 30: // Special Mark
-                // Use SVG from AtoN module
+                // Use SVG from AtoN module with optional light
                 return L.divIcon({
-                    html: getSpecialMarkSVG('Special', size),
+                    html: getAtoNWithLightSVG('Special', hasLight, size),
                     className: 'aton-marker',
                     iconSize: [size, size],
                     iconAnchor: [size/2, size]
@@ -4069,6 +4353,37 @@
             iconSize: [size, size],
             iconAnchor: [size/2, size]
         });
+    }
+
+    /**
+     * Determine if an AtoN has a light based on default assumption with exceptions
+     * @param atonType AtoN type number
+     * @param statusMessages Array of status messages
+     * @param isVirtual Whether the AtoN is virtual
+     * @returns boolean indicating if AtoN has a light
+     */
+    function atonHasLight(atonType: number, statusMessages: string[], isVirtual: boolean = false): boolean {
+        // Exception 1: Fixed Lights (types 5 and 6) are dedicated light structures - no overlay needed
+        if (atonType === 5 || atonType === 6) {
+            // console.debug(`AtoN type ${atonType} is Fixed Light - no light overlay needed`);
+            return false;
+        }
+        
+        // Exception 2: Virtual AtoNs don't have physical lights
+        if (isVirtual) {
+            // console.debug(`Virtual AtoN - no light overlay`);
+            return false;
+        }
+        
+        // Exception 3: If status explicitly says "No Light"
+        if (statusMessages.some(msg => msg.includes('No Light'))) {
+            // console.debug(`AtoN has "No Light" status - no light overlay`);
+            return false;
+        }
+        
+        // Default assumption: All other AtoNs have lights
+        // console.debug(`AtoN type ${atonType} - assuming has light (default)`);
+        return true;
     }
 
     /**
@@ -4361,7 +4676,7 @@
         }
 
         /* AIS Base Station Report
-            * https://www.navcen.uscg.gov/ais-base-station-report-message-4
+            * https://www.navcen.uscg.gov/ais-base-station-report-message4
         */
         if (msgType === 4) {
             // Base Station Report
@@ -5186,7 +5501,7 @@
                 }
             }
         }
-
+        // https://www.navcen.uscg.gov/ais-aton-report
         if (msgType === 21) {
             //console.debug(`AIS AtoN Message (Type 21) from MMSI ${mmsi}`);
             // Extract AtoN position and info
@@ -5208,12 +5523,77 @@
             }
             name = name.replace(/@+$/, '').trim();
 
-            // console.debug(`%c Virtual AtoN detected: ${name} in position (${lat.toFixed(5)}, ${lon.toFixed(5)})`, 'background: #FFF; color: #F00');
-
             // AtoN type (bits 38-42)
             const atonType = parseInt(bitstring.slice(38, 43), 2);
             const atonTypeName = getAtoNTypeText(atonType);
 
+            let atonStatus = {
+                offPosition: 0,
+                virtualAtoN: 0,
+                rawStatus: 0,
+                statusBits: '',
+                statusMessages: [] as string[]
+            };
+            
+            // Off-position indicator (bit 259)
+            if (bitstring.length >= 260) {
+                atonStatus.offPosition = parseInt(bitstring.slice(259, 260), 2);
+                if (atonStatus.offPosition === 1) atonStatus.statusMessages.push('Off Position');
+            }
+            
+            // AtoN Status bits (8 bits from 260-267) - IEC 62288 Annex L
+            if (bitstring.length >= 268) {
+                // Extract 8-bit status field (bits 260-267)
+                const statusBits = bitstring.slice(260, 268);
+                atonStatus.rawStatus = parseInt(statusBits, 2);
+                atonStatus.statusBits = statusBits;
+                
+                // Decode individual status bits according to IEC 62288 Annex L
+                const bit0 = parseInt(statusBits[0], 2); // Alarm / Good health
+                const bit1 = parseInt(statusBits[1], 2); // Light - Status (2 bits)
+                const bit2 = parseInt(statusBits[2], 2); // 
+                const bit3 = parseInt(statusBits[3], 2); // RACON - Status (2 bits)
+                const bit4 = parseInt(statusBits[4], 2); // 
+                const bit5 = parseInt(statusBits[5], 2); // Page ID (3 bits)
+                const bit6 = parseInt(statusBits[6], 2); // Page ID
+                const bit7 = parseInt(statusBits[7], 2); // Page ID
+                
+                // Build status messages for the 8-bit status field
+                if (bit5 === 1 && bit6 === 1 && bit7 === 1) {
+                    if (bit0 === 0) atonStatus.statusMessages.push('Alarm');
+
+                    if (bit2 === 0 && bit1 === 0) atonStatus.statusMessages.push('No Light');
+                    if (bit2 === 0 && bit1 === 1) atonStatus.statusMessages.push('Light ON');
+                    if (bit2 === 1 && bit1 === 0) atonStatus.statusMessages.push('Light OFF');
+                    if (bit2 === 1 && bit1 === 1) atonStatus.statusMessages.push('Light Error');
+                    
+                    if (bit4 === 0 && bit3 === 0) atonStatus.statusMessages.push('No RACON installed');
+                    if (bit4 === 0 && bit3 === 1) atonStatus.statusMessages.push('Racon not monitored');
+                    if (bit4 === 1 && bit3 === 0) atonStatus.statusMessages.push('Racon Ok');
+                    if (bit4 === 1 && bit3 === 1) atonStatus.statusMessages.push('Racon Error');
+                }
+                // console.debug(`AtoN Status bits for ${name}: ${statusBits} (${atonStatus.rawStatus}) - ${atonStatus.statusMessages.join(', ') || 'Normal'}`);
+            }
+            // RAIM-flag (bit 268)
+            if (bitstring.length >= 269) {
+                const raimFlag = parseInt(bitstring.slice(268, 269), 2);
+                if (raimFlag === 0) atonStatus.statusMessages.push('No RAIM in use');
+            }
+            // Virtual AtoN flag (bit 269)
+            if (bitstring.length >= 270) {
+                atonStatus.virtualAtoN = parseInt(bitstring.slice(269, 270), 2);
+                if (atonStatus.virtualAtoN === 1) atonStatus.statusMessages.push('Virtual');
+            }
+            
+            // console.debug(`AtoN Status bits for ${name}: ${atonStatus.statusMessages.join(', ') || 'Normal'}`);
+
+            // Legacy variables for compatibility
+            const offPosition = atonStatus.offPosition;
+            const virtualAtoN = atonStatus.virtualAtoN;
+            
+            // Build comprehensive status text
+            let statusText = atonStatus.statusMessages.join(', ');
+            
             // Add marker to atonLayer
             if (atonLayer) {
                 // console.debug(`Adding AtoN marker: Type ${atonType} (${atonTypeName}) at ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
@@ -5232,15 +5612,56 @@
                     if (existingAton.marker && atonLayer) {
                         atonLayer.removeLayer(existingAton.marker);
                     }
+                    if (existingAton.statusLabel && atonLayer) {
+                        atonLayer.removeLayer(existingAton.statusLabel);
+                    }
                 }
                 
-                const atonIcon = createAtoNIcon(atonType, iconSize);
+                // Check if AtoN has a light based on new default assumption logic
+                const hasLight = atonHasLight(atonType, atonStatus.statusMessages, virtualAtoN === 1);
+                const atonIcon = createAtoNIcon(atonType, iconSize, hasLight, statusText);
                 const marker = L.marker([lat, lon], { icon: atonIcon, zIndexOffset: zIndexWaypoint }).addTo(atonLayer);
+                
+                // console.debug(`AtoN ${mmsi} created: type=${atonType}, hasLight=${hasLight}, statusMessages=[${atonStatus.statusMessages.join(', ')}]`);
+                
+                // Add status text label for critical conditions
+                let statusLabel = null;
+                let statusLabelText = '';
+                let statusColor = '';
+                
+                // Prioritize most critical status first
+                if (offPosition === 1) {
+                    statusLabelText = 'Off Pstn';
+                    statusColor = 'rgba(255,0,0,0.8)'; // Red for off position
+                } else if (atonStatus.statusMessages.includes('Light OFF')) {
+                    statusLabelText = 'Light OFF';
+                    statusColor = 'rgba(255,165,0,0.8)'; // Orange for light issues
+                } else if (atonStatus.statusMessages.includes('Light Error')) {
+                    statusLabelText = 'Light Error';
+                    statusColor = 'rgba(255,165,0,0.8)'; // Orange for light issues
+                } else if (atonStatus.statusMessages.includes('Racon OFF')) {
+                    statusLabelText = 'Racon OFF';
+                    statusColor = 'rgba(255,165,0,0.8)'; // Orange for racon issues
+                } else if (atonStatus.statusMessages.includes('Racon Error')) {
+                    statusLabelText = 'Racon Error';
+                    statusColor = 'rgba(255,165,0,0.8)'; // Orange for racon issues
+                }
+                
+                if (statusLabelText) {
+                    const statusTextIcon = L.divIcon({
+                        className: 'aton-status-label',
+                        html: `<div style="background: ${statusColor}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; text-align: center; white-space: nowrap;">${statusLabelText}</div>`,
+                        iconSize: [Math.max(50, statusLabelText.length * 7), 15],
+                        iconAnchor: [Math.max(25, statusLabelText.length * 3.5), 0] // Position below the icon
+                    });
+                    statusLabel = L.marker([lat, lon], { icon: statusTextIcon, zIndexOffset: zIndexWaypoint + 1 }).addTo(atonLayer);
+                }
                 
                 const tooltipContent = `
                     <strong>AtoN</strong><br>
                     Name: ${name}<br>
                     Type: ${atonTypeName}<br>
+                    ${statusText ? `Status: ${statusText}<br>` : ''}
                     Lat: ${displayLatitude(lat)}<br>
                     Lon: ${displayLongitude(lon)}
                 `;
@@ -5255,6 +5676,7 @@
                 // Store AtoN marker data for zoom-based resizing
                 atonMarkers[mmsi] = {
                     marker: marker,
+                    statusLabel: statusLabel,
                     data: {
                         mmsi: mmsi,
                         lat: lat,
@@ -5262,6 +5684,10 @@
                         name: name,
                         atonType: atonType,
                         atonTypeName: atonTypeName,
+                        offPosition: offPosition,
+                        virtualAtoN: virtualAtoN,
+                        statusText: statusText,
+                        atonStatus: atonStatus,
                         lastUpdate: Date.now()
                     }
                 };
