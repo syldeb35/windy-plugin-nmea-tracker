@@ -1442,90 +1442,14 @@
                         zIndexOffset: zIndexWaypoint 
                     }).addTo(atonLayer);
                     
-                    // Add status label for critical conditions
-                    let statusLabel = null;
-                    let statusLabelText = '';
-                    let statusColor = '';
-                    
-                    // Determine what status label to show based on stored data
-                    if (atonData.offPosition === 1 || (atonData.statusText && atonData.statusText.includes('Off Position'))) {
-                        statusLabelText = 'Off Pstn';
-                        statusColor = 'rgba(255,0,0,0.8)';
-                    } else if (atonData.statusText && atonData.statusText.includes('Light OFF')) {
-                        statusLabelText = 'Light OFF';
-                        statusColor = 'rgba(255,165,0,0.8)';
-                    } else if (atonData.statusText && atonData.statusText.includes('Light Error')) {
-                        statusLabelText = 'Light Error';
-                        statusColor = 'rgba(255,165,0,0.8)';
-                    } else if (atonData.statusText && atonData.statusText.includes('Racon OFF')) {
-                        statusLabelText = 'Racon OFF';
-                        statusColor = 'rgba(255,165,0,0.8)';
-                    } else if (atonData.statusText && atonData.statusText.includes('Racon Error')) {
-                        statusLabelText = 'Racon Error';
-                        statusColor = 'rgba(255,165,0,0.8)';
-                    }
-                    
-                    if (statusLabelText) {
-                        const statusTextIcon = L.divIcon({
-                            className: 'aton-status-label',
-                            html: `<div style="background: ${statusColor}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; text-align: center; white-space: nowrap;">${statusLabelText}</div>`,
-                            iconSize: [Math.max(50, statusLabelText.length * 7), 15],
-                            iconAnchor: [Math.max(25, statusLabelText.length * 3.5), 0]
-                        });
-                        statusLabel = L.marker([atonData.lat, atonData.lon], { icon: statusTextIcon, zIndexOffset: zIndexWaypoint + 1 }).addTo(atonLayer);
-                    }
-                    
-                    // Add light indicator if AtoN has a light
-                    let lightIndicator = null;
-                    if (hasLight) {
-                        const lightSize = Math.max(24, Math.floor(iconSize * 2)); // Make it bigger for the teardrop
-                        
-                        // Use the official maritime light symbol (teardrop/flame shape)
-                        const lightSvg = `<svg xmlns="http://www.w3.org/2000/svg"
-                                            width="${lightSize}px"
-                                            height="${lightSize}px" 
-                                            viewBox="0 0 320 320">
-                                            <g transform="rotate(-90 160 160)">
-                                            <path d="M 131.60087,181.31159 L 69.97299,257.62001 L 65.44288,263.19827 L 59.885447,267.42201 L 52.986033,269.53125 L 45.663807,269.42153 L 38.851616,267.12524 L 33.104189,262.78791 L 28.902861,256.70061 L 26.677963,249.64945 L 26.834933,242.67425 L 29.567773,236.58472 L 34.162548,231.27636 L 39.756076,226.40835 L 40.930254,225.46186 L 131.60087,181.31159 z M 159.60212,156.05108 C 161.79918,155.83146 163.76054,157.43633 163.98017,159.63337 C 164.19979,161.83043 162.59492,163.79179 160.39788,164.01142 C 158.20082,164.23104 156.23946,162.62617 156.01983,160.42913 C 155.80021,158.23207 157.40508,156.27071 159.60212,156.05108 z"
-                                            style="fill:#a30075;fill-opacity:0.5;fill-rule:evenodd;stroke:none"/>
-                                          </svg>`;
-                        
-                        const lightIcon = L.divIcon({
-                            className: 'aton-light-indicator',
-                            html: lightSvg,
-                            iconSize: [lightSize, lightSize],
-                            iconAnchor: [lightSize/2, lightSize/2], // Position at bottom-center of AtoN
-                            popupAnchor: [0, 0]
-                        });
-                        
-                        // Position light indicator at same coordinates as AtoN, offset by iconAnchor
-                        lightIndicator = L.marker([atonData.lat, atonData.lon], { 
-                            icon: lightIcon,
-                            interactive: false, // Prevent interference with AtoN clicks
-                            zIndexOffset: zIndexWaypoint + 5
-                        }).addTo(atonLayer);
-                    }
-                    
-                    const tooltipContent = `
-                        <strong>AtoN</strong><br>
-                        Name: ${atonData.name}<br>
-                        Type: ${atonData.atonTypeName}<br>
-                        ${atonData.statusText ? `Status: ${atonData.statusText}<br>` : ''}
-                        Lat: ${displayLatitude(atonData.lat)}<br>
-                        Lon: ${displayLongitude(atonData.lon)}
-                    `;
-                    
-                    marker.bindTooltip(tooltipContent, { 
-                        permanent: false, 
-                        direction: 'top', 
-                        className: 'aton-tooltip' 
-                    });
+                    // Create indicators using the new helper function
+                    const indicators = createAtoNIndicators(atonData, marker, iconSize);
                     
                     // Store AtoN marker data for zoom-based resizing
                     atonMarkers[mmsi] = {
                         marker: marker,
-                        statusLabel: statusLabel,
-                        lightIndicator: lightIndicator,
+                        statusLabel: indicators.statusLabel,
+                        lightIndicator: indicators.lightIndicator,
                         data: atonData
                     };
                     
@@ -3701,6 +3625,123 @@
     }
 
     /**
+     * Create status label, light indicator, and tooltip for an AtoN marker
+     * @param atonData AtoN data object
+     * @param marker The main AtoN marker
+     * @param iconSize The size of the main AtoN icon
+     * @returns Object containing statusLabel, lightIndicator, and tooltipContent
+     */
+    function createAtoNIndicators(atonData: any, marker: any, iconSize: number): { statusLabel: any, lightIndicator: any, tooltipContent: string } {
+        // Create status label if needed
+        let statusLabel = null;
+        let statusLabelText = '';
+        let statusColor = '';
+        
+        // Determine what status label to show
+        if (atonData.offPosition === 1 || (atonData.statusText && atonData.statusText.includes('Off Position'))) {
+            statusLabelText = 'Off Pstn';
+            statusColor = 'rgba(255,0,0,0.8)';
+        } else if (atonData.statusText && atonData.statusText.includes('Light OFF')) {
+            statusLabelText = 'Light OFF';
+            statusColor = 'rgba(255,165,0,0.8)';
+        } else if (atonData.statusText && atonData.statusText.includes('Light Error')) {
+            statusLabelText = 'Light Error';
+            statusColor = 'rgba(255,165,0,0.8)';
+        } else if (atonData.statusText && atonData.statusText.includes('Racon OFF')) {
+            statusLabelText = 'Racon OFF';
+            statusColor = 'rgba(255,165,0,0.8)';
+        } else if (atonData.statusText && atonData.statusText.includes('Racon Error')) {
+            statusLabelText = 'Racon Error';
+            statusColor = 'rgba(255,165,0,0.8)';
+        }
+        
+        const minZoomForStatusLabels = 11; // Minimum zoom level to show status labels
+        if (statusLabelText && map.getZoom() >= minZoomForStatusLabels) {
+            const statusTextIcon = L.divIcon({
+                className: 'aton-status-label',
+                html: `<div style="background: ${statusColor}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; text-align: center; white-space: nowrap;">${statusLabelText}</div>`,
+                iconSize: [Math.max(50, statusLabelText.length * 7), 15],
+                iconAnchor: [Math.max(25, statusLabelText.length * 3.5), iconSize]
+            });
+            statusLabel = L.marker([atonData.lat, atonData.lon], { icon: statusTextIcon, zIndexOffset: zIndexWaypoint + 1 }).addTo(atonLayer);
+        }
+        
+        // Create light indicator if AtoN has a light
+        let lightIndicator = null;
+        const statusMessages = atonData.statusText ? atonData.statusText.split(', ') : [];
+        const hasLight = atonHasLight(atonData.atonType, statusMessages, atonData.virtualAtoN === 1);
+        
+        if (hasLight) {
+            let lightColor = 'yellow'; // Default light color
+            const atonType = atonData.atonType;
+            if (atonType === 13 || atonType === 15 || atonType === 24 || atonType === 26) {
+                lightColor = 'red';
+            }
+            if (atonType === 14 || atonType === 16 || atonType === 25 || atonType === 27) {
+                lightColor = 'green';
+            }
+            const lightSize = Math.max(24, Math.floor(iconSize * 2)); // Proportional to AtoN size
+            
+            // Use the official maritime light symbol (teardrop/flame shape)
+            const lightSvg = `<svg xmlns="http://www.w3.org/2000/svg"
+                                width="${lightSize}px"
+                                height="${lightSize}px" 
+                                viewBox="0 0 320 320">
+                                <g transform="rotate(-90 160 160)">
+                           <!-- <rect x="0" y="0" width="320" height="320" fill="none" stroke="red" stroke-width="2" stroke-dasharray="5,5"/> -->
+                                <path d="M 131.60087,181.31159 L 69.97299,257.62001 L 65.44288,263.19827 L 59.885447,267.42201 L 52.986033,269.53125 L 45.663807,269.42153 L 38.851616,267.12524 L 33.104189,262.78791 L 28.902861,256.70061 L 26.677963,249.64945 L 26.834933,242.67425 L 29.567773,236.58472 L 34.162548,231.27636 L 39.756076,226.40835 L 40.930254,225.46186 L 131.60087,181.31159 z M 159.60212,156.05108 C 161.79918,155.83146 163.76054,157.43633 163.98017,159.63337 C 164.19979,161.83043 162.59492,163.79179 160.39788,164.01142 C 158.20082,164.23104 156.23946,162.62617 156.01983,160.42913 C 155.80021,158.23207 157.40508,156.27071 159.60212,156.05108 z" 
+                                style="fill:${lightColor};fill-opacity:0.5;fill-rule:evenodd;stroke:none"/>
+                              </svg>`;
+            
+            const lightIcon = L.divIcon({
+                className: 'aton-light-indicator',
+                html: lightSvg,
+                iconSize: [lightSize, lightSize],
+                iconAnchor: [lightSize/2, lightSize/2], // Position at bottom-center of AtoN
+                popupAnchor: [0, 0]
+            });
+            
+            // Position light indicator at same coordinates as AtoN, offset by iconAnchor
+            lightIndicator = L.marker([atonData.lat, atonData.lon], { 
+                icon: lightIcon,
+                interactive: false, // Prevent interference with AtoN clicks
+                zIndexOffset: zIndexWaypoint + 5
+            }).addTo(atonLayer);
+        }
+        /*atonDim: {
+                        toBow: dimToBow,
+                        toStern: dimToStern,
+                        toPort: dimToPort,
+                        toStarboard: dimToStarboard,
+                        totalLength: totalLength,
+                        totalBeam: totalBeam,
+                        refPoint: refPoint
+                    },
+        */
+        // Create tooltip content
+        const tooltipContent = `
+            <strong>AtoN</strong><br>
+            Name: ${atonData.name}<br>
+            Type: ${atonData.atonTypeName}<br>
+            Dim: ${atonData.atonDim.totalLength || 0}m x ${atonData.atonDim.totalBeam || 0}m<br>
+            ${atonData.statusText ? `Status: ${atonData.statusText}<br>` : ''}
+            Lat: ${displayLatitude(atonData.lat)}<br>
+            Lon: ${displayLongitude(atonData.lon)}<br>
+            Position Accuracy: ${atonData.posAcc === 1 ? 'High' : 'Low'}<br>
+        `;
+        
+        // Bind tooltip to marker
+        marker.bindTooltip(tooltipContent, { 
+            permanent: false, 
+            direction: 'top',
+            offset: [0, -iconSize - 5], // Anchor to top of icon with small gap
+            className: 'aton-tooltip' 
+        });
+        
+        return { statusLabel, lightIndicator, tooltipContent };
+    }
+
+    /**
      * Update all AtoN markers with new icon sizes based on current zoom level
      */
     function updateAtoNIconSizes() {
@@ -3732,92 +3773,13 @@
                     zIndexOffset: zIndexWaypoint 
                 }).addTo(atonLayer);
                 
-                // Recreate status label if needed
-                let newStatusLabel = null;
-                let statusLabelText = '';
-                let statusColor = '';
-                
-                // Determine what status label to show
-                if (atonData.data.offPosition === 1 || (atonData.data.statusText && atonData.data.statusText.includes('Off Position'))) {
-                    statusLabelText = 'Off Pstn';
-                    statusColor = 'rgba(255,0,0,0.8)';
-                } else if (atonData.data.statusText && atonData.data.statusText.includes('Light OFF')) {
-                    statusLabelText = 'Light OFF';
-                    statusColor = 'rgba(255,165,0,0.8)';
-                } else if (atonData.data.statusText && atonData.data.statusText.includes('Light Error')) {
-                    statusLabelText = 'Light Error';
-                    statusColor = 'rgba(255,165,0,0.8)';
-                } else if (atonData.data.statusText && atonData.data.statusText.includes('Racon OFF')) {
-                    statusLabelText = 'Racon OFF';
-                    statusColor = 'rgba(255,165,0,0.8)';
-                } else if (atonData.data.statusText && atonData.data.statusText.includes('Racon Error')) {
-                    statusLabelText = 'Racon Error';
-                    statusColor = 'rgba(255,165,0,0.8)';
-                }
-                
-                if (statusLabelText) {
-                    const statusTextIcon = L.divIcon({
-                        className: 'aton-status-label',
-                        html: `<div style="background: ${statusColor}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; text-align: center; white-space: nowrap;">${statusLabelText}</div>`,
-                        iconSize: [Math.max(50, statusLabelText.length * 7), 15],
-                        iconAnchor: [Math.max(25, statusLabelText.length * 3.5), 0]
-                    });
-                    newStatusLabel = L.marker([atonData.data.lat, atonData.data.lon], { icon: statusTextIcon, zIndexOffset: zIndexWaypoint + 1 }).addTo(atonLayer);
-                }
-                
-                // Recreate light indicator with new size if AtoN has light
-                let newLightIndicator = null;
-                if (hasLight) {
-                    const lightSize = Math.max(24, Math.floor(newSize * 2)); // Make it bigger for the teardrop
-                    
-                    // Use the official maritime light symbol (teardrop/flame shape)
-                    const lightSvg = `<svg xmlns="http://www.w3.org/2000/svg" 
-                                        width="${lightSize}px"
-                                        height="${lightSize}px"
-                                        viewBox="0 0 320 320">
-                                        <g transform="rotate(-90 160 160)">
-                                        <path d="M 131.60087,181.31159 L 69.97299,257.62001 L 65.44288,263.19827 L 59.885447,267.42201 L 52.986033,269.53125 L 45.663807,269.42153 L 38.851616,267.12524 L 33.104189,262.78791 L 28.902861,256.70061 L 26.677963,249.64945 L 26.834933,242.67425 L 29.567773,236.58472 L 34.162548,231.27636 L 39.756076,226.40835 L 40.930254,225.46186 L 131.60087,181.31159 z M 159.60212,156.05108 C 161.79918,155.83146 163.76054,157.43633 163.98017,159.63337 C 164.19979,161.83043 162.59492,163.79179 160.39788,164.01142 C 158.20082,164.23104 156.23946,162.62617 156.01983,160.42913 C 155.80021,158.23207 157.40508,156.27071 159.60212,156.05108 z"
-                                        style="fill:#a30075;fill-opacity:0.5;fill-rule:evenodd;stroke:none"/>
-                                      </svg>`;
-                    
-                    const lightIcon = L.divIcon({
-                        className: 'aton-light-indicator',
-                        html: lightSvg,
-                        iconSize: [lightSize, lightSize],
-                        iconAnchor: [lightSize/2, lightSize/2], // Position at bottom-center of AtoN
-                        popupAnchor: [0, 0]
-                    });
-                    
-                    // Position light indicator at same coordinates as AtoN, offset by iconAnchor
-                    newLightIndicator = L.marker([atonData.data.lat, atonData.data.lon], { 
-                        icon: lightIcon,
-                        interactive: false, // Prevent interference with AtoN clicks
-                        zIndexOffset: zIndexWaypoint + 5
-                    }).addTo(atonLayer);
-                }
-                
-
-                
-                // Restore tooltip
-                const tooltipContent = `
-                    <strong>AtoN</strong><br>
-                    Name: ${atonData.data.name}<br>
-                    Type: ${atonData.data.atonTypeName}<br>
-                    ${atonData.data.statusText ? `Status: ${atonData.data.statusText}<br>` : ''}
-                    Lat: ${displayLatitude(atonData.data.lat)}<br>
-                    Lon: ${displayLongitude(atonData.data.lon)}
-                `;
-                newMarker.bindTooltip(tooltipContent, { 
-                    permanent: false, 
-                    direction: 'top',
-                    offset: [0, -newSize - 5], // Anchor to top of icon with small gap
-                    className: 'aton-tooltip' 
-                });
+                // Create indicators using the new helper function
+                const indicators = createAtoNIndicators(atonData.data, newMarker, newSize);
                 
                 // Update stored marker references
                 atonData.marker = newMarker;
-                atonData.statusLabel = newStatusLabel;
-                atonData.lightIndicator = newLightIndicator;
+                atonData.statusLabel = indicators.statusLabel;
+                atonData.lightIndicator = indicators.lightIndicator;
             }
         });
     }
@@ -4422,7 +4384,7 @@
             "Default, Type of AtoN not specified",
             "Reference point",
             "RACON",
-            "Fixed structures off-shore, such as oil platforms, wind farms.",
+            "Fixed structure off-shore",
             "Emergency Wreck Marking Buoy",
             "Fix. Light, without sectors",
             "Fix. Light, with sectors",
@@ -4454,6 +4416,26 @@
 
         ];
         return types[AtoNType] || "Unknown";
+    }
+    /**
+     * 
+     * @param code
+     */
+    function getPositionFixingDeviceText(code: number): string {
+        const devices = [
+            "Undefined",
+            "GPS",
+            "GLONASS",
+            "Combined GPS/GLONASS",
+            "Loran-C",
+            "Chayka",
+            "Integrated Navigation System",
+            "Surveyed",
+            "Galileo",
+            "BeiDou",
+            "Other"
+        ];
+        return devices[code] || "Unknown";
     }
 
     /**
@@ -4541,13 +4523,19 @@
                 const age = Date.now() - aton.data.lastUpdate;
                 
                 if (age > maxAge) {
-                    // Remove marker from map
+                    // Remove all associated markers from map
                     if (aton.marker && atonLayer) {
                         atonLayer.removeLayer(aton.marker);
                     }
+                    if (aton.statusLabel && atonLayer) {
+                        atonLayer.removeLayer(aton.statusLabel);
+                    }
+                    if (aton.lightIndicator && atonLayer) {
+                        atonLayer.removeLayer(aton.lightIndicator);
+                    }
                     delete atonMarkers[mmsi];
                     cleanedCount++;
-                    console.debug(`Cleaned up old AtoN marker: MMSI ${mmsi}`);
+                    console.debug(`Cleaned up old AtoN marker and associated indicators: MMSI ${mmsi}`);
                 }
             }
         });
@@ -4585,7 +4573,7 @@
             *
         */
         if (msgType === 1 || msgType === 2 || msgType === 3) {
-            // Position Report (Class A) - CORRECTION of coordinate decoding
+            // Position Report (Class A)
             // In AIS: longitude comes first (bits 61-88), then latitude (bits 89-115)
             const lonRaw = parseInt(bitstring.slice(61, 89), 2);  // 28 bits for longitude
             const latRaw = parseInt(bitstring.slice(89, 116), 2); // 27 bits for latitude
@@ -5042,7 +5030,7 @@
                         // For FID 29, the binary data structure is:
                         // - Link ID (10 bits) - bits 0-9
                         // - Text (variable length, 6-bit ASCII) - bits 10+
-                        console.debug(`Type 8 FID 29 - Processing ${binaryData.length} bits of text description data`);
+                        /* console.debug(`Type 8 FID 29 - Processing ${binaryData.length} bits of text description data`);
                         if (binaryData.length >= 10) {
                             const linkId = parseInt(binaryData.slice(0, 10), 2);
                             let description = '';
@@ -5061,7 +5049,7 @@
                             console.debug(`Type 8 Text Description (Link ID: ${linkId}): "${description.trim()}" (length: ${description.length})`);
                         } else {
                             console.debug(`Type 8 Text Description: Insufficient data (${binaryData.length} bits, need at least 10)`);
-                        }
+                        } */
                         break;
                     case 31: // Meteorological/Hydrological Data
                         console.debug(`Type 8 Met/Hydro Data (FID 31) from ${mmsi}`);
@@ -5183,7 +5171,7 @@
         */
         if (msgType === 10) {
             // UTC/Date Inquiry
-            console.debug(`AIS UTC/Date Inquiry (Type 10) from MMSI ${mmsi}`);
+            // console.debug(`AIS UTC/Date Inquiry (Type 10) from MMSI ${mmsi}`);
             // This message is typically sent by base stations requesting time sync
             // We can respond with our own UTC time if needed (not implemented here)
         }
@@ -5193,6 +5181,7 @@
             * https://www.navcen.uscg.gov/ais-utcdate-response-message-11
         */
         if (msgType === 11) {
+            /*
             // UTC/Date Response
             console.debug(`AIS UTC/Date Response (Type 11) from MMSI ${mmsi}`);
             // Extract UTC time and date according to ITU-R M.1371-5
@@ -5212,6 +5201,7 @@
             const validSecond = second >= 60 ? 'N/A' : second.toString().padStart(2, '0');
             
             console.debug(`UTC Time from ${mmsi}: ${validYear}-${validMonth}-${validDay} ${validHour}:${validMinute}:${validSecond} UTC`);
+            */
         }
 
         /*
@@ -5504,24 +5494,6 @@
         // https://www.navcen.uscg.gov/ais-aton-report
         if (msgType === 21) {
             //console.debug(`AIS AtoN Message (Type 21) from MMSI ${mmsi}`);
-            // Extract AtoN position and info
-            const lonRaw = parseInt(bitstring.slice(164, 192), 2);
-            const latRaw = parseInt(bitstring.slice(193, 219), 2);
-            let lon = (lonRaw & 0x8000000) ? (lonRaw - 0x10000000) : lonRaw;
-            let lat = (latRaw & 0x4000000) ? (latRaw - 0x8000000) : latRaw;
-            lat = lat / 600000.0;
-            lon = lon / 600000.0;
-
-            // Name (20x6 bits)
-            //let nameBits = bitstring.slice(112, 232);
-            let nameBits = bitstring.slice(43, 163);
-            let name = '';
-            for (let i = 0; i < nameBits.length; i += 6) {
-                const charCode = parseInt(nameBits.slice(i, i + 6), 2);
-                if (charCode === 0) break;
-                name += aisAscii(charCode);
-            }
-            name = name.replace(/@+$/, '').trim();
 
             // AtoN type (bits 38-42)
             const atonType = parseInt(bitstring.slice(38, 43), 2);
@@ -5534,6 +5506,46 @@
                 statusBits: '',
                 statusMessages: [] as string[]
             };
+
+            // Extract AtoN name (20x6 bits)
+            let nameBits = bitstring.slice(43, 164);
+            let name = '';
+            for (let i = 0; i < nameBits.length; i += 6) {
+                const charCode = parseInt(nameBits.slice(i, i + 6), 2);
+                if (charCode === 0) break;
+                name += aisAscii(charCode);
+            }
+            name = name.replace(/@+$/, '').trim();
+
+            // Extract AtoN position accuracy
+            const posAcc = parseInt(bitstring.slice(163, 164), 2);
+
+            // Extract AtoN position
+            const lonRaw = parseInt(bitstring.slice(164, 192), 2);
+            const latRaw = parseInt(bitstring.slice(192, 219), 2);
+            let lon = (lonRaw & 0x8000000) ? (lonRaw - 0x10000000) : lonRaw;
+            let lat = (latRaw & 0x4000000) ? (latRaw - 0x8000000) : latRaw;
+            lat = lat / 600000.0;
+            lon = lon / 600000.0;
+
+            // extract AtoN dimension and reference point
+            const dimToStarboard = parseInt(bitstring.slice(219, 228), 2);
+            const dimToPort = parseInt(bitstring.slice(228, 237), 2);
+            const dimToStern = parseInt(bitstring.slice(237, 243), 2);
+            const dimToBow = parseInt(bitstring.slice(243, 249), 2);
+            // Calculate total length and beam
+            const totalLength = dimToBow + dimToStern;
+            const totalBeam = dimToPort + dimToStarboard;
+
+            // extract Type of electronic position fixing device (4 bits from 249-252)
+            const posFixType = parseInt(bitstring.slice(249, 253), 2);
+            const posFixTypeName = getPositionFixingDeviceText(posFixType);
+
+            // extract Time stamp (UTC second when the report was generated) 4 bits from 253-258
+            // 0-59 = second of minute, 60 = not available, 61=Manual 62=Dead Reckoning , 63=Pos Sys inoperative
+            const utcTimestamp = parseInt(bitstring.slice(253, 259), 2);
+            
+            console.debug(`AtoN Detected: MMSI ${mmsi}, Name: "${name}", Type: ${atonType} (${atonTypeName}), Position: ${lat.toFixed(5)}, ${lon.toFixed(5)} (Acc: ${posAcc === 1 ? 'High' : 'Low'}), Dimensions: ${totalLength}m x ${totalBeam}m, PosFix: ${posFixType} (${posFixTypeName}) Timestamp: ${utcTimestamp >= 60 ? 'N/A' : utcTimestamp} s`);
             
             // Off-position indicator (bit 259)
             if (bitstring.length >= 260) {
@@ -5549,44 +5561,66 @@
                 atonStatus.statusBits = statusBits;
                 
                 // Decode individual status bits according to IEC 62288 Annex L
-                const bit0 = parseInt(statusBits[0], 2); // Alarm / Good health
-                const bit1 = parseInt(statusBits[1], 2); // Light - Status (2 bits)
-                const bit2 = parseInt(statusBits[2], 2); // 
-                const bit3 = parseInt(statusBits[3], 2); // RACON - Status (2 bits)
-                const bit4 = parseInt(statusBits[4], 2); // 
-                const bit5 = parseInt(statusBits[5], 2); // Page ID (3 bits)
-                const bit6 = parseInt(statusBits[6], 2); // Page ID
-                const bit7 = parseInt(statusBits[7], 2); // Page ID
+                const bit0 = parseInt(statusBits[7], 2); // Alarm / Good health
+                const bit1 = parseInt(statusBits[6], 2); // Light - Status (2 bits)
+                const bit2 = parseInt(statusBits[5], 2); // 
+                const bit3 = parseInt(statusBits[4], 2); // RACON - Status (2 bits)
+                const bit4 = parseInt(statusBits[3], 2); // 
+                const bit5 = parseInt(statusBits[2], 2); // Page ID (3 bits)
+                const bit6 = parseInt(statusBits[1], 2); // Page ID
+                const bit7 = parseInt(statusBits[0], 2); // Page ID
                 
                 // Build status messages for the 8-bit status field
-                if (bit5 === 1 && bit6 === 1 && bit7 === 1) {
-                    if (bit0 === 0) atonStatus.statusMessages.push('Alarm');
+                if (bit7 === 1 && bit6 === 1 && bit5 === 1) {
+                    if (bit0 === 1) atonStatus.statusMessages.push('Alarm');
+                    if (bit0 === 0) atonStatus.statusMessages.push('Good health');
 
                     if (bit2 === 0 && bit1 === 0) atonStatus.statusMessages.push('No Light');
                     if (bit2 === 0 && bit1 === 1) atonStatus.statusMessages.push('Light ON');
-                    if (bit2 === 1 && bit1 === 0) atonStatus.statusMessages.push('Light OFF');
                     if (bit2 === 1 && bit1 === 1) atonStatus.statusMessages.push('Light Error');
+                    if (bit2 === 1 && bit1 === 0) atonStatus.statusMessages.push('Light OFF');
                     
-                    if (bit4 === 0 && bit3 === 0) atonStatus.statusMessages.push('No RACON installed');
-                    if (bit4 === 0 && bit3 === 1) atonStatus.statusMessages.push('Racon not monitored');
-                    if (bit4 === 1 && bit3 === 0) atonStatus.statusMessages.push('Racon Ok');
-                    if (bit4 === 1 && bit3 === 1) atonStatus.statusMessages.push('Racon Error');
+                    if (bit4 === 0 && bit3 === 0) atonStatus.statusMessages.push('RACON not installed');
+                    if (bit4 === 0 && bit3 === 1) atonStatus.statusMessages.push('RACON not monitored');
+                    if (bit4 === 1 && bit3 === 1) atonStatus.statusMessages.push('RACON Error');
+                    if (bit4 === 1 && bit3 === 0) atonStatus.statusMessages.push('RACON Ok');
                 }
-                // console.debug(`AtoN Status bits for ${name}: ${statusBits} (${atonStatus.rawStatus}) - ${atonStatus.statusMessages.join(', ') || 'Normal'}`);
+                console.debug(`AtoN Status bits for ${name}: ${statusBits} (${atonStatus.rawStatus}) - ${atonStatus.statusMessages.join(', ') || 'Normal'}`);
             }
             // RAIM-flag (bit 268)
             if (bitstring.length >= 269) {
                 const raimFlag = parseInt(bitstring.slice(268, 269), 2);
-                if (raimFlag === 0) atonStatus.statusMessages.push('No RAIM in use');
+                if (raimFlag === 1) atonStatus.statusMessages.push('RAIM: in use');
+                if (raimFlag === 0) atonStatus.statusMessages.push('RAIM: not in use');
             }
             // Virtual AtoN flag (bit 269)
             if (bitstring.length >= 270) {
                 atonStatus.virtualAtoN = parseInt(bitstring.slice(269, 270), 2);
                 if (atonStatus.virtualAtoN === 1) atonStatus.statusMessages.push('Virtual');
             }
-            
-            // console.debug(`AtoN Status bits for ${name}: ${atonStatus.statusMessages.join(', ') || 'Normal'}`);
+            // Assigned mode flag (bit 270)
+            if (bitstring.length >= 271) {
+                const assignedMode = parseInt(bitstring.slice(270, 271), 2);
+                if (assignedMode === 0) atonStatus.statusMessages.push('Autonomous');
+                if (assignedMode === 1) atonStatus.statusMessages.push('Assigned mode');
+            }
+            // Spare (bit 271)
+            // (bit 271 is spare and should be ignored)
+            if (bitstring.length > 272) {
+                console.debug (`AtoN ${name} has extended data: ${bitstring.length} bits`);
+                // Name of AtoN extension (bit 272 to 356) - additional 14 characters
+                let atonNameExt: string = '';
+                // Name (20x6 bits)
+                let name2Bits = bitstring.slice(272, 357);
+                for (let i = 0; i < name2Bits.length; i += 6) {
+                    const charCode = parseInt(name2Bits.slice(i, i + 6), 2);
+                    if (charCode === 0) break;
+                    atonNameExt += aisAscii(charCode);
+                }
 
+                console.debug (`AtoN ${name} Name Extension: ${atonNameExt}`)
+                // console.debug(`AtoN Status bits for ${name}: ${atonStatus.statusMessages.join(', ') || 'Normal'}`);
+            }
             // Legacy variables for compatibility
             const offPosition = atonStatus.offPosition;
             const virtualAtoN = atonStatus.virtualAtoN;
@@ -5615,6 +5649,9 @@
                     if (existingAton.statusLabel && atonLayer) {
                         atonLayer.removeLayer(existingAton.statusLabel);
                     }
+                    if (existingAton.lightIndicator && atonLayer) {
+                        atonLayer.removeLayer(existingAton.lightIndicator);
+                    }
                 }
                 
                 // Check if AtoN has a light based on new default assumption logic
@@ -5624,72 +5661,39 @@
                 
                 // console.debug(`AtoN ${mmsi} created: type=${atonType}, hasLight=${hasLight}, statusMessages=[${atonStatus.statusMessages.join(', ')}]`);
                 
-                // Add status text label for critical conditions
-                let statusLabel = null;
-                let statusLabelText = '';
-                let statusColor = '';
+                // Create data object for helper function
+                const atonData = {
+                    mmsi: mmsi,
+                    lat: lat,
+                    lon: lon,
+                    posAcc: posAcc,
+                    name: name,
+                    atonType: atonType,
+                    atonDim: {
+                        toBow: dimToBow,
+                        toStern: dimToStern,
+                        toPort: dimToPort,
+                        toStarboard: dimToStarboard,
+                        totalLength: totalLength,
+                        totalBeam: totalBeam
+                    },
+                    atonTypeName: atonTypeName,
+                    offPosition: offPosition,
+                    virtualAtoN: virtualAtoN,
+                    statusText: statusText,
+                    atonStatus: atonStatus,
+                    lastUpdate: Date.now()
+                };
                 
-                // Prioritize most critical status first
-                if (offPosition === 1) {
-                    statusLabelText = 'Off Pstn';
-                    statusColor = 'rgba(255,0,0,0.8)'; // Red for off position
-                } else if (atonStatus.statusMessages.includes('Light OFF')) {
-                    statusLabelText = 'Light OFF';
-                    statusColor = 'rgba(255,165,0,0.8)'; // Orange for light issues
-                } else if (atonStatus.statusMessages.includes('Light Error')) {
-                    statusLabelText = 'Light Error';
-                    statusColor = 'rgba(255,165,0,0.8)'; // Orange for light issues
-                } else if (atonStatus.statusMessages.includes('Racon OFF')) {
-                    statusLabelText = 'Racon OFF';
-                    statusColor = 'rgba(255,165,0,0.8)'; // Orange for racon issues
-                } else if (atonStatus.statusMessages.includes('Racon Error')) {
-                    statusLabelText = 'Racon Error';
-                    statusColor = 'rgba(255,165,0,0.8)'; // Orange for racon issues
-                }
-                
-                if (statusLabelText) {
-                    const statusTextIcon = L.divIcon({
-                        className: 'aton-status-label',
-                        html: `<div style="background: ${statusColor}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; text-align: center; white-space: nowrap;">${statusLabelText}</div>`,
-                        iconSize: [Math.max(50, statusLabelText.length * 7), 15],
-                        iconAnchor: [Math.max(25, statusLabelText.length * 3.5), 0] // Position below the icon
-                    });
-                    statusLabel = L.marker([lat, lon], { icon: statusTextIcon, zIndexOffset: zIndexWaypoint + 1 }).addTo(atonLayer);
-                }
-                
-                const tooltipContent = `
-                    <strong>AtoN</strong><br>
-                    Name: ${name}<br>
-                    Type: ${atonTypeName}<br>
-                    ${statusText ? `Status: ${statusText}<br>` : ''}
-                    Lat: ${displayLatitude(lat)}<br>
-                    Lon: ${displayLongitude(lon)}
-                `;
-                
-                marker.bindTooltip(tooltipContent, { 
-                    permanent: false, 
-                    direction: 'top',
-                    offset: [0, -iconSize - 5], // Anchor to top of icon with small gap
-                    className: 'aton-tooltip' 
-                });
+                // Create indicators using the new helper function
+                const indicators = createAtoNIndicators(atonData, marker, iconSize);
                 
                 // Store AtoN marker data for zoom-based resizing
                 atonMarkers[mmsi] = {
                     marker: marker,
-                    statusLabel: statusLabel,
-                    data: {
-                        mmsi: mmsi,
-                        lat: lat,
-                        lon: lon,
-                        name: name,
-                        atonType: atonType,
-                        atonTypeName: atonTypeName,
-                        offPosition: offPosition,
-                        virtualAtoN: virtualAtoN,
-                        statusText: statusText,
-                        atonStatus: atonStatus,
-                        lastUpdate: Date.now()
-                    }
+                    statusLabel: indicators.statusLabel,
+                    lightIndicator: indicators.lightIndicator,
+                    data: atonData
                 };
                 
                 // Save AtoN data to localStorage only for new markers
