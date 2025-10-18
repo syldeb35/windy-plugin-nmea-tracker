@@ -35,6 +35,22 @@ npm.cmd run serve      # Development server with auto-reload
 npm.cmd run windy      # Opens Windy with localhost plugin URL
 ```
 
+### Background Development (PowerShell)
+Run watch mode as background job to free up terminal:
+```powershell
+# Start background watch job
+Start-Job -ScriptBlock { 
+    Set-Location "c:\temp\windy\Plugin\nmea-tracker"
+    & npm.cmd run start 
+} -Name "WindyPluginWatch"
+
+# Monitor job output
+Receive-Job -Name "WindyPluginWatch" -Keep
+
+# Stop and cleanup
+Get-Job -Name "WindyPluginWatch" | Stop-Job | Remove-Job
+```
+
 ### Key Build Configuration
 - **Entry point**: `src/plugin.svelte` (not typical .js/.ts)
 - **Output**: `dist/plugin.js` and `dist/plugin.min.js` as ES modules
