@@ -3,10 +3,12 @@
 ## Project Overview
 This is a **Windy.com plugin** for real-time vessel tracking using NMEA/AIS data. The plugin connects to an external NMEA server via WebSocket to display vessel position, course, speed, and weather forecasts on the Windy map.
 
+**Current Version**: 1.1.2 (see `package.json`)
+
 ## Architecture & Key Components
 
 ### Core Technologies
-- **Svelte 4** + TypeScript for UI components
+- **Svelte 4** + TypeScript for UI components  
 - **Rollup** for bundling with Windy-specific plugins
 - **Windy Plugin API** (`@windy/*` modules) for map integration
 - **Socket.io** for real-time NMEA data streaming
@@ -14,10 +16,11 @@ This is a **Windy.com plugin** for real-time vessel tracking using NMEA/AIS data
 
 ### Main Files Structure
 - `src/plugin.svelte` - Main UI component (9000+ lines, includes all business logic)
-- `src/pluginConfig.ts` - Windy plugin configuration and metadata
+- `src/pluginConfig.ts` - Windy plugin configuration and metadata  
 - `src/types.d.ts` - TypeScript declarations for Windy APIs and global types
 - `src/boatIcon.ts` - Custom rotating vessel icon with SVG rendering
 - `src/AtoN.ts` - Maritime navigation aids (buoys, beacons) SVG definitions
+- `src/windy-imports-plugin.js` - Custom Rollup plugin for handling Windy external modules
 
 ### Windy Plugin Integration Patterns
 - **External modules**: All `@windy/*` imports are marked as external in rollup config
@@ -27,13 +30,20 @@ This is a **Windy.com plugin** for real-time vessel tracking using NMEA/AIS data
 
 ## Development Workflow
 
-### Build & Development
+### Build & Development Commands
 ```bash
 npm.cmd run start      # Watch mode for development
-npm.cmd run build      # Production build
+npm.cmd run build      # Production build  
 npm.cmd run serve      # Development server with auto-reload
 npm.cmd run windy      # Opens Windy with localhost plugin URL
 ```
+
+### GitHub Actions CI/CD
+- **`.github/workflows/build-release.yml`** - Main CI/CD pipeline for releases and builds
+- **`.github/workflows/main.yml`** - Plugin publishing to Windy registry
+- **`.github/workflows/dev-build.yml`** - Development builds
+- Triggered on tags (`v*`), push to main, PRs, or manual dispatch
+- Automatically builds and packages plugin for distribution
 
 ### Background Development (PowerShell)
 Run watch mode as background job to free up terminal:
@@ -58,9 +68,11 @@ Get-Job -Name "WindyPluginWatch" | Stop-Job | Remove-Job
 - **Custom plugins**: `windyImportsPlugin()` handles Windy API resolution
 
 ### Publishing Process
-- Uses PowerShell script `publish-plugin.ps1` for Windy plugin registry
-- Requires Windy API key and git repository
+- **Primary**: GitHub Actions workflow (`.github/workflows/main.yml`) for automated publishing
+- **Manual**: PowerShell script `publish-plugin.ps1` for local publishing  
+- Requires Windy API key (`WINDY_API_KEY` secret) and git repository
 - Builds, archives, and uploads to Windy's plugin system
+- Can be triggered via GitHub Actions workflow dispatch or locally
 
 ## Code Patterns & Conventions
 
@@ -69,11 +81,20 @@ Get-Job -Name "WindyPluginWatch" | Stop-Job | Remove-Job
 - Real-time parsing of GPS (GGA, RMC, VTG) and AIS (VDO, VDM) frames
 - Vessel state stored in Svelte reactive variables (`myLatitude`, `myLongitude`, etc.)
 
+### GPX Route Management (Major Feature)
+- **GPX import/export**: Full route editing with waypoint management
+- **Leg types**: Rhumb Line (RL, constant bearing) vs Great Circle (GC, shortest path)
+- **Route projection**: Future position calculation based on SOG/COG or route following
+- **Route editor modal**: Interactive waypoint editing with distance/bearing calculations
+- **ETA calculations**: Estimated time of arrival for each waypoint
+- Supports maritime navigation standards for precise route planning
+
 ### Map Marker Management
 - **Layer hierarchy**: Vessel icon (top) → waypoints → AIS stations → weather → other ships
 - **Custom icons**: `createRotatingBoatIcon()` with dynamic rotation based on COG
 - **Track history**: 30-day position trail with automatic cleanup
-- **Route system**: GPX import/export with great circle vs rhumb line calculations
+- **Route visualization**: GPX route display with leg type indicators (RL/GC)
+- **Waypoint markers**: Interactive route waypoints with progress tracking
 
 ### State Management
 - All state in single Svelte component (no external store)
