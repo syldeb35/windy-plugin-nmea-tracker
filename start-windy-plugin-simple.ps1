@@ -1,8 +1,6 @@
 # Simple startup script - minimal version
 # This can be placed in Windows Startup folder
 
-$PluginPath = "c:\temp\windy\Plugin\nmea-tracker"
-
 # Wait for system to be ready
 Start-Sleep -Seconds 15
 
