@@ -83,12 +83,12 @@ Get-Job -Name "WindyPluginWatch" | Stop-Job | Remove-Job
 ### UI Component Structure
 ```svelte
 <!-- Help modal with extensive maritime feature documentation -->
-{#if helpVisible}
 <!-- Main plugin interface -->
 <section class="plugin__content">
   <!-- Connection status and vessel data -->
   <!-- Weather prediction integration -->
   <!-- Timeline navigation controls -->
+</section>
 ```
 
 ## Maritime Domain Specifics
