@@ -1,0 +1,29 @@
+{
+  "files.associations": {
+    ".github/workflows/build-release.yml": "plaintext",
+    "*.yml": "yaml",
+    "*.yaml": "yaml"
+  },
+  "yaml.validate": false,
+  "yaml.completion": false,
+  "yaml.hover": false,
+  "yaml.schemaStore.enable": false,
+  "github-actions.validate-workflow": false,
+  "github-actions.workflows.pinned.workflows": [],
+  "[yaml]": {
+    "editor.validate": false
+  },
+  "[github-actions-workflow]": {
+    "editor.validate": false
+  },
+  "[plaintext]": {
+    "editor.validate": false
+  },
+  "typescript.validate.enable": false,
+  "javascript.validate.enable": false,
+  "problems.decorations.enabled": false,
+  "problems.showCurrentInStatus": false,
+  "yaml.schemas": {},
+  "redhat.telemetry.enabled": false,
+  "extensions.ignoreRecommendations": true
+}

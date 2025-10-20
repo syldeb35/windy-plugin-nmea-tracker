@@ -57,6 +57,7 @@ pids/
 nmea-tracker.code-workspace
 CleanUpSources.sh
 rollup.config-win.js
+workflows/settings.json
 
 # Temporary files
 .tmp/

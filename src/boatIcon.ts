@@ -4,13 +4,102 @@ declare global {
     }
 }
 
-export function createRotatingBoatIcon(head: number, opacity: number = 0.846008, scale: number = 1.0): any {
+export function createRotatingBoatIcon(head: number, opacity: number = 0.846008, scale: number = 1.0, windAngle?: number, windSpeed?: number, windValid?: boolean): any {
     const L = (window as any).L;
     
     // Always use the same base size for iconSize and iconAnchor calculations
     const baseIconSize = 24;
     const iconSize = baseIconSize; // Keep iconSize constant
     const iconAnchor = baseIconSize / 2; // Keep anchor constant
+    
+    // Generate wind barb SVG if wind data is available
+    let windBarbSVG = '';
+    if (windValid && windAngle !== undefined && windSpeed !== undefined && windSpeed > 0) {
+        const windBarbAngle = windAngle; 
+        
+        // Generate wind barb components based on speed
+        const windBarbComponents = generateWindBarb(windSpeed);
+        
+        windBarbSVG = `
+            <div style="
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%) rotate(${windBarbAngle}deg);
+                pointer-events: none;
+            ">
+                <svg width="60" height="60" viewBox="0 0 60 60" style="overflow: visible;">
+                    ${windBarbComponents}
+                    <!-- <text x="32" y="-40" fill="#0066cc" font-size="11" font-weight="bold" text-anchor="middle">
+                        ${windSpeed.toFixed(0)}kt
+                    </text> -->
+                </svg>
+            </div>
+        `;
+    }
+
+    function generateWindBarb(speed: number): string {
+        const centerX = 30;
+        const centerY = 30;
+        const staffLength = 60;
+        const barbLength = 20;
+        const halfBarbLength = 10;
+        const flagWidth = 12;
+        const barbAngle = 120; // Angle of barbs from staff (degrees)
+        
+        let svg = '';
+        let remainingSpeed = speed // Math.round(speed);
+        let currentY = centerY - staffLength;
+
+        // Small circle at the center for calm winds (< 4 knots)
+        if (speed < 4) {
+            svg += `<circle cx="${centerX}" cy="${centerY}" r="4" fill="none" stroke="#0066cc" stroke-width="2.5" />`;
+            return svg;
+        }
+        
+        // Main staff line (pointing toward wind direction)
+        svg += `<line x1="${centerX}" y1="${centerY}" x2="${centerX}" y2="${centerY - staffLength}" 
+                stroke="#0066cc" stroke-width="2.5" stroke-linecap="round" />`;
+        
+        if (speed < 10) {
+            const halfBarbEndX = centerX + Math.cos((90 - barbAngle) * Math.PI / 180) * halfBarbLength;
+            const halfBarbEndY = currentY + Math.sin((90 - barbAngle) * Math.PI / 180) * halfBarbLength;
+            svg += `<line x1="${centerX}" y1="${currentY + 10}" x2="${halfBarbEndX}" y2="${halfBarbEndY}" 
+                    stroke="#0066cc" stroke-width="2.5" stroke-linecap="round" />`;
+            return svg;
+        }
+
+        // Add background circle for better visibility
+        svg += `<!-- <circle cx="${centerX}" cy="${centerY}" r="25" fill="rgba(255,255,255,0.8)" stroke="none" />-->`;
+        
+        // Add flags for 50+ knots (triangular pennants)
+        while (remainingSpeed >= 50) {
+            svg += `<polygon points="${centerX},${currentY} ${centerX + flagWidth},${currentY + 4} ${centerX},${currentY + 8}" 
+                    fill="#0066cc" stroke="#0066cc" stroke-width="1" />`;
+            remainingSpeed -= 50;
+            currentY += 10;
+        }
+        
+        // Add full barbs for 10+ knots
+        while (remainingSpeed >= 10) {
+            const barbEndX = centerX + Math.cos((90 - barbAngle) * Math.PI / 180) * barbLength;
+            const barbEndY = currentY + Math.sin((90 - barbAngle) * Math.PI / 180) * barbLength;
+            svg += `<line x1="${centerX}" y1="${currentY}" x2="${barbEndX}" y2="${barbEndY}" 
+                    stroke="#0066cc" stroke-width="2.5" stroke-linecap="round" />`;
+            remainingSpeed -= 10;
+            currentY += 10;
+        }
+        
+        // Add half barb for 5+ knots
+        if (remainingSpeed >= 5) {
+            const halfBarbEndX = centerX + Math.cos((90 - barbAngle) * Math.PI / 180) * halfBarbLength;
+            const halfBarbEndY = currentY + Math.sin((90 - barbAngle) * Math.PI / 180) * halfBarbLength;
+            svg += `<line x1="${centerX}" y1="${currentY}" x2="${halfBarbEndX}" y2="${halfBarbEndY}" 
+                    stroke="#0066cc" stroke-width="2.5" stroke-linecap="round" />`;
+        }
+        
+        return svg;
+    }
     
     return L.divIcon({
         className: 'boat-icon-marker',
@@ -42,6 +131,7 @@ export function createRotatingBoatIcon(head: number, opacity: number = 0.846008,
                               style="fill:#fff;fill-opacity:${opacity};"/>
                     </svg>
                 </div>
+                ${windBarbSVG}
             </div>
         `,
         iconSize: [iconSize, iconSize],

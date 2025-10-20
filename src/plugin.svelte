@@ -93,7 +93,7 @@
         on:click={() => bcast.emit('rqstOpen', 'menu')}
         type="button"
         aria-label="Back to menu"
-    >
+        >
         {title}
     </button>
     
@@ -170,6 +170,16 @@
                 <strong>SOG:</strong>
                 {testModeEnabled ? `${testSOG.toFixed(1)} knots (TEST)` : `${mySpeedOverGround.toFixed(1)} knots`}
             </div>
+            {#if windDataValid && trueWindSpeed !== null && trueWindAngle !== null}
+            <div>
+                <strong>🌬️ TWD:</strong>
+                {trueWindAngle.toFixed(0)}°
+            </div>
+            <div>
+                <strong>🌬️ TWS:</strong>
+                {trueWindSpeed.toFixed(1)} knots
+            </div>
+            {/if}
         </div>
         
         <div class="plugin__buttons__grid">
@@ -440,6 +450,16 @@
     let trueHeading: number = 0; // True heading
     let speedOverGround: number = 0; // In knots
     let mySpeedOverGround: number = 0; // In knots
+    
+    // Wind data from NMEA $WIMWV
+    let windAngle: number | null = null; // Wind angle (relative or true)
+    let windSpeed: number | null = null; // Wind speed in knots
+    let windReference: string | null = null; // 'R' for relative, 'T' for true
+    let windDataValid: boolean = false; // Wind data validity flag
+    let trueWindAngle: number | null = null; // Calculated true wind angle
+    let trueWindSpeed: number | null = null; // Calculated true wind speed
+
+    //
     let followShip = false; // do not follow ship by default
     let timelineStepHours = "4"; // Timeline navigation step in hours (1, 4, 8, 12) - string to match select options
     
@@ -2766,7 +2786,9 @@
         // Add frame to history
         addToNmeaHistory(data);
         
-        const parts = data.split(',');
+        // Remove checksum from data before parsing (e.g., "$GPGGA,123,A*5A" -> "$GPGGA,123,A")
+        const cleanData = data.includes('*') ? data.substring(0, data.indexOf('*')) : data;
+        const parts = cleanData.split(',');
         let frameType: string | null = null; // Track which frame type was processed
 
         // Decoding classic GPS frames
@@ -2863,6 +2885,49 @@
             }
             trueHeading = parseFloat(parts[1]);
             frameType = 'HDT';
+        } else if (parts[0].includes('MWV')) {
+            // WIMWV - Wind speed and angle
+            // Format: $WIMWV,angle,reference,speed,units,status*checksum
+            // Angle: 0-359° (0° = dead ahead, starboard = positive for relative wind)
+            // Reference: R = relative to vessel, T = true (relative to North)
+            if (parts.length < 6) {
+                console.debug("Invalid MWV frame - insufficient parts");
+                return null;
+            }
+            const angle = parseFloat(parts[1]); // Wind angle in degrees
+            const reference = parts[2]; // 'R' for relative, 'T' for true
+            const speed = parseFloat(parts[3]);
+            const speedUnit = parts[4]; // 'N' for knots, 'M' for m/s, 'K' for km/h
+            const status = parts[5]; // 'A' for valid, 'V' for invalid (checksum already removed)
+            
+            if (status === 'A' && !Number.isNaN(angle) && !Number.isNaN(speed)) {
+                windAngle = angle;
+                windReference = reference;
+                windDataValid = true;
+                
+                // Convert wind speed to knots
+                if (speedUnit === 'N') {
+                    windSpeed = speed; // Already in knots
+                } else if (speedUnit === 'M') {
+                    windSpeed = speed * 1.94384; // m/s to knots
+                } else if (speedUnit === 'K') {
+                    windSpeed = speed * 0.539957; // km/h to knots
+                } else {
+                    windSpeed = speed; // Default to knots
+                }
+                
+                // Calculate true wind if we have relative wind and vessel data
+                if (reference === 'R' && speedOverGround > 0 && courseOverGroundT !== null) {
+                    calculateTrueWind(windAngle, windSpeed, speedOverGround, courseOverGroundT);
+                } else if (reference === 'T') {
+                    trueWindAngle = windAngle;
+                    trueWindSpeed = windSpeed;
+                }
+            } else {
+                windDataValid = false;
+                console.debug(`Invalid MWV frame ${status} - wind data not valid or missing`);
+            }
+            frameType = 'MWV';
         }
         
         // Position variables update (for GPS frames that have position data)
@@ -6014,6 +6079,56 @@
     }
 
     /**
+     * Calculate true wind from apparent wind and vessel data
+     * Uses proper maritime wind triangle calculations
+     * @param apparentWindAngle Apparent wind angle in degrees (relative to vessel bow, 0° = dead ahead)
+     * @param apparentWindSpeed Apparent wind speed in knots
+     * @param vesselSpeed Vessel speed over ground in knots
+     * @param vesselCourse Vessel course over ground in degrees (true north = 0°)
+     */
+    function calculateTrueWind(apparentWindAngle: number, apparentWindSpeed: number, vesselSpeed: number, vesselCourse: number) {
+        // Convert apparent wind angle from relative to vessel to absolute bearing
+        // NMEA apparent wind angle: 0° = dead ahead, positive = starboard side
+        const apparentWindBearing = (vesselCourse + apparentWindAngle) % 360;
+        
+        // Convert to radians for calculations
+        const awaRad = toRadians(apparentWindBearing);
+        const vesselCourseRad = toRadians(vesselCourse);
+        
+        // Calculate apparent wind velocity components (North/East coordinate system)
+        // Wind direction is "from" direction, so we need opposite direction for velocity
+        const awaVelX = apparentWindSpeed * Math.sin(awaRad); // East component
+        const awaVelY = apparentWindSpeed * Math.cos(awaRad); // North component
+        
+        // Calculate vessel velocity components (North/East coordinate system)
+        const vesselVelX = vesselSpeed * Math.sin(vesselCourseRad); // East component  
+        const vesselVelY = vesselSpeed * Math.cos(vesselCourseRad); // North component
+        
+        // Calculate true wind velocity components
+        // True wind = Apparent wind - Vessel velocity (vector subtraction)
+        const trueWindVelX = awaVelX - vesselVelX;
+        const trueWindVelY = awaVelY - vesselVelY;
+        
+        // Calculate true wind speed and direction
+        trueWindSpeed = Math.sqrt(trueWindVelX * trueWindVelX + trueWindVelY * trueWindVelY);
+        
+        // Calculate true wind direction (where wind is coming FROM, in degrees from North)
+        let trueWindDirection = toDegrees(Math.atan2(trueWindVelX, trueWindVelY));
+        
+        // Convert from velocity direction to wind direction (opposite direction)
+        //trueWindDirection = (trueWindDirection + 180) % 360;
+        
+        // Normalize to 0-360 degrees
+        if (trueWindDirection < 0) {
+            trueWindDirection += 360;
+        };
+        
+        trueWindAngle = trueWindDirection;
+        
+        // console.debug(`True Wind Calc: AWA=${apparentWindAngle}°, AWS=${apparentWindSpeed}kt, SOG=${vesselSpeed}kt, COG=${vesselCourse}° → TWD=${trueWindAngle.toFixed(1)}°, TWS=${trueWindSpeed.toFixed(1)}kt`);
+    }
+
+    /**
      * Formatted display of latitude/longitude
      * @param {number} val - The latitude/longitude value
      * @param {string} dir - The direction ('N', 'S', 'E', 'W')
@@ -7421,7 +7536,9 @@
         }
 
         // Create main vessel marker
-        const icon = createRotatingBoatIcon(trueHeading, 0.846008, boatIconSize);
+        const windAngleToShow = trueWindAngle !== null ? trueWindAngle : (windReference === 'T' ? windAngle : null);
+        const windSpeedToShow = trueWindSpeed !== null ? trueWindSpeed : (windReference === 'T' ? windSpeed : null);
+        const icon = createRotatingBoatIcon(trueHeading ?? 0, 0.846008, boatIconSize, windAngleToShow ?? undefined, windSpeedToShow ?? undefined, windDataValid);
         ownShipMarker = L.marker(Position, { 
             icon: icon,
             zIndexOffset: zIndexOwnShip
