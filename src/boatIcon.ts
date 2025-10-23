@@ -52,7 +52,7 @@ export function createRotatingBoatIcon(head: number, opacity: number = 0.846008,
         let currentY = centerY - staffLength;
 
         // Small circle at the center for calm winds (< 4 knots)
-        if (speed < 4) {
+        if (speed < 3.5) {
             svg += `<circle cx="${centerX}" cy="${centerY}" r="4" fill="none" stroke="#0066cc" stroke-width="2.5" />`;
             return svg;
         }
@@ -61,7 +61,7 @@ export function createRotatingBoatIcon(head: number, opacity: number = 0.846008,
         svg += `<line x1="${centerX}" y1="${centerY}" x2="${centerX}" y2="${centerY - staffLength}" 
                 stroke="#0066cc" stroke-width="2.5" stroke-linecap="round" />`;
         
-        if (speed < 10) {
+        if (speed < 7.5) {
             const halfBarbEndX = centerX + Math.cos((90 - barbAngle) * Math.PI / 180) * halfBarbLength;
             const halfBarbEndY = currentY + Math.sin((90 - barbAngle) * Math.PI / 180) * halfBarbLength;
             svg += `<line x1="${centerX}" y1="${currentY + 10}" x2="${halfBarbEndX}" y2="${halfBarbEndY}" 
@@ -73,25 +73,27 @@ export function createRotatingBoatIcon(head: number, opacity: number = 0.846008,
         svg += `<!-- <circle cx="${centerX}" cy="${centerY}" r="25" fill="rgba(255,255,255,0.8)" stroke="none" />-->`;
         
         // Add flags for 50+ knots (triangular pennants)
-        while (remainingSpeed >= 50) {
+        while (remainingSpeed >= 47.5) {
             svg += `<polygon points="${centerX},${currentY} ${centerX + flagWidth},${currentY + 4} ${centerX},${currentY + 8}" 
                     fill="#0066cc" stroke="#0066cc" stroke-width="1" />`;
             remainingSpeed -= 50;
+            remainingSpeed < 0 ? remainingSpeed = 0 : remainingSpeed;
             currentY += 10;
         }
         
         // Add full barbs for 10+ knots
-        while (remainingSpeed >= 10) {
+        while (remainingSpeed >= 7.5) {
             const barbEndX = centerX + Math.cos((90 - barbAngle) * Math.PI / 180) * barbLength;
             const barbEndY = currentY + Math.sin((90 - barbAngle) * Math.PI / 180) * barbLength;
             svg += `<line x1="${centerX}" y1="${currentY}" x2="${barbEndX}" y2="${barbEndY}" 
                     stroke="#0066cc" stroke-width="2.5" stroke-linecap="round" />`;
             remainingSpeed -= 10;
+            remainingSpeed < 0 ? remainingSpeed = 0 : remainingSpeed;
             currentY += 10;
         }
         
         // Add half barb for 5+ knots
-        if (remainingSpeed >= 5) {
+        if (remainingSpeed >= 3.5) {
             const halfBarbEndX = centerX + Math.cos((90 - barbAngle) * Math.PI / 180) * halfBarbLength;
             const halfBarbEndY = currentY + Math.sin((90 - barbAngle) * Math.PI / 180) * halfBarbLength;
             svg += `<line x1="${centerX}" y1="${currentY}" x2="${halfBarbEndX}" y2="${halfBarbEndY}" 

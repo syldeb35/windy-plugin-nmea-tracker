@@ -170,17 +170,32 @@
                 <strong>SOG:</strong>
                 {testModeEnabled ? `${testSOG.toFixed(1)} knots (TEST)` : `${mySpeedOverGround.toFixed(1)} knots`}
             </div>
-            {#if windDataValid && trueWindSpeed !== null && trueWindAngle !== null}
+        </div>
+
+        <!-- Wind Data Display -->
+        {#if windDataValid && trueWindSpeed !== null && trueWindAngle !== null}
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; width: 100%; margin-bottom: 8px; border-top: 1px solid #555; padding-top: 8px;">
             <div>
                 <strong>🌬️ TWD:</strong>
                 {trueWindAngle.toFixed(0)}°
+                {#if avgTrueWindAngle !== null && windReadings.length >= 3}
+                <br><small style="color: #888;">Avg: {avgTrueWindAngle.toFixed(0)}°</small>
+                {/if}
             </div>
             <div>
-                <strong>🌬️ TWS:</strong>
+                <strong>🍃 TWS:</strong>
                 {trueWindSpeed.toFixed(1)} knots
+                {#if avgTrueWindSpeed !== null && windReadings.length >= 3}
+                <br><small style="color: #888;">Avg: {avgTrueWindSpeed.toFixed(1)} kt</small>
+                {/if}
+            </div>
+            {#if windReadings.length > 0}
+            <div style="grid-column: 1 / -1; font-size: 0.8em; color: #888; margin-top: 4px;">
+                📊 {WIND_AVERAGE_WINDOW_MIN} min avg ({windReadings.length} samples, {((WIND_AVERAGE_WINDOW_MS - (Date.now() - Math.min(...windReadings.map(r => r.timestamp)))) / 1000).toFixed(0)}s oldest)
             </div>
             {/if}
         </div>
+        {/if}
         
         <div class="plugin__buttons__grid">
             <!-- Row 1: | empty | Center | Follow | empty | -->
@@ -207,6 +222,24 @@
                 <option value="12">12h</option>
             </select>
         </div>
+
+        <!-- Wind Data Controls -->
+        {#if windDataValid && windReadings.length > 0}
+        <div style="display: flex; gap: 8px; margin-top: 8px; justify-content: center;">
+            <button 
+                on:click={showWindStatistics} 
+                title="Show detailed wind data statistics" 
+                style="font-size: 0.8em; padding: 4px 8px;">
+                📊 Wind Stats
+            </button>
+            <button 
+                on:click={clearWindReadings} 
+                title="Clear wind averaging history" 
+                style="font-size: 0.8em; padding: 4px 8px; background-color: #d32f2f; color: white;">
+                🗑️ Clear Wind Data
+            </button>
+        </div>
+        {/if}
     {/if}
     <!-- Test Mode Controls -->
     <hr />
@@ -459,6 +492,14 @@
     let trueWindAngle: number | null = null; // Calculated true wind angle
     let trueWindSpeed: number | null = null; // Calculated true wind speed
 
+    // Sliding average wind data (10-minute window)
+    let windReadings: Array<{timestamp: number, trueAngle: number, trueSpeed: number}> = [];
+    let avgTrueWindAngle: number | null = null; // 10-minute average true wind angle
+    let avgTrueWindSpeed: number | null = null; // 10-minute average true wind speed
+    const WIND_AVERAGE_WINDOW_MIN = 6; // minutes
+    const WIND_AVERAGE_WINDOW_MS = WIND_AVERAGE_WINDOW_MIN * 60 * 1000; // minutes in milliseconds
+    let windCleanupTimer: NodeJS.Timeout | null = null; // Timer for periodic cleanup
+
     //
     let followShip = false; // do not follow ship by default
     let timelineStepHours = "4"; // Timeline navigation step in hours (1, 4, 8, 12) - string to match select options
@@ -699,6 +740,9 @@
         
         // Start cleanup timer for old AtoN markers (every 30 minutes)
         setInterval(cleanupOldAtoNMarkers, 30 * 60 * 1000);
+        
+        // Start wind data cleanup timer (every minute)
+        startWindCleanupTimer();
         
         // Start the no frame detection timer
         startNoFrameTimer();
@@ -6126,6 +6170,248 @@
         trueWindAngle = trueWindDirection;
         
         // console.debug(`True Wind Calc: AWA=${apparentWindAngle}°, AWS=${apparentWindSpeed}kt, SOG=${vesselSpeed}kt, COG=${vesselCourse}° → TWD=${trueWindAngle.toFixed(1)}°, TWS=${trueWindSpeed.toFixed(1)}kt`);
+        
+        // Add to sliding average after calculating true wind
+        addWindReadingToAverage(trueWindAngle, trueWindSpeed);
+    }
+
+    /**
+     * Adds a new wind reading to the sliding average buffer and updates averages
+     * @param {number} trueAngle - True wind direction in degrees (0-360)
+     * @param {number} trueSpeed - True wind speed in knots
+     */
+    function addWindReadingToAverage(trueAngle: number, trueSpeed: number): void {
+        const now = Date.now();
+        
+        // Add new reading
+        windReadings.push({
+            timestamp: now,
+            trueAngle: trueAngle,
+            trueSpeed: trueSpeed
+        });
+        
+        // Remove readings older than WIND_AVERAGE_WINDOW_MIN minutes
+        const cutoffTime = now - WIND_AVERAGE_WINDOW_MS;
+        windReadings = windReadings.filter(reading => reading.timestamp >= cutoffTime);
+        
+        // Calculate sliding averages
+        calculateWindSlidingAverages();
+    }
+
+    /**
+     * Calculates the sliding average of wind direction and speed over the last WIND_AVERAGE_WINDOW_MIN minutes
+     * Uses vector averaging for wind direction to handle the circular nature of angles
+     * @returns {{avgAngle: number, avgSpeed: number} | null} The averaged values or null if insufficient data
+     */
+    function calculateWindSlidingAverages(): {avgAngle: number, avgSpeed: number} | null {
+        if (windReadings.length === 0) {
+            avgTrueWindAngle = null;
+            avgTrueWindSpeed = null;
+            return null;
+        }
+        
+        // For wind direction, we need to use vector averaging to handle the circular nature
+        // Convert angles to unit vectors, average the vectors, then convert back to angle
+        let sumX = 0;
+        let sumY = 0;
+        let sumSpeed = 0;
+        
+        for (const reading of windReadings) {
+            // Convert wind direction to unit vector components
+            const angleRad = toRadians(reading.trueAngle);
+            sumX += Math.sin(angleRad); // East component
+            sumY += Math.cos(angleRad); // North component
+            sumSpeed += reading.trueSpeed;
+        }
+        
+        // Calculate average speed (simple arithmetic mean)
+        avgTrueWindSpeed = sumSpeed / windReadings.length;
+        
+        // Calculate average direction from vector components
+        const avgAngleRad = Math.atan2(sumX, sumY);
+        let avgAngleDeg = toDegrees(avgAngleRad);
+        
+        // Normalize to 0-360 degrees
+        if (avgAngleDeg < 0) {
+            avgAngleDeg += 360;
+        }
+        
+        avgTrueWindAngle = avgAngleDeg;
+        
+        return {
+            avgAngle: avgTrueWindAngle,
+            avgSpeed: avgTrueWindSpeed
+        };
+    }
+
+    /**
+     * Gets the current sliding average wind values
+     * @returns {{avgAngle: number | null, avgSpeed: number | null, sampleCount: number}} Current averages and sample count
+     */
+    function getWindSlidingAverages(): {avgAngle: number | null, avgSpeed: number | null, sampleCount: number} {
+        return {
+            avgAngle: avgTrueWindAngle,
+            avgSpeed: avgTrueWindSpeed,
+            sampleCount: windReadings.length
+        };
+    }
+
+    /**
+     * Gets detailed statistics about the wind data quality and age
+     * @returns Wind data statistics including age, variance, and sample distribution
+     */
+    function getWindDataStatistics(): {
+        avgAngle: number | null,
+        avgSpeed: number | null,
+        sampleCount: number,
+        oldestSampleAge: number,
+        newestSampleAge: number,
+        speedVariance: number | null,
+        directionVariance: number | null
+    } {
+        if (windReadings.length === 0) {
+            return {
+                avgAngle: null,
+                avgSpeed: null,
+                sampleCount: 0,
+                oldestSampleAge: 0,
+                newestSampleAge: 0,
+                speedVariance: null,
+                directionVariance: null
+            };
+        }
+
+        const now = Date.now();
+        const ages = windReadings.map(r => now - r.timestamp);
+        const oldestAge = Math.max(...ages) / 1000; // seconds
+        const newestAge = Math.min(...ages) / 1000; // seconds
+
+        // Calculate speed variance
+        let speedVariance: number | null = null;
+        if (avgTrueWindSpeed !== null && windReadings.length > 1) {
+            const speedSum = windReadings.reduce((sum, r) => sum + Math.pow(r.trueSpeed - avgTrueWindSpeed!, 2), 0);
+            speedVariance = speedSum / windReadings.length;
+        }
+
+        // Calculate circular variance for direction (more complex for circular data)
+        let directionVariance: number | null = null;
+        if (windReadings.length > 1) {
+            // Use vector strength as measure of directional consistency
+            let sumX = 0, sumY = 0;
+            for (const reading of windReadings) {
+                const angleRad = toRadians(reading.trueAngle);
+                sumX += Math.sin(angleRad);
+                sumY += Math.cos(angleRad);
+            }
+            const vectorLength = Math.sqrt(sumX * sumX + sumY * sumY) / windReadings.length;
+            directionVariance = 1 - vectorLength; // 0 = consistent, 1 = completely scattered
+        }
+
+        return {
+            avgAngle: avgTrueWindAngle,
+            avgSpeed: avgTrueWindSpeed,
+            sampleCount: windReadings.length,
+            oldestSampleAge: oldestAge,
+            newestSampleAge: newestAge,
+            speedVariance,
+            directionVariance
+        };
+    }
+
+    /**
+     * Clears all wind readings (useful for reset or when switching vessels)
+     */
+    function clearWindReadings(): void {
+        windReadings = [];
+        avgTrueWindAngle = null;
+        avgTrueWindSpeed = null;
+    }
+
+    /**
+     * Shows detailed wind statistics in an alert popup
+     */
+    function showWindStatistics(): void {
+        const stats = getWindDataStatistics();
+        
+        if (stats.sampleCount === 0) {
+            alert('No wind data available yet.');
+            return;
+        }
+
+        let message = `📊 Wind Data Statistics (10-minute window)\n\n`;
+        message += `Sample Count: ${stats.sampleCount} readings\n`;
+        message += `Data Age: ${stats.newestSampleAge.toFixed(0)}s to ${stats.oldestSampleAge.toFixed(0)}s\n\n`;
+        
+        if (stats.avgAngle !== null && stats.avgSpeed !== null) {
+            message += `Current Readings:\n`;
+            message += `  • True Wind Direction: ${trueWindAngle?.toFixed(1)}°\n`;
+            message += `  • True Wind Speed: ${trueWindSpeed?.toFixed(1)} knots\n\n`;
+            
+            message += `10-Minute Averages:\n`;
+            message += `  • Average Direction: ${stats.avgAngle.toFixed(1)}°\n`;
+            message += `  • Average Speed: ${stats.avgSpeed.toFixed(1)} knots\n\n`;
+        }
+        
+        message += `Data Quality:\n`;
+        if (stats.speedVariance !== null) {
+            message += `  • Speed Variance: ${stats.speedVariance.toFixed(2)} knots²\n`;
+            message += `  • Speed Stability: ${stats.speedVariance < 1 ? 'Stable' : stats.speedVariance < 4 ? 'Moderate' : 'Variable'}\n`;
+        }
+        if (stats.directionVariance !== null) {
+            message += `  • Direction Consistency: ${(stats.directionVariance * 100).toFixed(1)}%\n`;
+            message += `  • Direction Stability: ${stats.directionVariance < 0.2 ? 'Very Stable' : stats.directionVariance < 0.5 ? 'Stable' : 'Variable'}\n`;
+        }
+
+        message += `\n📈 Interpretation:\n`;
+        message += `  • Minimum 3 samples recommended for reliable averages\n`;
+        message += `  • 10+ samples provide good statistical accuracy\n`;
+        message += `  • Lower variance = more stable wind conditions\n`;
+
+        alert(message);
+    }
+
+    /**
+     * Performs periodic cleanup of old wind readings (called every minute)
+     */
+    function periodicWindCleanup(): void {
+        if (windReadings.length === 0) return;
+        
+        const now = Date.now();
+        const cutoffTime = now - WIND_AVERAGE_WINDOW_MS;
+        const originalLength = windReadings.length;
+        
+        windReadings = windReadings.filter(reading => reading.timestamp >= cutoffTime);
+        
+        // If we removed readings, recalculate averages
+        if (windReadings.length !== originalLength) {
+            calculateWindSlidingAverages();
+        }
+        
+        // If no readings left, clear averages
+        if (windReadings.length === 0) {
+            avgTrueWindAngle = null;
+            avgTrueWindSpeed = null;
+        }
+    }
+
+    /**
+     * Starts the periodic wind data cleanup timer
+     */
+    function startWindCleanupTimer(): void {
+        if (windCleanupTimer) return; // Already running
+        
+        // Clean up every minute to maintain accurate data window
+        windCleanupTimer = setInterval(periodicWindCleanup, 60 * 1000); // 60 seconds
+    }
+
+    /**
+     * Stops the periodic wind data cleanup timer
+     */
+    function stopWindCleanupTimer(): void {
+        if (windCleanupTimer) {
+            clearInterval(windCleanupTimer);
+            windCleanupTimer = null;
+        }
     }
 
     /**
@@ -7535,16 +7821,45 @@
             ownShipMarker = null;
         }
 
-        // Create main vessel marker
-        const windAngleToShow = trueWindAngle !== null ? trueWindAngle : (windReference === 'T' ? windAngle : null);
-        const windSpeedToShow = trueWindSpeed !== null ? trueWindSpeed : (windReference === 'T' ? windSpeed : null);
+        // Create main vessel marker - prefer averaged wind data for display if available
+        const windAverages = getWindSlidingAverages();
+        const useAveragedWind = windAverages.avgAngle !== null && windAverages.avgSpeed !== null && windAverages.sampleCount >= 3;
+        
+        const windAngleToShow = useAveragedWind ? windAverages.avgAngle : 
+                               (trueWindAngle !== null ? trueWindAngle : (windReference === 'T' ? windAngle : null));
+        const windSpeedToShow = useAveragedWind ? windAverages.avgSpeed : 
+                               (trueWindSpeed !== null ? trueWindSpeed : (windReference === 'T' ? windSpeed : null));
+        
         const icon = createRotatingBoatIcon(trueHeading ?? 0, 0.846008, boatIconSize, windAngleToShow ?? undefined, windSpeedToShow ?? undefined, windDataValid);
         ownShipMarker = L.marker(Position, { 
             icon: icon,
             zIndexOffset: zIndexOwnShip
         }).addTo(markerLayer);
         
-        ownShipMarker.bindTooltip(vesselName, { 
+        const tooltipContent = `
+            <div style="text-align: center;">
+                <strong>${vesselName}</strong><br>
+                <div style="text-align: left;">
+                    ${windDataValid && trueWindSpeed !== null && trueWindAngle !== null ? `
+                        <div>
+                            <strong>🌬️ TWD:</strong>
+                            ${trueWindAngle.toFixed(0)}° ${useAveragedWind ? `(avg: ${windAverages.avgAngle!.toFixed(0)}°)` : ''}
+                        </div>
+                        <div>
+                            <strong>🍃 TWS:</strong>
+                            ${trueWindSpeed.toFixed(1)} knots ${useAveragedWind ? `(avg: ${windAverages.avgSpeed!.toFixed(1)})` : ''}
+                        </div>
+                        ${useAveragedWind ? `
+                        <div style="font-size: 0.8em; color: #666;">
+                            📊 10min avg (${windAverages.sampleCount} samples)
+                        </div>
+                        ` : ''}
+                    ` : ''}
+                </div>
+            </div>
+        `;
+
+        ownShipMarker.bindTooltip(tooltipContent, { 
             permanent: false, 
             direction: 'top', 
             className: 'boat-tooltip' 
@@ -7562,11 +7877,11 @@
         });
 
         // Apply rotation to vessel icon
-        const iconDiv = ownShipMarker.getElement()?.querySelector('.rotatable') as HTMLElement;
+        /* const iconDiv = ownShipMarker.getElement()?.querySelector('.rotatable') as HTMLElement;
         if (iconDiv) {
             iconDiv.style.transformOrigin = '12px 12px';
             iconDiv.style.transform = `rotateZ(${trueHeading}deg)`;
-        }
+        } */
     }
 
     /**
@@ -8552,6 +8867,9 @@
                 clearInterval(fragmentCleanupTimer);
                 fragmentCleanupTimer = null;
             }
+
+            // Stop wind cleanup timer
+            stopWindCleanupTimer();
 
             // Clear route display
             clearRouteDisplay();
