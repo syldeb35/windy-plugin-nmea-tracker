@@ -225,18 +225,24 @@
 
         <!-- Wind Data Controls -->
         {#if windDataValid && windReadings.length > 0}
-        <div style="display: flex; gap: 8px; margin-top: 8px; justify-content: center;">
+        <div style="display: flex; gap: 6px; margin-top: 8px; justify-content: center; flex-wrap: wrap;">
             <button 
                 on:click={showWindStatistics} 
                 title="Show detailed wind data statistics" 
-                style="font-size: 0.8em; padding: 4px 8px;">
-                📊 Wind Stats
+                style="font-size: 0.7em; padding: 3px 6px;">
+                📊 Stats
+            </button>
+            <button 
+                on:click={() => alert(diagnoseWindData())} 
+                title="Diagnose wind data issues" 
+                style="font-size: 0.7em; padding: 3px 6px; background-color: #ff9800; color: white;">
+                🔍 Diagnose
             </button>
             <button 
                 on:click={clearWindReadings} 
                 title="Clear wind averaging history" 
-                style="font-size: 0.8em; padding: 4px 8px; background-color: #d32f2f; color: white;">
-                🗑️ Clear Wind Data
+                style="font-size: 0.7em; padding: 3px 6px; background-color: #d32f2f; color: white;">
+                🗑️ Clear
             </button>
         </div>
         {/if}
@@ -508,6 +514,7 @@
     let lastFollowUpdateTime: number = 0; // Last time map view was updated for position following
     let lastTimelineFollowTime: number = 0; // Last time map view was updated for timeline changes
     let lastProjectionPosition: {lat: number, lon: number} | null = null; // Last projection position for comparison
+    let lastWindMarkerUpdate: number = 0; // Last time vessel marker was updated due to wind changes
     let vesselName = loadVesselName(); // Load from localStorage or default
     let vesselCallSign = loadVesselCallSign(); // Load from localStorage or default
     let CurrentOverlay = 'Windy'; // Default overlay, can be changed later
@@ -2966,6 +2973,8 @@
                 } else if (reference === 'T') {
                     trueWindAngle = windAngle;
                     trueWindSpeed = windSpeed;
+                    // Add true wind data directly to sliding average
+                    addWindReadingToAverage(trueWindAngle, trueWindSpeed);
                 }
             } else {
                 windDataValid = false;
@@ -6181,18 +6190,33 @@
      * @param {number} trueSpeed - True wind speed in knots
      */
     function addWindReadingToAverage(trueAngle: number, trueSpeed: number): void {
+        // Validate input data
+        if (!Number.isFinite(trueAngle) || !Number.isFinite(trueSpeed) || trueSpeed < 0) {
+            console.warn(`Invalid wind reading: angle=${trueAngle}°, speed=${trueSpeed}kt - skipping`);
+            return;
+        }
+        
+        // Normalize angle to 0-360 range
+        const normalizedAngle = ((trueAngle % 360) + 360) % 360;
+        
         const now = Date.now();
         
         // Add new reading
         windReadings.push({
             timestamp: now,
-            trueAngle: trueAngle,
+            trueAngle: normalizedAngle,
             trueSpeed: trueSpeed
         });
         
         // Remove readings older than WIND_AVERAGE_WINDOW_MIN minutes
         const cutoffTime = now - WIND_AVERAGE_WINDOW_MS;
+        const originalLength = windReadings.length;
         windReadings = windReadings.filter(reading => reading.timestamp >= cutoffTime);
+        
+        // Debug log if cleanup removed old data
+        if (windReadings.length !== originalLength) {
+            console.debug(`Wind cleanup: removed ${originalLength - windReadings.length} old readings, ${windReadings.length} remaining`);
+        }
         
         // Calculate sliding averages
         calculateWindSlidingAverages();
@@ -6215,17 +6239,32 @@
         let sumX = 0;
         let sumY = 0;
         let sumSpeed = 0;
+        let validReadings = 0;
         
         for (const reading of windReadings) {
+            // Validate reading data
+            if (!Number.isFinite(reading.trueAngle) || !Number.isFinite(reading.trueSpeed) || reading.trueSpeed < 0) {
+                console.warn(`Invalid wind reading in average: angle=${reading.trueAngle}°, speed=${reading.trueSpeed}kt - skipping`);
+                continue;
+            }
+            
             // Convert wind direction to unit vector components
             const angleRad = toRadians(reading.trueAngle);
             sumX += Math.sin(angleRad); // East component
             sumY += Math.cos(angleRad); // North component
             sumSpeed += reading.trueSpeed;
+            validReadings++;
+        }
+        
+        if (validReadings === 0) {
+            console.warn('No valid wind readings found for averaging');
+            avgTrueWindAngle = null;
+            avgTrueWindSpeed = null;
+            return null;
         }
         
         // Calculate average speed (simple arithmetic mean)
-        avgTrueWindSpeed = sumSpeed / windReadings.length;
+        avgTrueWindSpeed = sumSpeed / validReadings;
         
         // Calculate average direction from vector components
         const avgAngleRad = Math.atan2(sumX, sumY);
@@ -6237,6 +6276,21 @@
         }
         
         avgTrueWindAngle = avgAngleDeg;
+        
+        // Debug log for significant changes and refresh vessel marker if needed
+        if (validReadings >= 3) {
+            console.debug(`Wind avg updated: ${avgAngleDeg.toFixed(1)}° @ ${avgTrueWindSpeed.toFixed(1)}kt (${validReadings} samples)`);
+            
+            // Force vessel marker refresh if wind data changed significantly
+            if (lastLatitude !== null && lastLongitude !== null) {
+                const validCOG = Number.isFinite(myCourseOverGroundT) ? myCourseOverGroundT : 0;
+                // Use a throttled update to prevent excessive refreshing
+                if (Date.now() - lastWindMarkerUpdate > 5000) { // Max once every 5 seconds
+                    updateVesselMarker(lastLatitude, lastLongitude, validCOG);
+                    lastWindMarkerUpdate = Date.now();
+                }
+            }
+        }
         
         return {
             avgAngle: avgTrueWindAngle,
@@ -6322,9 +6376,52 @@
      * Clears all wind readings (useful for reset or when switching vessels)
      */
     function clearWindReadings(): void {
+        console.log(`Clearing ${windReadings.length} wind readings`);
         windReadings = [];
         avgTrueWindAngle = null;
         avgTrueWindSpeed = null;
+    }
+
+    /**
+     * Diagnoses potential wind data corruption issues
+     */
+    function diagnoseWindData(): string {
+        let diagnosis = `Wind Data Diagnosis:\n`;
+        diagnosis += `- Total readings: ${windReadings.length}\n`;
+        
+        if (windReadings.length === 0) {
+            diagnosis += `- Status: No data available\n`;
+            return diagnosis;
+        }
+        
+        const now = Date.now();
+        const oldestReading = Math.min(...windReadings.map(r => r.timestamp));
+        const newestReading = Math.max(...windReadings.map(r => r.timestamp));
+        
+        diagnosis += `- Age range: ${((now - newestReading) / 1000).toFixed(0)}s to ${((now - oldestReading) / 1000).toFixed(0)}s\n`;
+        diagnosis += `- Current averages: ${avgTrueWindAngle?.toFixed(1)}° @ ${avgTrueWindSpeed?.toFixed(1)}kt\n`;
+        diagnosis += `- Current instantaneous: ${trueWindAngle?.toFixed(1)}° @ ${trueWindSpeed?.toFixed(1)}kt\n`;
+        
+        // Check for corrupted readings
+        let corruptedCount = 0;
+        let futureCount = 0;
+        for (const reading of windReadings) {
+            if (!Number.isFinite(reading.trueAngle) || !Number.isFinite(reading.trueSpeed) || reading.trueSpeed < 0) {
+                corruptedCount++;
+            }
+            if (reading.timestamp > now + 5000) { // More than 5 seconds in the future
+                futureCount++;
+            }
+        }
+        
+        diagnosis += `- Corrupted readings: ${corruptedCount}\n`;
+        diagnosis += `- Future timestamps: ${futureCount}\n`;
+        
+        if (corruptedCount > 0 || futureCount > 0) {
+            diagnosis += `- Recommendation: Clear wind data to fix corruption\n`;
+        }
+        
+        return diagnosis;
     }
 
     /**
@@ -6334,11 +6431,11 @@
         const stats = getWindDataStatistics();
         
         if (stats.sampleCount === 0) {
-            alert('No wind data available yet.');
+            alert('No wind data available yet.\n\n' + diagnoseWindData());
             return;
         }
 
-        let message = `📊 Wind Data Statistics (10-minute window)\n\n`;
+        let message = `📊 Wind Data Statistics (${WIND_AVERAGE_WINDOW_MIN}-minute window)\n\n`;
         message += `Sample Count: ${stats.sampleCount} readings\n`;
         message += `Data Age: ${stats.newestSampleAge.toFixed(0)}s to ${stats.oldestSampleAge.toFixed(0)}s\n\n`;
         
@@ -6347,7 +6444,7 @@
             message += `  • True Wind Direction: ${trueWindAngle?.toFixed(1)}°\n`;
             message += `  • True Wind Speed: ${trueWindSpeed?.toFixed(1)} knots\n\n`;
             
-            message += `10-Minute Averages:\n`;
+            message += `${WIND_AVERAGE_WINDOW_MIN}-Minute Averages:\n`;
             message += `  • Average Direction: ${stats.avgAngle.toFixed(1)}°\n`;
             message += `  • Average Speed: ${stats.avgSpeed.toFixed(1)} knots\n\n`;
         }
@@ -6380,10 +6477,26 @@
         const cutoffTime = now - WIND_AVERAGE_WINDOW_MS;
         const originalLength = windReadings.length;
         
-        windReadings = windReadings.filter(reading => reading.timestamp >= cutoffTime);
+        // Filter out both old readings and corrupted data
+        windReadings = windReadings.filter(reading => {
+            // Remove old readings
+            if (reading.timestamp < cutoffTime) return false;
+            
+            // Remove corrupted readings
+            if (!Number.isFinite(reading.trueAngle) || !Number.isFinite(reading.trueSpeed)) return false;
+            
+            // Remove readings with invalid speed
+            if (reading.trueSpeed < 0 || reading.trueSpeed > 200) return false; // Max 200 knots
+            
+            // Remove readings with future timestamps (more than 1 minute in future)
+            if (reading.timestamp > now + 60000) return false;
+            
+            return true;
+        });
         
         // If we removed readings, recalculate averages
         if (windReadings.length !== originalLength) {
+            console.debug(`Wind cleanup: removed ${originalLength - windReadings.length} readings (${windReadings.length} remaining)`);
             calculateWindSlidingAverages();
         }
         
@@ -7851,7 +7964,7 @@
                         </div>
                         ${useAveragedWind ? `
                         <div style="font-size: 0.8em; color: #666;">
-                            📊 10min avg (${windAverages.sampleCount} samples)
+                            📊 ${WIND_AVERAGE_WINDOW_MIN}min avg (${windAverages.sampleCount} samples)
                         </div>
                         ` : ''}
                     ` : ''}
