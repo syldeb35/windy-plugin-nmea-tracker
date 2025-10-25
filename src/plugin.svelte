@@ -6214,9 +6214,9 @@
         windReadings = windReadings.filter(reading => reading.timestamp >= cutoffTime);
         
         // Debug log if cleanup removed old data
-        if (windReadings.length !== originalLength) {
+       /*  if (windReadings.length !== originalLength) {
             console.debug(`Wind cleanup: removed ${originalLength - windReadings.length} old readings, ${windReadings.length} remaining`);
-        }
+        } */
         
         // Calculate sliding averages
         calculateWindSlidingAverages();
@@ -6279,7 +6279,7 @@
         
         // Debug log for significant changes and refresh vessel marker if needed
         if (validReadings >= 3) {
-            console.debug(`Wind avg updated: ${avgAngleDeg.toFixed(1)}° @ ${avgTrueWindSpeed.toFixed(1)}kt (${validReadings} samples)`);
+            //console.debug(`Wind avg updated: ${avgAngleDeg.toFixed(1)}° @ ${avgTrueWindSpeed.toFixed(1)}kt (${validReadings} samples)`);
             
             // Force vessel marker refresh if wind data changed significantly
             if (lastLatitude !== null && lastLongitude !== null) {
@@ -6496,7 +6496,7 @@
         
         // If we removed readings, recalculate averages
         if (windReadings.length !== originalLength) {
-            console.debug(`Wind cleanup: removed ${originalLength - windReadings.length} readings (${windReadings.length} remaining)`);
+            //console.debug(`Wind cleanup: removed ${originalLength - windReadings.length} readings (${windReadings.length} remaining)`);
             calculateWindSlidingAverages();
         }
         
