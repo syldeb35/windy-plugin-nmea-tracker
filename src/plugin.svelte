@@ -7490,11 +7490,14 @@
      * @returns 
      */
     function snapToRoute(lat: number, lon: number) { // Helper to snap to route (GC or RL)
+
+        
         let bestSegmentIndex = 0; // Index of the best matching segment
         let minDistance = Infinity; // Minimum distance to a segment
         let snappedLat = lat; // Snapped latitude
         let snappedLon = lon; // Snapped longitude
         let snappedT = 0; // Progress along the segment [0,1]
+        
         for (let i = 0; i < gpxRoute.length - 1; i++) {
             const segStart = gpxRoute[i];
             const segEnd = gpxRoute[i + 1];
@@ -7508,7 +7511,10 @@
                 snappedLon = proj.projectionLon;
             }
         }
-        return { snappedLat, snappedLon, bestSegmentIndex};
+        
+        const result = { snappedLat, snappedLon, bestSegmentIndex };
+
+        return result;
     }
 
     /**
@@ -7518,16 +7524,10 @@
      * @returns {{lat: number, lon: number, heading: number} | null} Projected position
     */
     function computeRouteProjection(currentSOG: number, targetTime: number): {lat: number, lon: number, heading: number} | null {
-        /* console.info('computeRouteProjection called:', {
-            currentSOG,
-            targetTime: new Date(targetTime).toISOString(),
-            isRouteLoaded,
-            gpxRouteLength: gpxRoute.length,
-            routeStartTime: routeStartTime?.toISOString()
-        }); */
+
         
         if (!isRouteLoaded || gpxRoute.length < 2) {
-           console.info('Early return due to:', { isRouteLoaded, gpxRouteLength: gpxRoute.length });
+
             return null;
         }
 
@@ -7542,24 +7542,18 @@
             // BEFORE DEPARTURE: Always use GPX-time projection for passage planning
             if (beforeDeparture) {
                 const gpxProjection = computeGpxTimeProjection(targetTime);
-              /*  console.info('GPX projection (passage planning mode - before departure):', {
-                    targetTime: new Date(targetTime).toISOString(),
-                    routeStartTime: routeStartTime.toISOString(),
-                    currentTime: new Date(now).toISOString(),
-                    beforeDeparture: true,
-                    gpxProjection
-                }); */
+
                 return gpxProjection;
             }
 
             // AFTER DEPARTURE: Use real-time projection from vessel's actual position
-           //console.info('After route departure - using real-time projection from vessel position');
+
             
             // If test mode is disabled after departure, we still need to project from actual vessel position
             // This handles the case where the vessel may be off schedule but we want to show realistic projection
             // After departure: for real-time projection, we need SOG > 0
             if (currentSOG <= 0) {
-               //console.info('No SOG for real-time projection after departure');
+                console.info('No SOG for real-time projection after departure');
                 return null;
             }
 
@@ -7609,39 +7603,20 @@
             // For projection beyond current time, calculate from vessel's current position
            // console.info('Projecting from current vessel position along route');
             
-            // calculate the snapped point:
-            // Find the intersection between abeam the vessel and the actual leg: it will be the snapped point and departure of our projected vessel's icon.
+            // Find which route segment the vessel is closest to
             const snapResult = snapToRoute(vesselLat, vesselLon);
-            let snappedLat = snapResult.snappedLat;
-            let snappedLon = snapResult.snappedLon;
             let currentSegmentIndex = snapResult.bestSegmentIndex;
             
             // No time limitation - allow unlimited projection for route following
             let remainingDistance = currentSOG * (projectionDurationSeconds / 3600); // in NM
             
-            // Start projection from snapped point (not from vessel's actual position)
-            // if first leg waypoint.type = RL, project following a straight line.
-            // if first leg waypoint.type = GC project following a great circle curve.
-            // if we reach the end of the segment, follow the route to the next leg.
-            // Use the walkRouteFromPosition function to follow route turns after leg end waypoint
+            // Start projection from vessel's ACTUAL position (not snapped to route)
+            // This prevents the "jumping backward" issue when vessel is off-route
+            // The projection will converge toward the route naturally as it follows route bearings
             
-            // Calculate how far we are from the start of the current segment
-            const segmentStart = gpxRoute[currentSegmentIndex];
-            const segmentEnd = gpxRoute[currentSegmentIndex + 1];
-            const legType = segmentStart.type || 'RL';
-            
-            // Calculate distance from segment start to our snapped position
-            const distanceFromSegmentStart = calculateDistance(
-                segmentStart.lat, segmentStart.lon, 
-                snappedLat, snappedLon, 
-                legType
-            );
-            
-            // Now use walkRouteFromPosition to properly follow the route including turns until we reach the distance sog * projection duration
-            // But start from the exact snapped position on the route
             const routeProjectionResult = walkRouteFromPosition(
-                snappedLat, 
-                snappedLon, 
+                vesselLat, 
+                vesselLon, 
                 currentSegmentIndex, 
                 remainingDistance
             );
@@ -8026,17 +8001,17 @@
 
             // Use route projection if available, otherwise fallback projection
             if (lastRouteProjection) {
-                //console.log('Using route projection:', lastRouteProjection);
+                console.log('Using route projection:', lastRouteProjection);
                 projectedLat = lastRouteProjection.lat;
                 projectedLon = lastRouteProjection.lon;
                 projectedHeading = lastRouteProjection.heading;
             } else if (lastFallbackProjection) {
-                //console.log('Using fallback projection:', lastFallbackProjection);
+                console.log('Using fallback projection:', lastFallbackProjection);
                 projectedLat = lastFallbackProjection.lat;
                 projectedLon = lastFallbackProjection.lon;
                 projectedHeading = lastFallbackProjection.heading;
             } else {
-                //console.log('No projection available - using current position');
+                console.log('No projection available - using current position');
                 // No projection available - use current position
                 if (lastLatitude === null || lastLongitude === null) return;
                 projectedLat = lastLatitude;
@@ -8044,8 +8019,8 @@
                 projectedHeading = trueHeading;
             }
 
-            // Create projection marker
-            const projectedIcon = createRotatingBoatIcon(projectedHeading, 0.846008, boatIconSize * 0.67);
+            // Create projection marker (no wind barbs for projection)
+            const projectedIcon = createRotatingBoatIcon(projectedHeading, 0.846008, boatIconSize * 0.67, undefined, undefined, false);
             forecastIcon = L.marker([projectedLat, projectedLon], {
                 icon: projectedIcon,
                 zIndexOffset: zIndexOwnShip
@@ -8157,8 +8132,19 @@
         const validCOG = Number.isFinite(cog) ? cog : 0;
         const Position = L.latLng(lat, lon);
         
-        // Clear marker layer and update track
-        markerLayer.clearLayers();
+        // Clear marker layer selectively (preserve projection marker)
+        // Store reference to forecast icon before clearing
+        const preserveForecastIcon = forecastIcon;
+        if (preserveForecastIcon) {
+            markerLayer.removeLayer(preserveForecastIcon);
+        }
+        
+        //markerLayer.clearLayers();
+        
+        // Re-add forecast icon if it existed
+        if (preserveForecastIcon) {
+            preserveForecastIcon.addTo(markerLayer);
+        }
         pathLatLngs.push(Position);
         saveShortTrackPoint(lat, lon);
         updateTrackDisplay();
@@ -8174,7 +8160,7 @@
         // Update all vessel-related markers and projections
         updateVesselMarker(lat, lon, validCOG);
         updateProjectionArrows(lat, lon, effectiveSOG, effectiveCOG);
-        updateProjectionMarker(effectiveSOG, effectiveCOG);
+        // Note: updateProjectionMarker is called from updateProjectionForTimeline when timeline changes
         
         // Update button text and handle camera following with throttling
         updateButtonText(windyStore.get('timestamp'));
@@ -8190,6 +8176,7 @@
      * @returns Final position and heading
      */
     function walkRouteFromPosition(startLat: number, startLon: number, startIndex: number, remainingDistance: number): {lat: number, lon: number, heading: number, index: number} {
+        
         let currentLat = startLat;
         let currentLon = startLon;
         let currentIndex = startIndex;
@@ -8202,12 +8189,39 @@
             const legType = gpxRoute[currentIndex].type || 'RL'; // Leg type is on the departure waypoint
             const segmentDistance = calculateDistance(currentLat, currentLon, nextWaypoint.lat, nextWaypoint.lon, legType);
             
+
+            
             if (segmentDistance <= remainingDistance) {
-                // Move to next waypoint
+                // Move to next waypoint and continue projecting
                 remainingDistance -= segmentDistance;
+                
+                // Always move to exact waypoint coordinates
+                // Intercept logic is only applied within segments, not at waypoint transitions
                 currentLat = nextWaypoint.lat;
                 currentLon = nextWaypoint.lon;
+                
                 currentIndex++;
+                
+                // CRITICAL: After waypoint transition, ensure we're exactly on the new route segment
+                // This prevents precision/rounding errors from causing route divergence in the next segment
+                if (remainingDistance > 0 && currentIndex < gpxRoute.length - 1) {
+                    const newSegmentStart = gpxRoute[currentIndex];
+                    const newSegmentEnd = gpxRoute[currentIndex + 1];
+                    const newLegType = newSegmentStart.type || 'RL';
+                    
+                    const transitionSnapResult = findPerpendicularProjection(
+                        currentLat, currentLon,
+                        newSegmentStart.lat, newSegmentStart.lon,
+                        newSegmentEnd.lat, newSegmentEnd.lon,
+                        newLegType
+                    );
+                    
+                    // Always snap after waypoint transition to ensure clean start on new segment
+                    if (transitionSnapResult.progress >= -0.1 && transitionSnapResult.progress <= 1.1) {
+                        currentLat = transitionSnapResult.projectionLat;
+                        currentLon = transitionSnapResult.projectionLon;
+                    }
+                }
             } else {
                 // Interpolate along current segment using EXACT waypoint coordinates to match route display
                 const ratio = segmentDistance === 0 ? 0 : remainingDistance / segmentDistance;
@@ -8222,23 +8236,44 @@
                     currentLat = gc.lat;
                     currentLon = gc.lon;
                 } else {
-                    // RL: Use proper rhumb line interpolation instead of simple linear interpolation
-                    // This is crucial for long distance projections to prevent gaps
+                    // RL: For rhumb line legs, we need to project toward the route if off-route,
+                    // then follow the route bearing once on the route
                     
-                    // Get the exact waypoint coordinates and calculate rhumb line bearing and distance
-                    const totalSegmentDistance = calculateDistance(segmentStartWP.lat, segmentStartWP.lon, segmentEndWP.lat, segmentEndWP.lon, legType);
-                    const distanceFromStart = calculateDistance(segmentStartWP.lat, segmentStartWP.lon, currentLat, currentLon, legType);
+                    // Calculate distance from current position to the route segment
+                    const snapResult = findPerpendicularProjection(
+                        currentLat, currentLon,
+                        segmentStartWP.lat, segmentStartWP.lon,
+                        segmentEndWP.lat, segmentEndWP.lon,
+                        'RL'
+                    );
                     
-                    // Calculate the bearing of this rhumb line segment
-                    const rhumbBearing = calculateStraightLineBearing(segmentStartWP.lat, segmentStartWP.lon, segmentEndWP.lat, segmentEndWP.lon);
+                    let targetBearing: number;
+                    let targetDistance = remainingDistance;
                     
-                    // Calculate the total distance we need to travel along this segment
-                    const finalDistance = distanceFromStart + remainingDistance;
+                    if (snapResult.distance > 2.0 && snapResult.progress >= 0 && snapResult.progress <= 1) {
+                        // Off-route: calculate bearing to intercept the route ahead
+                        // Project along the route from the snap point
+                        const routeBearing = calculateStraightLineBearing(segmentStartWP.lat, segmentStartWP.lon, segmentEndWP.lat, segmentEndWP.lon);
+                        const interceptPoint = deadReckoningFromPoint(snapResult.projectionLat, snapResult.projectionLon, routeBearing, remainingDistance);
+                        
+                        // Calculate bearing from current position to intercept point
+                        targetBearing = calculateStraightLineBearing(currentLat, currentLon, interceptPoint.lat, interceptPoint.lon);
+                        targetDistance = calculateDistance(currentLat, currentLon, interceptPoint.lat, interceptPoint.lon, 'RL');
+                        
+
+                    } else {
+                        // On-route or close to route: follow the route bearing
+                        targetBearing = calculateStraightLineBearing(segmentStartWP.lat, segmentStartWP.lon, segmentEndWP.lat, segmentEndWP.lon);
+                        
+
+                    }
                     
-                    // Use dead reckoning along the rhumb line bearing for accurate positioning
-                    const newPosition = deadReckoningFromPoint(segmentStartWP.lat, segmentStartWP.lon, rhumbBearing, finalDistance);
+                    // Project using the calculated bearing and distance
+                    const newPosition = deadReckoningFromPoint(currentLat, currentLon, targetBearing, targetDistance);
                     currentLat = newPosition.lat;
                     currentLon = newPosition.lon;
+                    
+
                 }
                 
                 // INTERMEDIATE SNAP: Snap to route after interpolation to prevent cumulative errors
@@ -8251,7 +8286,8 @@
                 
                 // For long projections, be more aggressive with snapping to prevent gaps
                 // Use larger distance threshold based on remaining distance to project
-                const snapThreshold = Math.min(5.0, Math.max(2.0, remainingDistance / 100)); // 2-5 NM threshold
+                // Increased threshold to handle cumulative errors in long projections
+                const snapThreshold = Math.min(10.0, Math.max(3.0, remainingDistance / 50)); // 3-10 NM threshold
                 if (snapResult.progress >= 0 && snapResult.progress <= 1 && snapResult.distance < snapThreshold) {
                     currentLat = snapResult.projectionLat;
                     currentLon = snapResult.projectionLon;
@@ -8277,7 +8313,8 @@
 
             // Only snap if we're within the segment bounds and reasonably close to the route
             // For very long projections, use a more generous distance threshold
-            const finalSnapThreshold = Math.max(3.0, iterations > 500 ? 10.0 : 3.0); // More generous for long projections
+            // Increased threshold to handle cumulative errors from long dead reckoning projections
+            const finalSnapThreshold = Math.max(5.0, iterations > 100 ? 15.0 : 5.0); // Much more generous for long projections
             if (snapResult.progress >= 0 && snapResult.progress <= 1 && snapResult.distance < finalSnapThreshold) {
                 currentLat = snapResult.projectionLat;
                 currentLon = snapResult.projectionLon;
@@ -8285,14 +8322,45 @@
         }
         
         // Calculate heading for the projected position
+        // Use the route bearing of the current segment, not bearing to next waypoint
         let heading = 0;
         if (currentIndex < gpxRoute.length - 1) {
             const legType = gpxRoute[currentIndex].type || 'RL'; // Current leg type from departure waypoint
-            heading = calculateBearingByLegType(currentLat, currentLon, gpxRoute[currentIndex + 1].lat, gpxRoute[currentIndex + 1].lon, legType);
+            // Use route bearing for the current segment the vessel is on
+            heading = calculateBearingByLegType(gpxRoute[currentIndex].lat, gpxRoute[currentIndex].lon, gpxRoute[currentIndex + 1].lat, gpxRoute[currentIndex + 1].lon, legType);
         } else if (currentIndex > 0) {
             const legType = gpxRoute[currentIndex - 1].type || 'RL'; // Previous leg type
-            heading = calculateBearingByLegType(gpxRoute[currentIndex - 1].lat, gpxRoute[currentIndex - 1].lon, currentLat, currentLon, legType);
+            // Use route bearing for the previous segment
+            heading = calculateBearingByLegType(gpxRoute[currentIndex - 1].lat, gpxRoute[currentIndex - 1].lon, gpxRoute[currentIndex].lat, gpxRoute[currentIndex].lon, legType);
         }
+        
+        // DEBUG: Calculate distance from projected position to route for debugging
+        let distanceToRoute = 0;
+        let routeSegmentInfo = 'N/A';
+        if (currentIndex < gpxRoute.length - 1) {
+            const segmentStart = gpxRoute[currentIndex];
+            const segmentEnd = gpxRoute[currentIndex + 1];
+            const legType = segmentStart.type || 'RL';
+            
+            const routeProj = findPerpendicularProjection(
+                currentLat, currentLon,
+                segmentStart.lat, segmentStart.lon,
+                segmentEnd.lat, segmentEnd.lon,
+                legType
+            );
+            
+            distanceToRoute = routeProj.distance;
+            routeSegmentInfo = `${currentIndex}-${currentIndex + 1} (${legType})`;
+        }
+        
+        console.info('walkRouteFromPosition result:', {
+            finalPos: { lat: currentLat.toFixed(4), lon: currentLon.toFixed(4) },
+            finalIndex: currentIndex,
+            heading: heading.toFixed(1) + '°',
+            totalIterations: iterations,
+            distanceToRoute: distanceToRoute.toFixed(3) + ' NM',
+            routeSegment: routeSegmentInfo
+        });
         
         return { lat: currentLat, lon: currentLon, heading, index: currentIndex };
     }
@@ -8316,32 +8384,16 @@
         // Check if any critical parameter has changed
         const sogChanged = lastProjectionSOG === null || Math.abs(effectiveSOG - lastProjectionSOG) > 0.1; // 0.1 knot threshold
         
-        // For time changes, use a much larger threshold to account for timeline granularity
-        // Windy timeline often updates in small increments, so we need a bigger threshold
-        const timeThreshold = 5 * 60 * 1000; // 5 minutes in milliseconds
+        // For time changes, use a smaller threshold to allow real-time timeline updates
+        // Route projection should update as user drags timeline
+        const timeThreshold = 30 * 1000; // 30 seconds in milliseconds (reduced from 5 minutes)
         const timeChanged = lastProjectionTargetTime === null || Math.abs(targetTime - lastProjectionTargetTime) > timeThreshold;
         
         const routeStateChanged = lastProjectionRouteState !== currentRouteState;
         
         const hasChanged = sogChanged || timeChanged || routeStateChanged;
         
-        // Only log if something actually changed to reduce console noise
         if (hasChanged) {
-           /* console.info('Parameter change detected:', {
-                effectiveSOG,
-                lastProjectionSOG,
-                sogChanged,
-                targetTime: new Date(targetTime).toISOString(),
-                lastTargetTime: lastProjectionTargetTime ? new Date(lastProjectionTargetTime).toISOString() : null,
-                timeDiffMs: lastProjectionTargetTime ? Math.abs(targetTime - lastProjectionTargetTime) : 'null',
-                timeDiffMin: lastProjectionTargetTime ? Math.round(Math.abs(targetTime - lastProjectionTargetTime) / 60000) : 'null',
-                timeChanged,
-                currentRouteState,
-                lastRouteState: lastProjectionRouteState,
-                routeStateChanged,
-                reason: sogChanged ? 'SOG' : timeChanged ? 'Time' : 'Route'
-            }); */
-            
             // Update last known parameters
             lastProjectionSOG = effectiveSOG;
             lastProjectionTargetTime = targetTime;
@@ -8383,17 +8435,10 @@
         if (isRouteLoaded && routeProjectionActive && gpxRoute.length > 0 && routeStartTime) {
             // Only compute route projection if parameters have changed significantly
             if (hasRouteProjectionParametersChanged(effectiveSOG, ts, forceRecalculation)) {
-               /* console.info('Route projection conditions met and parameters changed:', {
-                    isRouteLoaded,
-                    routeProjectionActive,
-                    gpxRouteLength: gpxRoute.length,
-                    routeStartTime: routeStartTime?.toISOString(),
-                    testModeEnabled,
-                    effectiveSOG
-                }); */
+
                 // Route-based projection: use timeline vs route start time
                 lastRouteProjection = computeRouteProjection(effectiveSOG, ts);
-                // console.info('computeRouteProjection returned:', lastRouteProjection);
+
             }
             
             // If route projection returns null (e.g., before route start), use fallback projection
@@ -8408,6 +8453,18 @@
                 lastFallbackProjection = null;
             }
         } else {
+            // Debug why route projection is not active
+            console.warn('Route projection not active - conditions:', {
+                isRouteLoaded,
+                routeProjectionActive,
+                gpxRouteLength: gpxRoute?.length || 0,
+                hasRouteStartTime: !!routeStartTime,
+                routeStartTime: routeStartTime?.toISOString() || null,
+                effectiveSOG,
+                effectiveCOG,
+                testModeEnabled
+            });
+            
             // Fallback: COG/SOG projection from current position
             if (lastLatitude !== null && lastLongitude !== null && effectiveSOG > 0.5 && projectionHours > 0) {
                 const fallback = computeFallbackProjection(lastLatitude, lastLongitude, effectiveCOG, effectiveSOG, projectionHours);
@@ -8421,6 +8478,9 @@
             }
             lastRouteProjection = null;
         }
+        
+        // Update the projection marker with new coordinates
+        updateProjectionMarker(effectiveSOG, effectiveCOG);
         
         // Move the weather popup if it's open and timeline changes
         if (openedPopup && lastRouteProjection) {
