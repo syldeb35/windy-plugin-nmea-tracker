@@ -7776,16 +7776,34 @@
             }
             const forecastDate = ts ? new Date(ts) : new Date();
 
-            const overlay = windyStore.get('overlay');
-            const product = windyStore.get('product');
+            let overlay, product, refTime;
+            try {
+                overlay = windyStore.get('overlay');
+                product = windyStore.get('product');
+                // Try to get refTime from calendar store
+                try {
+                    const calendar = windyStore.get('calendar');
+                    refTime = calendar?.refTimeTs ? new Date(calendar.refTimeTs) : null;
+                } catch (refTimeError) {
+                    console.warn('refTime not available from calendar:', refTimeError);
+                    refTime = null;
+                }
+            } catch (error) {
+                console.warn('Error accessing windyStore:', error);
+                overlay = 'unknown';
+                product = 'unknown';
+                refTime = null;
+            }
             const overlayName = getOverlayName();
 
             const values = interpolator({ lat, lon });
             let content = `<div style="text-align: center;"><strong>${vesselName}</strong><br>φ = ${displayLatitude(lat)}, λ= ${displayLongitude(lon)}</div><hr>`;
-                if (Math.abs(projectionHours ?? 0) < 0.1) {
-                    content += `<div><small><strong>${capitalizeWords(overlayName)} actual forecast as per ${product.toUpperCase()} model :</strong></small></div>`;
-                } else if (projectionHours !== null && projectionHours > 0) {
+                if (Math.abs(projectionHours ?? 0) < 0.5) {
+                    content += `<div><small><strong>${capitalizeWords(overlayName)} actual forecast :</strong></small></div>`;
+                } else if (projectionHours !== null && projectionHours >= 0.5) {
                     content += `<div><small><strong>${capitalizeWords(overlayName)} forecast in ${projectionHours.toFixed(1)} hours :</strong></small></div>`;
+                } else if (projectionHours !== null && projectionHours <= 0.5) {
+                    content += `<div><small><strong>${capitalizeWords(overlayName)} forecast ${projectionHours.toFixed(1)} hours ago :</strong></small></div>`;
                 }
             if (!Array.isArray(values)) {
                 content += '❌ No interpolated data.';
@@ -7870,7 +7888,8 @@
             }
             // Add Windy API version and forecast date
             content += `<hr><div style="text-align: right;"><small><strong>Forecast date : </strong>${forecastDate.toUTCString()}</small></div>`;
-            
+
+            content += `<div style="text-align: right;"><small><strong>Model : ${product.toUpperCase()} from ${refTime ? refTime.toUTCString() : 'unknown'}</strong></small></div>`;
             // *** Mettre à jour le contenu du popup ! ***
             popup.setContent(content);
             
