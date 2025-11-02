@@ -7777,12 +7777,13 @@
             const forecastDate = ts ? new Date(ts) : new Date();
 
             const overlay = windyStore.get('overlay');
+            const product = windyStore.get('product');
             const overlayName = getOverlayName();
 
             const values = interpolator({ lat, lon });
             let content = `<div style="text-align: center;"><strong>${vesselName}</strong><br>φ = ${displayLatitude(lat)}, λ= ${displayLongitude(lon)}</div><hr>`;
                 if (Math.abs(projectionHours ?? 0) < 0.1) {
-                    content += `<div><small><strong>${capitalizeWords(overlayName)} actual forecast :</strong></small></div>`;
+                    content += `<div><small><strong>${capitalizeWords(overlayName)} actual forecast as per ${product.toUpperCase()} model :</strong></small></div>`;
                 } else if (projectionHours !== null && projectionHours > 0) {
                     content += `<div><small><strong>${capitalizeWords(overlayName)} forecast in ${projectionHours.toFixed(1)} hours :</strong></small></div>`;
                 }
