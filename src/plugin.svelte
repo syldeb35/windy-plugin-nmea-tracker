@@ -652,7 +652,7 @@
     let lastWakeTime = Date.now();
     let lastReconnectAttempt = 0; // Track last manual reconnection attempt
 
-    let userOS: string = 'Uknown';
+    let userOS: string = 'Unknown';
 
     /**
      * 
