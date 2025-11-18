@@ -504,8 +504,8 @@
     let avgTrueWindSpeed: number | null = null; // 10-minute average true wind speed
     const WIND_AVERAGE_WINDOW_MIN = 6; // minutes
     const WIND_AVERAGE_WINDOW_MS = WIND_AVERAGE_WINDOW_MIN * 60 * 1000; // minutes in milliseconds
-    let windCleanupTimer: NodeJS.Timeout | null = null; // Timer for periodic cleanup
-
+    //let windCleanupTimer: NodeJS.Timeout | null = null; // Timer for periodic cleanup
+    let windCleanupTimer: ReturnType<typeof setTimeout> | null = null; // Timer for periodic cleanup
     //
     let followShip = false; // do not follow ship by default
     let timelineStepHours = "4"; // Timeline navigation step in hours (1, 4, 8, 12) - string to match select options
