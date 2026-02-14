@@ -1376,14 +1376,15 @@
         */
 
         const atonIcon = createAtoNIcon(atonType, iconSize, hasLight, 'Test Light');
-        const marker = L.marker([funchalLat, funchalLon], { 
+        const marker = new L.Marker([funchalLat, funchalLon], { 
             icon: atonIcon, 
-            zIndexOffset: zIndexWaypoint 
+            zIndexOffset: zIndexWaypoint,
+            interactive: true  // Required for Leaflet GL (Windy V4) tooltips
         }).addTo(atonLayer);
         
         // Add a separate light indicator as HTML overlay for testing
         if (hasLight) {
-            const lightOverlay = L.marker([funchalLat, funchalLon], {
+            const lightOverlay = new L.Marker([funchalLat, funchalLon], {
                 icon: L.divIcon({
                     html: '<div style="background: red; color: white; padding: 2px 4px; border-radius: 3px; font-size: 10px; font-weight: bold; margin-left: 20px; margin-top: -10px;">LIGHT</div>',
                     className: 'light-overlay',
@@ -1444,14 +1445,15 @@
         // console.info(`Creating second test AtoN: type=${atonType2}, hasLight=${hasLight2}, statusMessages=${JSON.stringify(testStatusMessages2)}`);
         
         const atonIcon2 = createAtoNIcon(atonType2, iconSize, hasLight2, 'Test Light OFF');
-        const marker2 = L.marker([funchalLat + 0.01, funchalLon + 0.01], { 
+        const marker2 = new L.Marker([funchalLat + 0.01, funchalLon + 0.01], { 
             icon: atonIcon2, 
-            zIndexOffset: zIndexWaypoint 
+            zIndexOffset: zIndexWaypoint,
+            interactive: true  // Required for Leaflet GL (Windy V4) tooltips
         }).addTo(atonLayer);
         
         // Add a separate light indicator as HTML overlay for testing
         if (hasLight2) {
-            const lightOverlay2 = L.marker([funchalLat + 0.01, funchalLon + 0.01], {
+            const lightOverlay2 = new L.Marker([funchalLat + 0.01, funchalLon + 0.01], {
                 icon: L.divIcon({
                     html: '<div style="background: orange; color: white; padding: 2px 4px; border-radius: 3px; font-size: 10px; font-weight: bold; margin-left: 20px; margin-top: -10px;">LIGHT OFF</div>',
                     className: 'light-overlay',
@@ -1508,9 +1510,10 @@
                     const statusMessages = atonData.statusText ? atonData.statusText.split(', ') : [];
                     const hasLight = atonHasLight(atonData.atonType, statusMessages, atonData.virtualAtoN === 1);
                     const atonIcon = createAtoNIcon(atonData.atonType, iconSize, hasLight, atonData.statusText || '');
-                    const marker = L.marker([atonData.lat, atonData.lon], { 
+                    const marker = new L.Marker([atonData.lat, atonData.lon], { 
                         icon: atonIcon, 
-                        zIndexOffset: zIndexWaypoint 
+                        zIndexOffset: zIndexWaypoint,
+                        interactive: true  // Required for Leaflet GL (Windy V4) tooltips
                     }).addTo(atonLayer);
                     
                     // Create indicators using the new helper function
@@ -3244,10 +3247,12 @@
                 display: flex;
                 justify-content: center;
                 align-items: center;
+                pointer-events: auto;
             ">
                 <svg width="${iconSize}" height="${iconSize}" viewBox="0 0 ${iconSize} ${iconSize}" style="
                     transform: rotate(${validHeading}deg);
                     transform-origin: center center;
+                    pointer-events: none;
                 ">
                     <!-- Vessel hull outline -->
                     <path d="M${iconSize/2},2 
@@ -3298,10 +3303,12 @@
                 display: flex;
                 justify-content: center;
                 align-items: center;
+                pointer-events: auto;
             ">
                 <svg width="${size}" height="${size}" viewBox="0 0 24 24" style="
                     transform: rotate(${validHeading}deg);
                     transform-origin: center center;
+                    pointer-events: none;
                 ">
                     <!-- Simple "A" letter for Class A -->
                     <text x="12" y="16" 
@@ -3393,10 +3400,12 @@
                 display: flex;
                 justify-content: center;
                 align-items: center;
+                pointer-events: auto;
             ">
                 <svg width="${size}" height="${size}" viewBox="0 0 24 24" style="
                     transform: rotate(${validHeading}deg);
                     transform-origin: center center;
+                    pointer-events: none;
                 ">
                     <path d="M12 2 L8 6 L6 12 L8 18 L16 18 L18 12 L16 6 Z" fill="${color}" stroke="#000" stroke-width="0.8"/>
                     <circle cx="12" cy="12" r="1" fill="#fff"/>
@@ -3436,10 +3445,12 @@
                 display: flex;
                 justify-content: center;
                 align-items: center;
+                pointer-events: auto;
             ">
                 <svg width="${size}" height="${size}" viewBox="0 0 24 24" style="
                     transform: rotate(${validHeading}deg);
                     transform-origin: center center;
+                    pointer-events: none;
                 ">
                     <!-- Main sail (larger and more prominent) -->
                     <path d="M12 2 L19 12 L12 12 Z" fill="${sailColor}" stroke="#333" stroke-width="0.6"/>
@@ -3515,20 +3526,9 @@
         const shipKey = mmsi.toString();
         const position = L.latLng(data.lat, data.lon);
         
-        // Remove existing marker if it exists
-        if (aisShips[shipKey] && aisShips[shipKey].marker) {
-            aisShipsLayer.removeLayer(aisShips[shipKey].marker);
-        }
-        
-        // Remove existing name label if it exists
-        if (aisShips[shipKey] && aisShips[shipKey].nameLabel) {
-            aisShipsLayer.removeLayer(aisShips[shipKey].nameLabel);
-        }
-        
         // Use heading if available, otherwise use COG
         const displayHeading = data.heading !== undefined && data.heading !== 511 ? data.heading : (data.cog || 0);
         
-        // Create new marker with corrected heading
         // Get ship type from existing data if available (for ships that already sent static data)
         const consolidatedShipType = data.shipType || aisShips[shipKey]?.shipType || 0;
         const isClassB = data.classB || aisShips[shipKey]?.classB || false;
@@ -3538,47 +3538,100 @@
         const vesselBeam = data.beam || aisShips[shipKey]?.data?.beam || 0;
         
         const icon = createAISShipIcon(displayHeading, consolidatedShipType, isClassB, vesselLength, vesselBeam);
-        const marker = L.marker(position, { 
-            icon: icon,
-            zIndexOffset: zIndexAisShips   // Lower z-index for other ships
-        }).addTo(aisShipsLayer);
-        
-        //console.debug(`Adding/updating AIS ship: ${mmsi} at ${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}`);
         
         // Create tooltip content
         const tooltipContent = getAISTooltipContent(data, mmsi);
         
-        marker.bindTooltip(tooltipContent, { 
-            permanent: false, 
-            direction: 'top', 
-            className: 'ais-ship-tooltip' 
-        });
+        let marker = aisShips[shipKey]?.marker;
         
-        // Add name label if zoom level >= 11
-        let nameLabel = null;
+        // Update existing marker or create new one
+        if (marker) {
+            // Marker exists - just update position, icon, and tooltip
+            marker.setLatLng(position);
+            marker.setIcon(icon);
+            marker.setTooltipContent(tooltipContent);
+        } else {
+            // Create new marker (first time only)
+            marker = new L.Marker(position, { 
+                icon: icon,
+                zIndexOffset: zIndexAisShips,   // Lower z-index for other ships
+                interactive: true,  // Required for Leaflet GL (Windy V4) tooltips
+                bubblingMouseEvents: true,  // Let mouse events bubble up for Leaflet GL
+                pane: 'markerPane',  // Explicitly use marker pane for Leaflet GL compatibility
+                riseOnHover: true  // Bring marker to front on hover
+            }).addTo(aisShipsLayer);
+            
+            // Bind tooltip - Leaflet GL requires explicit event handling
+            marker.bindTooltip(tooltipContent, { 
+                permanent: false, 
+                direction: 'top', 
+                className: 'ais-ship-tooltip',
+                sticky: true  // Follow mouse for better interaction in Leaflet GL
+            });
+            
+            // Explicit event handlers for Leaflet GL compatibility
+            marker.on('mouseover', function(e: any) {
+                marker.openTooltip();
+            });
+            marker.on('mouseout', function(e: any) {
+                marker.closeTooltip();
+            });
+            
+            // Fallback: Direct DOM event listeners for Leaflet GL - ONCE per ship
+            setTimeout(() => {
+                const iconElement = marker.getElement();
+                if (iconElement) {
+                    console.debug('Adding direct DOM listeners to AIS ship (first creation):', mmsi);
+                    iconElement.addEventListener('mouseenter', () => {
+                        marker.openTooltip();
+                    });
+                    iconElement.addEventListener('mouseleave', () => {
+                        marker.closeTooltip();
+                    });
+                    iconElement.style.cursor = 'pointer';
+                } else {
+                    console.warn('Could not get DOM element for AIS marker:', mmsi);
+                }
+            }, 100);
+        }
+        
+        // Handle name label (update or create)
         const currentZoom = map.getZoom();
         const shipName = data.name || aisShips[shipKey]?.name || 'Unknown';
+        let nameLabel = aisShips[shipKey]?.nameLabel;
         
-        if (currentZoom >= 11 && shipName !== 'Unknown') {
-            nameLabel = L.marker(position, {
-                icon: L.divIcon({
-                    className: 'ais-ship-name-label',
-                    html: `<div style="
-                        background: transparent;
-                        border: none;
-                        color: #FFFFFF;
-                        font-size: 12px;
-                        font-weight: bold;
-                        text-align: center;
-                        text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
-                        white-space: nowrap;
-                        pointer-events: none;
-                    ">${shipName}</div>`,
-                    iconSize: [100, 20],
-                    iconAnchor: [50, -10] // Position above the ship icon
-                }),
-                zIndexOffset: zIndexAisShips + 1 // Above the ship icon
-            }).addTo(aisShipsLayer);
+        if (currentZoom >= 9 && shipName !== 'Unknown') {
+            if (nameLabel) {
+                // Update existing label position
+                nameLabel.setLatLng(position);
+            } else {
+                // Create new name label
+                nameLabel = new L.Marker(position, {
+                    icon: L.divIcon({
+                        className: 'ais-ship-name-label',
+                        html: `<div style="
+                            background: transparent;
+                            border: none;
+                            color: #FFFFFF;
+                            font-size: 12px;
+                            font-weight: bold;
+                            text-align: center;
+                            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+                            white-space: nowrap;
+                            pointer-events: none;
+                        ">${shipName}</div>`,
+                        iconSize: [100, 20],
+                        iconAnchor: [50, -10] // Position above the ship icon
+                    }),
+                    zIndexOffset: zIndexAisShips + 1 // Above the ship icon
+                }).addTo(aisShipsLayer);
+            }
+        } else {
+            // Remove name label if zoom is too low or name is unknown
+            if (nameLabel) {
+                aisShipsLayer.removeLayer(nameLabel);
+                nameLabel = null;
+            }
         }
         
         // Store ship data with consolidated structure
@@ -3598,15 +3651,9 @@
             lastUpdate: Date.now()
         };
         
-        // Update tooltip with latest consolidated data including ship type
+        // Update tooltip with latest consolidated data
         const updatedTooltipContent = getAISTooltipContent(aisShips[shipKey].data, mmsi);
         marker.setTooltipContent(updatedTooltipContent);
-        
-        // Update tooltip with latest name if it changed
-        if (aisShips[shipKey].name !== 'Unknown') {
-            const updatedTooltipContent = getAISTooltipContent(aisShips[shipKey].data, mmsi);
-            marker.setTooltipContent(updatedTooltipContent);
-        }
     }
 
     /**
@@ -3781,7 +3828,7 @@
                 iconSize: [Math.max(50, statusLabelText.length * 7), 15],
                 iconAnchor: [Math.max(25, statusLabelText.length * 3.5), iconSize]
             });
-            statusLabel = L.marker([atonData.lat, atonData.lon], { icon: statusTextIcon, zIndexOffset: zIndexWaypoint + 1 }).addTo(atonLayer);
+            statusLabel = new L.Marker([atonData.lat, atonData.lon], { icon: statusTextIcon, zIndexOffset: zIndexWaypoint + 1 }).addTo(atonLayer);
         }
         
         // Create light indicator if AtoN has a light
@@ -3820,7 +3867,7 @@
             });
             
             // Position light indicator at same coordinates as AtoN, offset by iconAnchor
-            lightIndicator = L.marker([atonData.lat, atonData.lon], { 
+            lightIndicator = new L.Marker([atonData.lat, atonData.lon], { 
                 icon: lightIcon,
                 interactive: false, // Prevent interference with AtoN clicks
                 zIndexOffset: zIndexWaypoint + 5
@@ -3886,9 +3933,10 @@
                 const statusMessages = atonData.data.statusText ? atonData.data.statusText.split(', ') : [];
                 const hasLight = atonHasLight(atonData.data.atonType, statusMessages, atonData.data.virtualAtoN === 1);
                 const newIcon = createAtoNIcon(atonData.data.atonType, newSize, hasLight, atonData.data.statusText || '');
-                const newMarker = L.marker([atonData.data.lat, atonData.data.lon], { 
+                const newMarker = new L.Marker([atonData.data.lat, atonData.data.lon], { 
                     icon: newIcon, 
-                    zIndexOffset: zIndexWaypoint 
+                    zIndexOffset: zIndexWaypoint,
+                    interactive: true  // Required for Leaflet GL (Windy V4) tooltips
                 }).addTo(atonLayer);
                 
                 // Create indicators using the new helper function
@@ -3928,7 +3976,7 @@
             
             // Add name label if zoom level >= 11 and ship has a name
             if (showLabels && shipName !== 'Unknown') {
-                const nameLabel = L.marker(position, {
+                const nameLabel = new L.Marker(position, {
                     icon: L.divIcon({
                         className: 'ais-ship-name-label',
                         html: `<div style="
@@ -3984,9 +4032,10 @@
         const meteoIcon = createMeteoIcon(iconSize);
 
         // Create marker
-        const marker = L.marker([lat, lon], { 
+        const marker = new L.Marker([lat, lon], { 
             icon: meteoIcon, 
-            zIndexOffset: zIndexMeteo 
+            zIndexOffset: zIndexMeteo,
+            interactive: true  // Required for Leaflet GL (Windy V4) tooltips
         }).addTo(meteoLayer);
 
         // Create detailed tooltip with weather information
@@ -4827,9 +4876,10 @@
                     }
 
                     const baseStationIcon = createBaseStationIcon(32);
-                    const marker = L.marker([lat, lon], { 
+                    const marker = new L.Marker([lat, lon], { 
                         icon: baseStationIcon, 
-                        zIndexOffset: zIndexBaseStations 
+                        zIndexOffset: zIndexBaseStations,
+                        interactive: true  // Required for Leaflet GL (Windy V4) tooltips
                     }).addTo(baseStationLayer);
 
                     const tooltipContent = `
@@ -5254,9 +5304,10 @@
                     }
 
                     const aircraftIcon = createSARAircraftIcon(cog, 32);
-                    const marker = L.marker([lat, lon], { 
+                    const marker = new L.Marker([lat, lon], { 
                         icon: aircraftIcon, 
-                        zIndexOffset: zIndexOwnShip + 150 // High priority
+                        zIndexOffset: zIndexOwnShip + 150, // High priority
+                        interactive: true  // Required for Leaflet GL (Windy V4) tooltips
                     }).addTo(emergencyLayer);
 
                     const tooltipContent = `
@@ -5375,9 +5426,10 @@
                 }
 
                 const sartIcon = createSARTIcon(28);
-                const marker = L.marker([lat, lon], { 
+                const marker = new L.Marker([lat, lon], { 
                     icon: sartIcon, 
-                    zIndexOffset: zIndexOwnShip + 200 // Very high priority
+                    zIndexOffset: zIndexOwnShip + 200, // Very high priority
+                    interactive: true  // Required for Leaflet GL (Windy V4) tooltips
                 }).addTo(emergencyLayer);
 
                 const tooltipContent = `
@@ -5775,7 +5827,11 @@
                 // Check if AtoN has a light based on new default assumption logic
                 const hasLight = atonHasLight(atonType, atonStatus.statusMessages, virtualAtoN === 1);
                 const atonIcon = createAtoNIcon(atonType, iconSize, hasLight, statusText);
-                const marker = L.marker([lat, lon], { icon: atonIcon, zIndexOffset: zIndexWaypoint }).addTo(atonLayer);
+                const marker = new L.Marker([lat, lon], { 
+                    icon: atonIcon, 
+                    zIndexOffset: zIndexWaypoint,
+                    interactive: true  // Required for Leaflet GL (Windy V4) tooltips
+                }).addTo(atonLayer);
                 
                 // console.debug(`AtoN ${mmsi} created: type=${atonType}, hasLight=${hasLight}, statusMessages=[${atonStatus.statusMessages.join(', ')}]`);
                 
@@ -6994,14 +7050,15 @@
                 waypointIcon = '📍'; // Orange - future waypoint
             }
             
-            const marker = L.marker([waypoint.lat, waypoint.lon], { 
+            const marker = new L.Marker([waypoint.lat, waypoint.lon], { 
                 icon: L.divIcon({
                     html: waypointIcon,
                     className: 'waypoint-marker',
                     iconSize: [20, 20],
                     iconAnchor: [10, 10]
                 }),
-                zIndexOffset: zIndexWaypoint
+                zIndexOffset: zIndexWaypoint,
+                interactive: true  // Required for Leaflet GL (Windy V4) tooltips
             }).addTo(routeMarkers);
             
             const myIndex = index - nextWaypointIndex; // My index in the ETA array
@@ -7761,7 +7818,7 @@
             openedPopup = null;
         });
         
-        getLatLonInterpolator().then((interpolator: any) => {
+        getLatLonInterpolator().then(async (interpolator: any) => {
             if (!interpolator) {
                 popup.setContent('Weather layer not available.');
                 return;
@@ -7796,7 +7853,23 @@
             }
             const overlayName = getOverlayName();
 
-            const values = interpolator({ lat, lon });
+            // V4 API: interpolator returns a Promise that must be awaited
+            let values;
+            try {
+                const interpolatorResult = interpolator({ lat, lon, ts });
+                
+                // Check if it's a Promise (V4) or direct value (V3)
+                if (interpolatorResult && typeof interpolatorResult.then === 'function') {
+                    values = await interpolatorResult;
+                } else {
+                    values = interpolatorResult;
+                }
+            } catch (error) {
+                console.error('Interpolator call failed:', error);
+                popup.setContent(`❌ Weather interpolation error: ${error}`);
+                return;
+            }
+            
             let content = `<div style="text-align: center;"><strong>${vesselName}</strong><br>φ = ${displayLatitude(lat)}, λ= ${displayLongitude(lon)}</div><hr>`;
                 if (Math.abs(projectionHours ?? 0) < 0.5) {
                     content += `<div><small><strong>${capitalizeWords(overlayName)} actual forecast :</strong></small></div>`;
@@ -7805,7 +7878,7 @@
                 } else if (projectionHours !== null && projectionHours <= 0.5) {
                     content += `<div><small><strong>${capitalizeWords(overlayName)} forecast ${projectionHours.toFixed(1)} hours ago :</strong></small></div>`;
                 }
-            if (!Array.isArray(values)) {
+            if (!values || !Array.isArray(values) || values.length === 0) {
                 content += '❌ No interpolated data.';
                 popup.setContent(content);
                 return;
@@ -7923,13 +7996,7 @@
         const validCOG = Number.isFinite(cog) ? cog : 0;
         const Position = L.latLng(lat, lon);
 
-        // Remove existing vessel marker
-        if (ownShipMarker) {
-            markerLayer.removeLayer(ownShipMarker);
-            ownShipMarker = null;
-        }
-
-        // Create main vessel marker - prefer averaged wind data for display if available
+        // Prepare wind data for icon and tooltip - prefer averaged wind data for display if available
         const windAverages = getWindSlidingAverages();
         const useAveragedWind = windAverages.avgAngle !== null && windAverages.avgSpeed !== null && windAverages.sampleCount >= 3;
         
@@ -7939,10 +8006,6 @@
                                (trueWindSpeed !== null ? trueWindSpeed : (windReference === 'T' ? windSpeed : null));
         
         const icon = createRotatingBoatIcon(trueHeading ?? 0, 0.846008, boatIconSize, windAngleToShow ?? undefined, windSpeedToShow ?? undefined, windDataValid);
-        ownShipMarker = L.marker(Position, { 
-            icon: icon,
-            zIndexOffset: zIndexOwnShip
-        }).addTo(markerLayer);
         
         const tooltipContent = `
             <div style="text-align: center;">
@@ -7967,22 +8030,53 @@
             </div>
         `;
 
-        ownShipMarker.bindTooltip(tooltipContent, { 
-            permanent: false, 
-            direction: 'top', 
-            className: 'boat-tooltip' 
-        });
+        // Update existing marker or create new one
+        if (ownShipMarker) {
+            // Marker exists - just update position, icon, and tooltip content
+            ownShipMarker.setLatLng(Position);
+            ownShipMarker.setIcon(icon);
+            ownShipMarker.setTooltipContent(tooltipContent);
+        } else {
+            // Create new marker (first time only)
+            ownShipMarker = new L.Marker(Position, { 
+                icon: icon,
+                zIndexOffset: zIndexOwnShip,
+                interactive: true  // Required for Leaflet GL (Windy V4) tooltips
+            }).addTo(markerLayer);
+            
+            ownShipMarker.bindTooltip(tooltipContent, { 
+                permanent: false, 
+                direction: 'top', 
+                className: 'boat-tooltip' 
+            });
 
-        // Click handler for weather at current time
-        ownShipMarker.on('click', () => {
-            if (openedPopup) {
-                openedPopup.remove();
-                openedPopup = null;
-                return;
-            }
-            windyStore.set('timestamp', getRoundedHourTimestamp());
-            showMyPopup(lat, lon, false);
-        });
+            // Add direct DOM event listeners for Leaflet GL (Windy V4) tooltip interaction - ONCE
+            console.log('Adding direct DOM listeners to own ship marker (first creation)');
+            setTimeout(() => {
+                const iconElement = ownShipMarker.getElement();
+                if (iconElement) {
+                    iconElement.addEventListener('mouseenter', () => {
+                        ownShipMarker.openTooltip();
+                    });
+                    iconElement.addEventListener('mouseleave', () => {
+                        ownShipMarker.closeTooltip();
+                    });
+                } else {
+                    console.warn('Own ship marker element not found after timeout');
+                }
+            }, 100);
+
+            // Click handler for weather at current time
+            ownShipMarker.on('click', () => {
+                if (openedPopup) {
+                    openedPopup.remove();
+                    openedPopup = null;
+                    return;
+                }
+                windyStore.set('timestamp', getRoundedHourTimestamp());
+                showMyPopup(lat, lon, false);
+            });
+        }
 
         // Apply rotation to vessel icon
         /* const iconDiv = ownShipMarker.getElement()?.querySelector('.rotatable') as HTMLElement;
@@ -8041,9 +8135,10 @@
 
             // Create projection marker (no wind barbs for projection)
             const projectedIcon = createRotatingBoatIcon(projectedHeading, 0.846008, boatIconSize * 0.67, undefined, undefined, false);
-            forecastIcon = L.marker([projectedLat, projectedLon], {
+            forecastIcon = new L.Marker([projectedLat, projectedLon], {
                 icon: projectedIcon,
-                zIndexOffset: zIndexOwnShip
+                zIndexOffset: zIndexOwnShip,
+                interactive: true  // Required for Leaflet GL (Windy V4) tooltips
             }).addTo(markerLayer);
 
             // Tooltip for projection
@@ -9375,19 +9470,39 @@
         padding-bottom: 20px;
     }
     
+    /* Leaflet GL marker compatibility - ensure interactive markers can receive events */
+    .leaflet-marker-icon {
+        pointer-events: auto !important;
+    }
+    
     /* AIS Ship marker styles */
     .ais-ship-marker {
         background: transparent !important;
         border: none !important;
+        pointer-events: auto !important; /* Required for Leaflet GL tooltips */
+    }
+    
+    .ais-ship-marker-simple {
+        background: transparent !important;
+        border: none !important;
+        pointer-events: auto !important; /* Required for Leaflet GL tooltips */
+    }
+    
+    .marine-traffic-marker {
+        background: transparent !important;
+        border: none !important;
+        pointer-events: auto !important; /* Required for Leaflet GL tooltips */
     }
     
     .ais-ship-icon {
         cursor: pointer;
         z-index: 1000;
+        pointer-events: auto !important; /* Required for Leaflet GL tooltips */
     }
     
     .ais-ship-icon svg {
         filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.3));
+        pointer-events: none; /* SVG itself doesn't need events, parent handles it */
     }
     
     /* NMEA Types display */
@@ -9637,21 +9752,25 @@
         white-space: nowrap !important;
     }
     
-    /* Marine Traffic style vessel icon */
-    /*.marine-traffic-marker {
+    /* Sailing boat icon styles */
+    .sailing-boat-icon {
         background: transparent !important;
         border: none !important;
+        pointer-events: auto !important; /* Required for Leaflet GL tooltips */
     }
     
-    .marine-traffic-icon {
-        user-select: none;
-        pointer-events: none;
+    .sailing-boat-marker {
+        background: transparent !important;
+        border: none !important;
+        pointer-events: auto !important; /* Required for Leaflet GL tooltips */
     }
     
-    .marine-traffic-icon svg {
-        filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.3));
+    .boat-icon-marker {
+        background: transparent !important;
+        border: none !important;
+        pointer-events: auto !important; /* Required for Leaflet GL tooltips */
     }
-    */
+    
     /* Base station tooltip styling */
     .leaflet-tooltip.base-station-tooltip {
         background: white !important;

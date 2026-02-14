@@ -41,7 +41,8 @@ declare module '@windy/map' {
 }
 
 declare module '@windy/interpolator' {
-    export function getLatLonInterpolator(): Promise<any>;
+    // Windy V4 API: interpolator now requires timestamp parameter and returns a Promise
+    export function getLatLonInterpolator(): Promise<(params: { lat: number; lon: number; ts: number }) => Promise<number[]>>;
 }
 
 declare module '@windy/config' {
