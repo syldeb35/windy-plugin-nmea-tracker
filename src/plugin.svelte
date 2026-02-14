@@ -8346,10 +8346,14 @@
                 const segmentEndWP = gpxRoute[currentIndex + 1];
                 
                 if (legType === 'GC') {
-                    // GC: use proper great circle interpolation between exact waypoints
-                    const gc = interpolateGreatCirclePoint(segmentStartWP.lat, segmentStartWP.lon, segmentEndWP.lat, segmentEndWP.lon, ratio);
-                    currentLat = gc.lat;
-                    currentLon = gc.lon;
+                    // GC: Project from current position toward next waypoint
+                    // Calculate bearing from current position to next waypoint
+                    const gcBearing = calculateGreatCircleBearing(currentLat, currentLon, segmentEndWP.lat, segmentEndWP.lon);
+                    
+                    // Project from current position along the great circle bearing
+                    const projected = deadReckoningGreatCircle(currentLat, currentLon, gcBearing, remainingDistance);
+                    currentLat = projected.lat;
+                    currentLon = projected.lon;
                 } else {
                     // RL: For rhumb line legs, we need to project toward the route if off-route,
                     // then follow the route bearing once on the route
@@ -8945,6 +8949,44 @@
         return {
             lat: toDegrees(lat2),
             lon: toDegrees(lon2)
+        };
+    }
+
+    /**
+     * Calculate new position from a starting point using dead reckoning along a great circle
+     * @param startLat Starting latitude in degrees
+     * @param startLon Starting longitude in degrees
+     * @param bearing Initial bearing in degrees (0-359)
+     * @param distanceNM Distance to travel in nautical miles
+     * @returns New position {lat, lon}
+     */
+    function deadReckoningGreatCircle(startLat: number, startLon: number, bearing: number, distanceNM: number): {lat: number, lon: number} {
+        // Convert to radians
+        const lat1 = toRadians(startLat);
+        const lon1 = toRadians(startLon);
+        const bearingRad = toRadians(bearing);
+        
+        // Earth radius in nautical miles
+        const R = 3437.7468;
+        
+        // Angular distance
+        const d = distanceNM / R;
+        
+        // Calculate destination latitude using great circle formula
+        const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(bearingRad));
+        
+        // Calculate destination longitude using great circle formula
+        const lon2 = lon1 + Math.atan2(
+            Math.sin(bearingRad) * Math.sin(d) * Math.cos(lat1),
+            Math.cos(d) - Math.sin(lat1) * Math.sin(lat2)
+        );
+        
+        // Normalize longitude to -180..+180
+        const lon2Normalized = ((lon2 + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
+        
+        return {
+            lat: toDegrees(lat2),
+            lon: toDegrees(lon2Normalized)
         };
     }
 
